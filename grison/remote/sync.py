@@ -66,11 +66,32 @@ def _emit(on_event: Callable[[str], None] | None, msg: str) -> None:
         on_event(msg)
 
 
-def _stem(f: Finding) -> str:
+def _stem(f: Finding, slug_counts: Counter | None = None) -> str:
     slug = slugify(f.title)
-    if f.grison.tier == "instance" and f.grison.gw.id is not None:
+    if f.grison.gw.id is not None and (
+        f.grison.tier == "instance" or (slug_counts is not None and slug_counts[slug] > 1)
+    ):
+        # instances always carry the id; library findings only when two remote records
+        # share a title-slug — bare slugs would collapse them onto one local file
+        # (silent last-writer-wins, recurring every sync).
         return f"{f.grison.gw.id}-{slug}"
     return slug
+
+
+def _carry_local_only(remote_f: Finding, local_f: Finding) -> None:
+    """Copy the fields grison owns locally onto a freshly-built remote finding before
+    it overwrites the local file. GW has no column for ``cwe``/``tags`` and no
+    update-in-place for evidence captions/friendly names, so the remote record can
+    never carry them — rebuilding the file without this wipes local curation on
+    every routine pull. (Consequence: a caption edited in the GW web UI after upload
+    loses to a local value; grison treats un-pushable fields as locally owned.)"""
+    remote_f.cwe = list(local_f.cwe)
+    remote_f.tags = list(local_f.tags)
+    local_ev = {e.gw.id: e for e in local_f.evidence if e.gw is not None and e.gw.id is not None}
+    for entry in remote_f.evidence:
+        if entry.gw is not None and entry.gw.id in local_ev:
+            entry.caption = local_ev[entry.gw.id].caption
+            entry.friendly_name = local_ev[entry.gw.id].friendly_name
 
 
 def _scan_local(root: Path) -> dict[tuple[str, int], tuple[Path, Finding]]:
@@ -95,6 +116,13 @@ def _scan_local(root: Path) -> dict[tuple[str, int], tuple[Path, Finding]]:
 def _report_dir(root: Path, report_id: int, reports: dict[int, dict]) -> Path:
     title = reports.get(report_id, {}).get("title", "report")
     return root / "findings" / "reports" / f"{report_id}-{slugify(title)}"
+
+
+def _library_slug_counts(findings: list[dict]) -> Counter:
+    """Title-slug multiset over the remote library — duplicate-titled findings must
+    not collapse onto one local filename."""
+    return Counter(slugify((rec.get("title") or "").strip() or "Untitled finding")
+                   for rec in findings)
 
 
 def _evidence_name_counters(
@@ -130,12 +158,13 @@ def pull(
     n_lib, n_rep, n_reports = len(findings), len(reported), len(reports)
     _emit(on_event, f"remote: {n_lib} library findings, {n_rep} reported, {n_reports} reports")
     local = _scan_local(root)
+    lib_slugs = _library_slug_counts(findings)
 
     for rec in findings:
         f = gw_record_to_finding(rec, tier="library")
         _reconcile(
             result, f, local, root / "findings" / "library", None, client, root,
-            dry_run=dry_run, on_event=on_event,
+            slug_counts=lib_slugs, dry_run=dry_run, on_event=on_event,
         )
 
     ev_names = _evidence_name_counters(reported, ev_by)
@@ -158,6 +187,7 @@ def _reconcile(
     client: GhostwriterClient,
     root: Path,
     *,
+    slug_counts: Counter | None = None,
     dry_run: bool,
     on_event: Callable[[str], None] | None = None,
 ) -> None:
@@ -179,8 +209,9 @@ def _reconcile(
             result.unchanged.append(path)  # clean, no-op
             return
         target_path = path  # local clean, remote moved → fast-forward pull
+        _carry_local_only(remote, local_f)
     else:
-        target_path = target_dir / f"{_stem(remote)}.md"
+        target_path = target_dir / f"{_stem(remote, slug_counts)}.md"
 
     if dry_run:
         result.written.append(target_path)
@@ -429,6 +460,7 @@ def sync(
     reports = {r["id"]: r for r in client.fetch_reports()}
     remote_index: dict[tuple[str, int], dict] = {}
     findings = client.fetch_findings()
+    lib_slugs = _library_slug_counts(findings)
     for rec in findings:
         remote_index[("finding", rec["id"])] = rec
     reported = client.fetch_reported_findings()
@@ -476,7 +508,7 @@ def sync(
                     ev_names_by_report.get(rec.get("reportId")) if tier == "instance" else None
                 ),
             )
-            new_path = _remote_target_path(root, remote_f, rec, reports)
+            new_path = _remote_target_path(root, remote_f, rec, reports, lib_slugs)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
             result.errors.append(f"{key[0]} {key[1]}: {e}")
             _emit(on_event, f"error {key[0]} {key[1]}: {e}")
@@ -533,9 +565,11 @@ def sync(
     return result
 
 
-def _remote_target_path(root: Path, remote_f: Finding, rec: dict, reports: dict) -> Path:
+def _remote_target_path(
+    root: Path, remote_f: Finding, rec: dict, reports: dict, lib_slugs: Counter
+) -> Path:
     if remote_f.grison.tier == "library":
-        return root / "findings" / "library" / f"{slugify(remote_f.title)}.md"
+        return root / "findings" / "library" / f"{_stem(remote_f, lib_slugs)}.md"
     return _report_dir(root, rec["reportId"], reports) / f"{rec['id']}-{slugify(remote_f.title)}.md"
 
 
@@ -607,6 +641,8 @@ def _apply_pull(
                 ev_names_by_report.get(plan.rec.get("reportId")) if tier == "instance" else None
             ),
         )
+    if plan.local is not None:
+        _carry_local_only(remote_f, plan.local.finding)
     evidence_down = _download_finding_evidence(remote_f, client, path.parent, on_event=on_event)
     stamp_synced(remote_f)
     path.parent.mkdir(parents=True, exist_ok=True)

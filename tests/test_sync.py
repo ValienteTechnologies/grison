@@ -162,3 +162,43 @@ def test_evidence_basename_collision_across_findings_disambiguates(tmp_path: Pat
         f = markdown_to_finding(md.read_text())
         assert len(f.evidence) == 1
         assert f.evidence[0].file.startswith("evidence/") and "-shell.png" in f.evidence[0].file
+
+
+def test_pull_preserves_locally_owned_fields(tmp_path: Path) -> None:
+    """cwe/tags (no GW column) and evidence caption/friendly_name (no GW update
+    path) are locally owned — a routine pull triggered by an unrelated remote edit
+    must carry them forward, not rebuild the file without them."""
+    from grison.markdown import finding_to_markdown
+
+    pull(tmp_path, FakeGW())
+    rf_file = next((tmp_path / "findings" / "reports").rglob("*.md"))
+    f = markdown_to_finding(rf_file.read_text())
+    f.cwe = ["CWE-79"]
+    f.tags = ["ATT&CK:T1557"]
+    f.evidence[0].caption = "EDITED CAPTION"
+    f.evidence[0].friendly_name = "edited-name"
+    rf_file.write_text(finding_to_markdown(f))
+
+    class ChangedGW(FakeGW):
+        def fetch_reported_findings(self):
+            return [{**_RF[0], "description": "<p>beta CHANGED</p>"}]
+
+    r = pull(tmp_path, ChangedGW())
+    assert rf_file in r.written
+    f2 = markdown_to_finding(rf_file.read_text())
+    assert "CHANGED" in f2.description  # the remote edit arrived
+    assert f2.cwe == ["CWE-79"] and f2.tags == ["ATT&CK:T1557"]  # curation survived
+    assert f2.evidence[0].caption == "EDITED CAPTION"
+    assert f2.evidence[0].friendly_name == "edited-name"
+
+
+def test_duplicate_library_titles_get_distinct_files(tmp_path: Path) -> None:
+    """Two GW library findings sharing a title must not collapse onto one local
+    file (silent last-writer-wins, recurring every sync)."""
+    libs = [dict(_LIB[0]), {**_LIB[0], "id": 2, "description": "<p>other body</p>"}]
+    pull(tmp_path, FakeGW(findings=libs))
+    lib_dir = tmp_path / "findings" / "library"
+    assert (lib_dir / "1-lib-a.md").exists()
+    assert (lib_dir / "2-lib-a.md").exists()
+    r2 = pull(tmp_path, FakeGW(findings=libs))  # stable across re-pulls
+    assert r2.written == [] and len(r2.unchanged) == 3
