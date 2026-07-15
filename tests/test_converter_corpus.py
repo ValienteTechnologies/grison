@@ -68,7 +68,10 @@ def test_reference_link_idiom_drops_cosmetic_attrs_and_roundtrips() -> None:
 
 def test_multi_paragraph_li_joins() -> None:
     html = "<ul><li><p>first step</p><p>then <code>nmap</code></p></li></ul>"
-    assert html_to_md(html) == "- first step then `nmap`"
+    md = html_to_md(html)
+    assert md == "- first step then `nmap`"
+    # md -> html -> md is a fixed point (the merge base relies on this)
+    assert html_to_md(md_to_html(md)) == md
 
 
 def test_link_url_with_quote_cannot_break_out_of_href() -> None:

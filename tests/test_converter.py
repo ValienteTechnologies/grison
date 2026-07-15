@@ -209,6 +209,60 @@ def test_html_to_md_unwraps_span_without_raising() -> None:
     assert html_to_md('<p>a <span style="x">b</span> c</p>') == "a b c"
 
 
+# --- __strong__, ***strong+em***, link title (defect fixes) ------------------
+
+
+def test_double_underscore_parses_as_strong() -> None:
+    assert md_to_html("__strong text__") == "<p><strong>strong text</strong></p>"
+
+
+def test_double_underscore_strong_intraword_guard() -> None:
+    # snake_case identifiers with double underscores must not be read as markup —
+    # same guard as the existing `_em_` intraword rule.
+    for text in ("user_id", "snake_case__names", "a__b__c"):
+        assert md_to_html(text) == f"<p>{text}</p>"
+
+
+def test_strong_underscore_round_trips_fixpoint() -> None:
+    once = html_to_md(md_to_html("__strong text__"))
+    assert once == "**strong text**"  # normalized to ** on the way back — stable-cosmetic
+    assert html_to_md(md_to_html(once)) == once  # fixpoint
+
+
+def test_triple_star_is_strong_and_em() -> None:
+    html = md_to_html("***bold and italic***")
+    assert html == "<p><strong><em>bold and italic</em></strong></p>"
+
+
+def test_triple_star_round_trips_fixpoint() -> None:
+    md = "***bold and italic***"
+    assert html_to_md(md_to_html(md)) == md
+
+
+def test_link_title_parses_and_round_trips() -> None:
+    md = '[text](http://example.com "Title Text")'
+    html = md_to_html(md)
+    assert html == (
+        '<p><a href="http://example.com" title="Title Text" '
+        'target="_blank" rel="noopener">text</a></p>'
+    )
+    assert html_to_md(html) == md
+
+
+def test_link_without_title_unchanged() -> None:
+    md = "[text](http://example.com)"
+    html = md_to_html(md)
+    assert html == '<p><a href="http://example.com" target="_blank" rel="noopener">text</a></p>'
+    assert html_to_md(html) == md
+
+
+def test_html_link_title_round_trips_to_md_and_back() -> None:
+    html = '<p><a href="https://x/" title="See also" target="_blank" rel="noopener">x</a></p>'
+    md = html_to_md(html)
+    assert md == '[x](https://x/ "See also")'
+    assert _norm(md_to_html(md)) == _norm(html)
+
+
 # --- entity escaping round-trips --------------------------------------------
 
 

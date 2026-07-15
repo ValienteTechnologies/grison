@@ -11,8 +11,9 @@ get dropped on the floor.
 
 Whitelist (both directions):
   block:  ``<p>`` <-> paragraph, ``<ul><li>`` <-> ``- `` list item
-  inline: ``<strong>`` <-> ``**bold**``, ``<code>`` <-> `` `code` ``,
-          ``<em>`` <-> ``*em*``/``_em_``, ``<a href>`` <-> ``[text](url)``,
+  inline: ``<strong>`` <-> ``**bold**``/``__bold__``, ``<code>`` <-> `` `code` ``,
+          ``<em>`` <-> ``*em*``/``_em_``, ``<strong><em>`` <-> ``***both***``,
+          ``<a href[ title]>`` <-> ``[text](url[ "title"])``,
           ``<br>`` <-> a hard line break inside a paragraph
   ``<span>`` is unwrapped (kept, tag dropped) rather than rejected, since
   TinyMCE wraps highlighted text in it.
@@ -106,10 +107,10 @@ class _TreeBuilder(HTMLParser):
         node_attrs: dict[str, str] = {}
         if tag == "a":
             for name, value in attrs:
-                # href is load-bearing; rel/target are captured only so the render
-                # step can warn when they diverge from the canonical values grison
-                # substitutes on push — not otherwise preserved.
-                if name in ("href", "rel", "target"):
+                # href/title are load-bearing; rel/target are captured only so the
+                # render step can warn when they diverge from the canonical values
+                # grison substitutes on push — not otherwise preserved.
+                if name in ("href", "rel", "target", "title"):
                     node_attrs[name] = value or ""
         elif tag == "span":
             # Captured only for on_loss reporting (F4) — the span is still unwrapped.
@@ -292,7 +293,9 @@ def _render_inline(
                 _report_loss(
                     on_loss, f'link target={target!r} canonicalized to "_blank" on push'
                 )
-            parts.append(f"[{_render_inline(n.children, on_loss)}]({href})")
+            title = n.attrs.get("title")
+            title_part = f' "{title}"' if title else ""
+            parts.append(f"[{_render_inline(n.children, on_loss)}]({href}{title_part})")
         elif n.tag == "span":
             attrs = {k: v for k, v in n.attrs.items() if v}
             if attrs:
@@ -330,9 +333,16 @@ _RULE_RE = re.compile(r"-{2,}")
 
 _TOKEN_RE = re.compile(
     r"`(?P<code>[^`]*)`"
+    # *** before ** and * — ***x*** is strong+em, not strong followed by a stray *.
+    r"|\*\*\*(?P<strongem>.+?)\*\*\*"
     r"|\*\*(?P<strong>.+?)\*\*"
-    r"|\[(?P<link_text>[^\]]*)\]\((?P<link_url>[^)]*)\)"
+    # optional `"title"` — a space then a double-quoted run before the closing `)`;
+    # link_url stops at the first space so it can't swallow the title into the href.
+    r"|\[(?P<link_text>[^\]]*)\]\((?P<link_url>[^)\s]*)(?:\s+\"(?P<link_title>[^\"]*)\")?\)"
     r"|\*(?P<em1>.+?)\*"
+    # __ before _ — same intraword guard as `_em_` below, so `__strong__` isn't read
+    # as nested `<em><em>` and snake_case__names/user_id stay untouched.
+    r"|(?<!\w)__(?P<strong2>.+?)__(?!\w)"
     # CommonMark's intraword rule for `_em_`: unlike `*em*`, underscore emphasis
     # doesn't fire mid-word — required so snake_case text and underscored URLs
     # (very common as a link's own visible text, see F2) aren't misread as markup.
@@ -455,14 +465,22 @@ def _inline_to_html(text: str) -> str:
             out.append(_esc(text[pos : m.start()]))
         if m.group("code") is not None:
             out.append(f"<code>{_esc(m.group('code'))}</code>")
+        elif m.group("strongem") is not None:
+            out.append(f"<strong><em>{_inline_to_html(m.group('strongem'))}</em></strong>")
         elif m.group("strong") is not None:
             out.append(f"<strong>{_inline_to_html(m.group('strong'))}</strong>")
         elif m.group("link_text") is not None:
             href = _esc(m.group("link_url"))
             link_text = _inline_to_html(m.group("link_text"))
-            out.append(f'<a href="{href}" target="_blank" rel="noopener">{link_text}</a>')
+            title = m.group("link_title")
+            title_attr = f' title="{_esc(title)}"' if title else ""
+            out.append(
+                f'<a href="{href}"{title_attr} target="_blank" rel="noopener">{link_text}</a>'
+            )
         elif m.group("em1") is not None:
             out.append(f"<em>{_inline_to_html(m.group('em1'))}</em>")
+        elif m.group("strong2") is not None:
+            out.append(f"<strong>{_inline_to_html(m.group('strong2'))}</strong>")
         else:
             out.append(f"<em>{_inline_to_html(m.group('em2'))}</em>")
         pos = m.end()
