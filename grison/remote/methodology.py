@@ -68,6 +68,12 @@ _ARTIFACT_RES = [
     (re.compile(r'<div class="?notice'), "leaked notice-block div", True),
 ]
 
+# BookStack extracts inline base64 image data into an upload on save and rewrites the
+# stored markdown to reference it — pushing a body containing one verbatim would not
+# round-trip, so it's refused rather than silently staling the merge base right after
+# the push.
+_INLINE_BASE64_IMAGE_RE = re.compile(r"data:image/[^;)\s]+;base64,")
+
 
 def _rel(root: Path, path: Path) -> str:
     try:
@@ -414,6 +420,21 @@ def _pull_target(root: Path, path: Path, rpage: MethPage) -> Path:
     return d / path.name
 
 
+def _remote_unchanged_since_sync(lpage: MethPage, item: dict) -> bool:
+    """True only when it's safe to skip this page's detail GET: stored remote markers
+    are present and match the cheap list row's, AND local content is itself clean
+    (hash still equals its merge base). Markers missing/differ, or a local edit,
+    must fall through to a real fetch — this is a skip-direction-only gate."""
+    return (
+        lpage.synced_hash is not None
+        and lpage.remote_updated_at is not None
+        and lpage.remote_revision_count is not None
+        and lpage.remote_updated_at == item.get("updated_at")
+        and lpage.remote_revision_count == item.get("revision_count")
+        and bs_content_hash(lpage) == lpage.synced_hash
+    )
+
+
 def sync_methodology(
     root: Path,
     client: BookStackClient,
@@ -438,6 +459,9 @@ def sync_methodology(
         {d.name for d in lib_root.iterdir() if d.is_dir()} if lib_root.exists() else set()
     )
     mirrors = _load_mirrors(root)
+    # scanned up front (before any remote call) so the pages loop below can consult it
+    # per-pid to decide whether a detail fetch is even needed.
+    local, dup_pids = _scan_local(root, result, on_event=on_event)
 
     _emit(on_event, "pulling bookstack state…")
     books_list = client.fetch_books()
@@ -449,31 +473,45 @@ def sync_methodology(
     remote: dict[int, MethPage] = {}
     remote_loc: dict[int, tuple[str, str | None, str]] = {}  # pid -> (book, chapter, page slug)
     wysiwyg: dict[int, str] = {}  # pid -> description, for pages grison must never mirror
+    clean_pids: set[int] = set()  # markers unchanged + locally clean: no detail fetch needed
+    markdown_native_total = 0  # mass-change-guard denominator (clean_pids count too)
     pages_list = client.fetch_pages()
     for item in pages_list:
-        detail = client.fetch_page(item["id"])
+        pid = item["id"]
         book_slug = books.get(item["book_id"], item.get("book_slug", "book"))
+        local_entry = local.get(pid)
+        if local_entry is not None and _remote_unchanged_since_sync(local_entry[1], item):
+            # updated_at/revision_count bump on EVERY update_page call (content, move,
+            # tags, even an empty PUT) and never fail to bump on a real content change —
+            # so unchanged markers on a locally-clean page mean the remote body/title/
+            # chapter/priority/tags are provably identical to the merge base, with no
+            # need to fetch and hash them to find out.
+            clean_pids.add(pid)
+            markdown_native_total += 1
+            continue
+        detail = client.fetch_page(pid)
         cid = detail.get("chapter_id") or 0
         chapter_slug = chap_slug_by_id.get(cid) if cid else None
-        remote_loc[item["id"]] = (book_slug, chapter_slug, item["slug"])
+        remote_loc[pid] = (book_slug, chapter_slug, item["slug"])
         if not is_markdown_native(detail):
             editor = detail.get("editor") or "wysiwyg"
-            wysiwyg[item["id"]] = f"id={item['id']}, name={detail.get('name')!r}, editor={editor}"
+            wysiwyg[pid] = f"id={pid}, name={detail.get('name')!r}, editor={editor}"
             continue
-        remote[item["id"]] = page_from_record(detail, book_slug=book_slug,
-                                              chapter_slug=chapter_slug)
+        markdown_native_total += 1
+        remote[pid] = page_from_record(detail, book_slug=book_slug, chapter_slug=chapter_slug)
     _emit(
         on_event,
         f"bookstack: {len(books_list)} books, {len(chapters_list)} chapters, "
         f"{len(pages_list)} pages",
     )
+    if clean_pids:
+        _emit(on_event, f"methodology: {len(clean_pids)} pages unchanged (skipped detail fetch)")
 
     _materialize_structure(root, client, books_list, chapters_list, books, result, mirrors,
                            dry_run=dry_run, on_event=on_event)
     if not dry_run:
         _save_mirrors(root, mirrors)
 
-    local, dup_pids = _scan_local(root, result, on_event=on_event)
     _emit(on_event, f"reconciling {len(local)} pages…")
 
     # wysiwyg pages are never mirrored — no empty-body stub written, and one already
@@ -511,6 +549,9 @@ def sync_methodology(
                                old_path=path if target != path else None))
 
     for pid, (path, lpage) in local.items():
+        if pid in clean_pids:
+            result.unchanged.append(path)
+            continue
         if pid in wysiwyg:
             continue  # already reported above — never a candidate for push/pull
         # Book-rename tripwire (bs-structure F7): the local dir now names a DIFFERENT
@@ -575,6 +616,18 @@ def sync_methodology(
         lh = bs_content_hash(lpage)
         rh = bs_content_hash(rpage)
         if lh == base and rh == base:
+            # reached only after a real detail fetch (the skip-gate already diverted
+            # markers-matched pages) — a legacy file's first fetch, or a metadata-only
+            # remote write (retag round-trip, empty PUT) that bumped markers without
+            # changing content, must still pick up the fresh markers here or every
+            # future sync would keep re-fetching this page to learn the same thing.
+            if not dry_run and (
+                lpage.remote_updated_at != rpage.remote_updated_at
+                or lpage.remote_revision_count != rpage.remote_revision_count
+            ):
+                lpage.remote_updated_at = rpage.remote_updated_at
+                lpage.remote_revision_count = rpage.remote_revision_count
+                path.write_text(page_to_markdown(lpage), encoding="utf-8")
             result.unchanged.append(path)
         elif lh != base and rh == base:
             plans.append(_MethPlan("push", path, lpage, rpage=rpage))
@@ -588,6 +641,8 @@ def sync_methodology(
             # nothing to reconcile, just restamp clean instead of a phantom collision.
             lpage.book_id = rpage.book_id
             lpage.chapter_id = rpage.chapter_id
+            lpage.remote_updated_at = rpage.remote_updated_at
+            lpage.remote_revision_count = rpage.remote_revision_count
             plans.append(_MethPlan("repair", path, lpage))
         else:
             plans.append(_MethPlan("collision", path, rpage))
@@ -619,7 +674,10 @@ def sync_methodology(
                 plans.append(_MethPlan("create", md, lpage))
                 planned_writes += 1
 
-    total = max(len(remote), 1)
+    # markdown_native_total, not len(remote) — clean_pids skipped the detail fetch and
+    # so never landed in `remote`, but they're still real markdown-native pages and
+    # must still count in the mass-change denominator.
+    total = max(markdown_native_total, 1)
     if not dry_run and planned_writes > 5 and planned_writes > mass_change_ratio * total:
         result.mass_change_blocked = True
         plans = [p for p in plans if p.action not in ("push", "create")]
@@ -686,7 +744,8 @@ def _apply(  # noqa: PLR0913
             result.repaired.append(path)
             _emit(on_event, f"would repair {_rel(root, path)}")
             return
-        stamp(page, now=now)
+        stamp(page, now=now, remote_updated_at=page.remote_updated_at,
+              remote_revision_count=page.remote_revision_count)
         path.write_text(page_to_markdown(page), encoding="utf-8")
         result.repaired.append(path)
         _emit(on_event, f"repair {_rel(root, path)}")
@@ -707,7 +766,8 @@ def _apply(  # noqa: PLR0913
             else:
                 _emit(on_event, f"would pull {_rel(root, path)}")
             return
-        stamp(page, now=now)
+        stamp(page, now=now, remote_updated_at=page.remote_updated_at,
+              remote_revision_count=page.remote_revision_count)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(page_to_markdown(page), encoding="utf-8")
         if plan.old_path is not None:
@@ -736,6 +796,12 @@ def _apply(  # noqa: PLR0913
             # (and permanently destroy) its html. Refuse, never update_page(markdown=…).
             note = ("refused: remote page is no longer markdown-native (wysiwyg) — "
                     "grison never pushes markdown over wysiwyg-authored content")
+            result.skipped.append((path, note))
+            _emit(on_event, f"skip {_rel(root, path)}: {note}")
+            return
+        if _INLINE_BASE64_IMAGE_RE.search(page.body):
+            note = ("refused: inline base64 image(s) in body — BookStack rewrites the "
+                     "stored markdown on save, which would stale the merge base")
             result.skipped.append((path, note))
             _emit(on_event, f"skip {_rel(root, path)}: {note}")
             return
@@ -775,9 +841,9 @@ def _apply(  # noqa: PLR0913
         name_val = page.title if page.title != pre.get("name") else None
         tags_val = page.tags if page.tags != pre_tags else None
         snap.before_update(page.page_id, pre)
-        client.update_page(page.page_id, markdown=page.body, name=name_val,
-                           book_id=move_book, chapter_id=move_chapter, priority=prio,
-                           tags=tags_val)
+        resp = client.update_page(page.page_id, markdown=page.body, name=name_val,
+                                  book_id=move_book, chapter_id=move_chapter, priority=prio,
+                                  tags=tags_val) or {}
         result.pushed.append(path)
         _emit(on_event, f"push {_rel(root, path)}")
         # keep frontmatter truthful — the drift witnesses depend on it
@@ -788,11 +854,18 @@ def _apply(  # noqa: PLR0913
             page.chapter_id = 0
         else:
             page.chapter_id = pre.get("chapter_id") or 0
-        stamp(page, now=now)
+        stamp(page, now=now, remote_updated_at=resp.get("updated_at"),
+              remote_revision_count=resp.get("revision_count"))
         path.write_text(page_to_markdown(page), encoding="utf-8")
     elif action == "create":
         if _artifact_scan(path, page.body, "", result, root, on_event=on_event):
             note = "refused: corruption artifact in new page body"
+            result.skipped.append((path, note))
+            _emit(on_event, f"skip {_rel(root, path)}: {note}")
+            return
+        if _INLINE_BASE64_IMAGE_RE.search(page.body):
+            note = ("refused: inline base64 image(s) in body — BookStack rewrites the "
+                     "stored markdown on save, which would stale the merge base")
             result.skipped.append((path, note))
             _emit(on_event, f"skip {_rel(root, path)}: {note}")
             return
@@ -825,7 +898,8 @@ def _apply(  # noqa: PLR0913
         page.book_id = rec.get("book_id", book_id)
         page.chapter_id = rec.get("chapter_id") or (chapter_id or 0)
         page.priority = rec.get("priority")
-        stamp(page, now=now)
+        stamp(page, now=now, remote_updated_at=rec.get("updated_at"),
+              remote_revision_count=rec.get("revision_count"))
         path.write_text(page_to_markdown(page), encoding="utf-8")
 
 

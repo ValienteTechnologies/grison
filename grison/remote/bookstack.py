@@ -94,7 +94,7 @@ class BookStackClient:
         chapter_id: int | None = None,
         priority: int | None = None,
         tags: list[dict] | None = None,
-    ) -> None:
+    ) -> dict | None:
         # book_id and chapter_id are both *parent moves*: book_id re-parents the page to
         # the book root (ejecting it from any chapter), chapter_id moves it into a chapter.
         # Callers must send at most one, and only when they intend a move.
@@ -117,7 +117,9 @@ class BookStackClient:
             body["priority"] = priority
         if tags is not None:
             body["tags"] = tags
-        self._request("PUT", f"/api/pages/{page_id}", json=body)
+        # the API returns the updated page object — callers use it to restamp
+        # updated_at/revision_count without a separate GET.
+        return self._request("PUT", f"/api/pages/{page_id}", json=body)
 
     def create_page(
         self,

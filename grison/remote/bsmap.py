@@ -34,6 +34,12 @@ class MethPage:
     tags: list[dict] = field(default_factory=list)  # [{"name","value"}]
     synced_hash: str | None = None
     synced_at: str | None = None
+    # BookStack's own change markers off the page row (list AND detail expose both) —
+    # bump on every update_page call, content or not, never fail to bump on a content
+    # change. Not part of bs_content_hash: they gate the sync's skip-detail-fetch fast
+    # path (grison/remote/methodology.py), they don't describe content themselves.
+    remote_updated_at: str | None = None
+    remote_revision_count: int | None = None
 
 
 def bs_content_hash(page: MethPage) -> str:
@@ -65,6 +71,8 @@ def page_from_record(rec: dict, *, book_slug: str, chapter_slug: str | None = No
         chapter_id=rec.get("chapter_id") or 0,
         priority=rec.get("priority"),
         tags=_norm_tags(rec.get("tags") or []),
+        remote_updated_at=rec.get("updated_at"),
+        remote_revision_count=rec.get("revision_count"),
     )
 
 
@@ -125,7 +133,14 @@ def page_to_markdown(page: MethPage) -> str:
         # value-less tags serialize as bare strings — the common case reads cleanly
         fm["tags"] = [t["name"] if not t["value"] else dict(t) for t in page.tags]
     if page.synced_hash:
-        fm["grison"]["synced"] = {"hash": page.synced_hash, "at": page.synced_at}
+        synced: dict = {"hash": page.synced_hash, "at": page.synced_at}
+        # remote markers are omitted (not written as null) when unset — legacy/never-
+        # populated case — so their absence, not a null, is what forces a detail fetch.
+        if page.remote_updated_at is not None:
+            synced["remote_updated_at"] = page.remote_updated_at
+        if page.remote_revision_count is not None:
+            synced["remote_revision_count"] = page.remote_revision_count
+        fm["grison"]["synced"] = synced
     fm_yaml = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip()
     body = page.body.strip()
     return f"---\n{fm_yaml}\n---\n\n{body}\n" if body else f"---\n{fm_yaml}\n---\n"
@@ -149,6 +164,9 @@ def markdown_to_page(text: str) -> MethPage:
     at = synced.get("at")
     if isinstance(at, datetime):
         at = at.isoformat()
+    remote_updated_at = synced.get("remote_updated_at")
+    if isinstance(remote_updated_at, datetime):  # a hand-edited unquoted timestamp
+        remote_updated_at = remote_updated_at.isoformat()
     return MethPage(
         page_id=bs.get("page_id"),
         book_id=bs.get("book_id"),
@@ -161,11 +179,24 @@ def markdown_to_page(text: str) -> MethPage:
         tags=_norm_tags(fm.get("tags") or []),
         synced_hash=synced.get("hash"),
         synced_at=at,
+        remote_updated_at=remote_updated_at,
+        remote_revision_count=synced.get("remote_revision_count"),
     )
 
 
-def stamp(page: MethPage, *, now: datetime) -> MethPage:
-    """Set the merge base (hash + time) to the page's current content."""
+def stamp(
+    page: MethPage,
+    *,
+    now: datetime,
+    remote_updated_at: str | None = None,
+    remote_revision_count: int | None = None,
+) -> MethPage:
+    """Set the merge base (hash + time) to the page's current content, and record
+    BookStack's own change markers off whatever response prompted this stamp — absent
+    (None) when that response didn't carry them, which safely forces a detail fetch
+    next sync rather than trusting a stale or missing marker."""
     page.synced_hash = bs_content_hash(page)
     page.synced_at = now.isoformat()
+    page.remote_updated_at = remote_updated_at
+    page.remote_revision_count = remote_revision_count
     return page
