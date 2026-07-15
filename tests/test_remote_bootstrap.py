@@ -41,6 +41,29 @@ def test_require_ghostwriter_lists_missing(tmp_path: Path, monkeypatch: pytest.M
         load(tmp_path).require_ghostwriter()
 
 
+def test_cf_access_is_optional(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in _GW_VARS:
+        monkeypatch.delenv(var, raising=False)
+    (tmp_path / ".grison").mkdir()
+    (tmp_path / ".grison" / "env").write_text(
+        "GRISON_GW_URL=https://gw.example\nGRISON_GW_TOKEN=tok\n"
+    )
+    creds = load(tmp_path)
+    creds.require_ghostwriter()  # no CF pair → still complete
+    assert creds.cf_headers() == {}
+
+
+def test_half_set_cf_pair_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in _GW_VARS:
+        monkeypatch.delenv(var, raising=False)
+    (tmp_path / ".grison").mkdir()
+    (tmp_path / ".grison" / "env").write_text(
+        "GRISON_GW_URL=https://gw.example\nGRISON_GW_TOKEN=tok\nGRISON_CF_CLIENT_ID=cid\n"
+    )
+    with pytest.raises(MissingCreds, match="set together"):
+        load(tmp_path).require_ghostwriter()
+
+
 def test_bootstrap_scaffolds_tree_env_and_gitignore(tmp_path: Path) -> None:
     result = bootstrap_workspace(tmp_path)
     assert (tmp_path / "findings" / "library").is_dir()

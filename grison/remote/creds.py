@@ -2,8 +2,9 @@
 
 The binary scaffolds a commented template (see :mod:`grison.remote.bootstrap`); the
 human only pastes values. ``GRISON_*`` environment variables override the file so
-headless/CI runs need no file. Both Ghostwriter and BookStack sit behind Cloudflare
-Access ZTNA, so the CF service-token pair is required for any remote call.
+headless/CI runs need no file. If the deployment sits behind Cloudflare Access ZTNA,
+set the CF service-token pair and it is sent with every remote call; leave both empty
+otherwise.
 """
 
 from __future__ import annotations
@@ -39,32 +40,40 @@ class Creds:
     cf_client_secret: str = ""
 
     def cf_headers(self) -> dict[str, str]:
+        if not (self.cf_client_id and self.cf_client_secret):
+            return {}
         return {
             "CF-Access-Client-Id": self.cf_client_id,
             "CF-Access-Client-Secret": self.cf_client_secret,
         }
 
     def require_ghostwriter(self) -> None:
-        missing = [
-            _KEYS[k]
-            for k in ("gw_url", "gw_token", "cf_client_id", "cf_client_secret")
-            if not getattr(self, k)
-        ]
+        missing = [_KEYS[k] for k in ("gw_url", "gw_token") if not getattr(self, k)]
         if missing:
             raise MissingCreds(
                 "missing Ghostwriter credentials: "
                 + ", ".join(missing)
                 + "\nFill them into .grison/env (or set the env vars) and re-run."
             )
+        self._require_cf_pair()
 
     def require_bookstack(self) -> None:
-        needed = ("bs_url", "bs_token_id", "bs_token_secret", "cf_client_id", "cf_client_secret")
+        needed = ("bs_url", "bs_token_id", "bs_token_secret")
         missing = [_KEYS[k] for k in needed if not getattr(self, k)]
         if missing:
             raise MissingCreds(
                 "missing BookStack credentials: "
                 + ", ".join(missing)
                 + "\nFill them into .grison/env (or set the env vars) and re-run."
+            )
+        self._require_cf_pair()
+
+    def _require_cf_pair(self) -> None:
+        if bool(self.cf_client_id) != bool(self.cf_client_secret):
+            raise MissingCreds(
+                "GRISON_CF_CLIENT_ID and GRISON_CF_CLIENT_SECRET must be set together "
+                "(Cloudflare Access service token) — set both, or neither if the "
+                "deployment is not behind CF Access."
             )
 
 

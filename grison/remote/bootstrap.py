@@ -29,7 +29,8 @@ GRISON_BS_URL=
 GRISON_BS_TOKEN_ID=
 GRISON_BS_TOKEN_SECRET=
 
-# Cloudflare Access service token — both systems sit behind CF Access ZTNA
+# Cloudflare Access service token — only if the deployment sits behind CF Access;
+# leave both empty otherwise
 GRISON_CF_CLIENT_ID=
 GRISON_CF_CLIENT_SECRET=
 """
