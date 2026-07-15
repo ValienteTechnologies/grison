@@ -6,4 +6,10 @@ layout (ports & adapters): ``model`` (schema), ``scanners`` (source adapters),
 ``remote`` (Ghostwriter + BookStack), and ``cli``.
 """
 
-__version__ = "0.2.0"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
+try:
+    __version__ = _version("grison")
+except PackageNotFoundError:  # uninstalled checkout (no dist metadata to read)
+    __version__ = "0+unknown"

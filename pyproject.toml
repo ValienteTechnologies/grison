@@ -1,6 +1,6 @@
 [project]
 name = "grison"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A markdown hub between security scanners and Ghostwriter + BookStack."
 readme = "README.md"
 license = "MIT"
@@ -43,6 +43,10 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "VERSION"
+pattern = "^(?P<version>\\S+)$"
 
 [tool.hatch.build.targets.wheel]
 packages = ["grison"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from importlib.metadata import version
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -11,7 +12,11 @@ from grison.cli import app
 
 
 def test_version() -> None:
-    assert __version__ == version("grison")
+    # VERSION (repo root) is the single source of truth: hatchling reads it at
+    # build/install time, __version__ reads the installed metadata. A mismatch
+    # means the editable install is stale (re-run `uv sync`) or packaging broke.
+    ssot = (Path(__file__).parents[1] / "VERSION").read_text().strip()
+    assert __version__ == version("grison") == ssot
 
 
 def test_help_renders() -> None:
