@@ -61,13 +61,13 @@ class FakeGW:
 
     def fetch_finding_types(self):
         return [
-            {"id": 1, "finding_type": "Network"},
-            {"id": 2, "finding_type": "Physical"},
-            {"id": 3, "finding_type": "Wireless"},
-            {"id": 4, "finding_type": "Web"},
-            {"id": 5, "finding_type": "Mobile"},
-            {"id": 6, "finding_type": "Cloud"},
-            {"id": 7, "finding_type": "Host"},
+            {"id": 1, "findingType": "Network"},
+            {"id": 2, "findingType": "Physical"},
+            {"id": 3, "findingType": "Wireless"},
+            {"id": 4, "findingType": "Web"},
+            {"id": 5, "findingType": "Mobile"},
+            {"id": 6, "findingType": "Cloud"},
+            {"id": 7, "findingType": "Host"},
         ]
 
     def download_evidence(self, evidence_id: int):

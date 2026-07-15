@@ -115,7 +115,7 @@ def check_severity_drift(rows: list[dict]) -> None:
 
 
 def check_finding_type_drift(rows: list[dict]) -> None:
-    """Verify live ``findingType`` rows (``{id, finding_type}``) against
+    """Verify live ``findingType`` rows (``{id, findingType}``) against
     :data:`_FINDING_TYPE_GW_ID` — same shape as :func:`check_severity_drift`."""
     by_id = {row["id"]: row for row in rows}
     for ft, gw_id in _FINDING_TYPE_GW_ID.items():
@@ -124,7 +124,7 @@ def check_finding_type_drift(rows: list[dict]) -> None:
             raise EnumDriftError(
                 f"findingType id {gw_id} ({ft.value}) is missing on the live instance"
             )
-        live = str(row.get("finding_type") or "").strip().lower()
+        live = str(row.get("findingType") or "").strip().lower()
         if live != ft.value:
             raise EnumDriftError(
                 f"findingType drift: live id {gw_id} is {row.get('finding_type')!r}, "

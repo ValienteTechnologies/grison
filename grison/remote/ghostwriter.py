@@ -79,7 +79,7 @@ _FINDING_TYPE_LOOKUP_QUERY = """
 query {
   findingType {
     id
-    finding_type
+    findingType
   }
 }
 """
@@ -302,9 +302,8 @@ class GhostwriterClient:
         return self._post(_FINDING_SEVERITY_QUERY)["findingSeverity"]
 
     def fetch_finding_types(self) -> list[dict]:
-        """``{id, finding_type}`` rows (``finding_type`` is snake_case on this lookup
-        table, unlike most GW field names — a live schema quirk, same idiom as
-        ``replication_steps``)."""
+        """``{id, findingType}`` rows — the lookup table's name column is camelCase
+        ``findingType`` on the live schema (verified by introspection 2026-07-15)."""
         return self._post(_FINDING_TYPE_LOOKUP_QUERY)["findingType"]
 
     def _resolve_content_types(self) -> dict[str, int]:

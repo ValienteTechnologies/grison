@@ -150,8 +150,8 @@ _FINDING_SEVERITY_ROWS = [
     {"id": 2, "severity": "Low", "weight": 2},
 ]
 _FINDING_TYPE_LOOKUP_ROWS = [
-    {"id": 1, "finding_type": "Network"},
-    {"id": 2, "finding_type": "Physical"},
+    {"id": 1, "findingType": "Network"},
+    {"id": 2, "findingType": "Physical"},
 ]
 
 
