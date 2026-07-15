@@ -21,7 +21,7 @@ SNAPSHOT_ROOT = Path.home() / ".local" / "share" / "grison" / "snapshots"
 
 @dataclass
 class Undo:
-    # op ∈ {update_finding, update_reportedFinding, delete_finding,
+    # op ∈ {update_finding, update_reportedFinding, update_report, delete_finding,
     #       delete_reportedFinding, delete_evidence, upload_evidence}
     op: str
     id: int
@@ -41,6 +41,11 @@ class Snapshot:
     def after_insert(self, table: str, record_id: int) -> None:
         op = "delete_finding" if table == "finding" else "delete_reportedFinding"
         self.undos.append(Undo(op, record_id))
+
+    def before_update_report(self, report_id: int, pre_extra_fields: dict) -> None:
+        """Pre-image of a report's ``extraFields`` before a narrative push — rollback
+        PUTs the whole map back, restoring every section at once."""
+        self.undos.append(Undo("update_report", report_id, {"extraFields": pre_extra_fields}))
 
     def after_upload_evidence(self, evidence_id: int) -> None:
         self.undos.append(Undo("delete_evidence", evidence_id))
@@ -83,6 +88,8 @@ class Snapshot:
                 client.update_finding(u.id, u.fields or {})
             elif u.op == "update_reportedFinding":
                 client.update_reported_finding(u.id, u.fields or {})
+            elif u.op == "update_report":
+                client.update_report(u.id, u.fields or {})
             elif u.op == "delete_finding":
                 client.delete_finding(u.id)
             elif u.op == "delete_reportedFinding":

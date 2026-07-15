@@ -104,6 +104,8 @@ def _scan_local(root: Path) -> dict[tuple[str, int], tuple[Path, Finding]]:
         for md in base.rglob("*.md"):
             if md.name.endswith(".remote.md"):  # collision sidecar — not a record
                 continue
+            if "narrative" in md.parts:  # report-narrative subtree — owned by reports.py
+                continue
             try:
                 f = markdown_to_finding(md.read_text(encoding="utf-8"))
             except (DocumentError, ValueError, OSError):
@@ -275,14 +277,18 @@ def _tier(loc_table: str) -> str:
 
 
 def target_from_location(root: Path, path: Path) -> tuple[str, int | None] | None:
-    """Map a file to its GW target ``(table, report_id)`` — ``None`` if non-conforming."""
+    """Map a file to its GW target ``(table, report_id)`` — ``None`` if non-conforming.
+
+    A reportedFinding is a *direct* child of its report dir; anything deeper (the
+    ``narrative/`` report-narrative subtree, owned by :mod:`grison.remote.reports`) is
+    not a finding."""
     try:
         parts = path.relative_to(root).parts
     except ValueError:
         return None
     if len(parts) >= 3 and parts[0] == "findings" and parts[1] == "library":
         return ("finding", None)
-    if len(parts) >= 4 and parts[0] == "findings" and parts[1] == "reports":
+    if len(parts) == 4 and parts[0] == "findings" and parts[1] == "reports":
         m = _REPORT_DIR_RE.match(parts[2])
         if m:
             return ("reportedFinding", int(m.group(1)))
@@ -328,6 +334,8 @@ def _scan_synced(
             continue
         for md in sorted(base.rglob("*.md")):
             if md.name.endswith(".remote.md"):
+                continue
+            if "narrative" in md.parts:  # report-narrative subtree — owned by reports.py
                 continue
             target = target_from_location(root, md)
             if target is None:

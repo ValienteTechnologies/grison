@@ -66,6 +66,7 @@ def test_sync_exit_code_reflects_result_errors(
     """A batch that finishes with isolated per-record errors must still exit non-zero —
     a green summary line next to a swallowed error would be misleading."""
     import grison.cli as cli_mod
+    from grison.remote.reports import ReportResult
     from grison.remote.sync import SyncResult
 
     monkeypatch.chdir(tmp_path)
@@ -79,7 +80,13 @@ def test_sync_exit_code_reflects_result_errors(
     ):
         return SyncResult(errors=["findings/library/bad.md: boom"])
 
+    def fake_sync_reports(
+        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
+    ):
+        return ReportResult()
+
     monkeypatch.setattr(cli_mod, "run_sync", fake_run_sync)
+    monkeypatch.setattr(cli_mod, "sync_reports", fake_sync_reports)
     r = _runner.invoke(app, ["sync"])
     assert r.exit_code == 1
     assert "boom" in r.output

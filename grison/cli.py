@@ -23,6 +23,7 @@ from grison.remote.creds import MissingCreds
 from grison.remote.creds import load as load_creds
 from grison.remote.ghostwriter import GhostwriterClient
 from grison.remote.methodology import MethResult, sync_methodology
+from grison.remote.reports import ReportResult, sync_reports
 from grison.remote.sync import SyncResult
 from grison.remote.sync import sync as run_sync
 from grison.sinks import ParseSummary, run_parse
@@ -163,9 +164,15 @@ def sync(
                 root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
                 on_event=lambda msg: typer.secho(msg, dim=True),
             )
+            rep = sync_reports(
+                root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
+                on_event=lambda msg: typer.secho(msg, dim=True),
+            )
         _print_sync_summary(result, dry_run=dry_run)
+        _print_report_summary(rep, dry_run=dry_run)
         bad = bool(
             result.collisions or result.invalid or result.mass_change_blocked or result.errors
+            or rep.collisions or rep.mass_change_blocked or rep.errors
         )
 
         if creds.bs_url and creds.bs_token_id and creds.bs_token_secret:
@@ -237,6 +244,30 @@ def _print_meth_summary(m: MethResult, *, dry_run: bool) -> None:
     for p, reason in m.skipped:
         typer.secho(f"skipped  {p}: {reason}", fg=typer.colors.YELLOW)
     for e in m.errors:
+        typer.secho(f"  error: {e}", fg=typer.colors.RED)
+
+
+def _print_report_summary(rep: ReportResult, *, dry_run: bool) -> None:
+    tense = "would " if dry_run else ""
+    typer.secho(
+        f"reports: {tense}pull {len(rep.pulled)}, {tense}push {len(rep.pushed)}  "
+        f"({len(rep.unchanged)} clean, {len(rep.repaired)} repaired)",
+        fg=typer.colors.GREEN,
+    )
+    if rep.snapshot_dir:
+        typer.echo(f"snapshot: {rep.snapshot_dir}")
+    if rep.mass_change_blocked:
+        typer.secho("MASS-CHANGE GUARD tripped on reports — pushes withheld.", fg=typer.colors.RED)
+    if rep.collisions:
+        typer.secho(
+            f"{len(rep.collisions)} report-section collision(s) — hand-merge then --force-*:",
+            fg=typer.colors.RED,
+        )
+        for p in rep.collisions:
+            typer.echo(f"  ! {p}")
+    for p, reason in rep.skipped:
+        typer.secho(f"skipped  {p}: {reason}", fg=typer.colors.YELLOW)
+    for e in rep.errors:
         typer.secho(f"  error: {e}", fg=typer.colors.RED)
 
 

@@ -69,6 +69,30 @@ query {
   report {
     id
     title
+    complete
+    archived
+    delivered
+    creation
+    last_update
+    extraFields
+    project {
+      id
+      startDate
+      endDate
+      client {
+        id
+        name
+        shortName
+      }
+    }
+  }
+}
+"""
+
+_UPDATE_REPORT_MUTATION = """
+mutation($id: bigint!, $set: report_set_input!) {
+  update_report_by_pk(pk_columns: {id: $id}, _set: $set) {
+    id
   }
 }
 """
@@ -205,6 +229,10 @@ class GhostwriterClient:
 
     def fetch_reports(self) -> list[dict]:
         return self._post(_REPORT_QUERY)["report"]
+
+    def update_report(self, report_id: int, fields: dict) -> None:
+        """Patch a report's ``_set`` columns (grison only ever sends ``extraFields``)."""
+        self._post(_UPDATE_REPORT_MUTATION, {"id": report_id, "set": fields})
 
     def download_evidence(self, evidence_id: int) -> tuple[str, bytes]:
         data = self._post(_DOWNLOAD_EVIDENCE_QUERY, {"id": evidence_id})["downloadEvidence"]

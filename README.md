@@ -59,6 +59,7 @@ findings/
   inbox/
   library/
   reports/<id>-<slug>/
+    narrative/
     evidence/
 methodology/
   library/<book>/<chapter>/
@@ -71,6 +72,7 @@ methodology/
 | `findings/inbox/` | nothing | parse output; triage here, then `cp` into a tier |
 | `findings/library/` | Ghostwriter finding library | reusable templates |
 | `findings/reports/<id>-<slug>/` | Ghostwriter reported findings | one dir per *existing* report; grison never creates reports |
+| `findings/reports/…/narrative/` | Ghostwriter report `extraFields` | one editable markdown file per report section (exec summary, methodology, …); 3-way per section. `.report.yml` holds the read-only metadata mirror |
 | `findings/reports/…/evidence/` | Ghostwriter evidence | images attached to a finding |
 | `methodology/library/` | BookStack books/chapters/pages | markdown-native, mirrors verbatim |
 | `methodology/checklists/` | nothing | per-engagement working copies, `cp -r` from library |

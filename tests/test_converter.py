@@ -100,6 +100,37 @@ def test_md_to_html_raises_on_heading() -> None:
         md_to_html("# Heading")
 
 
+# --- headings=True (report-narrative mode) ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "md",
+    [
+        "## Plan",
+        "# Top\n\nA paragraph with **bold**.\n\n### Sub\n\n- one\n- two",
+        "Intro text.\n\n## Section\n\nBody with `code` and [a](https://x/).",
+        "###### Deep\n\nlast",
+    ],
+)
+def test_heading_mode_md_round_trips(md: str) -> None:
+    assert html_to_md(md_to_html(md, headings=True), headings=True) == md
+
+
+def test_heading_mode_html_round_trips() -> None:
+    html = "<h2>Plan</h2><p>Five phases:</p><ul><li>recon</li><li>exploit</li></ul><h3>Notes</h3>"
+    md = html_to_md(html, headings=True)
+    assert md == "## Plan\n\nFive phases:\n\n- recon\n- exploit\n\n### Notes"
+    # md is a fixed point across md->html->md (the report merge base relies on this)
+    assert html_to_md(md_to_html(md, headings=True), headings=True) == md
+
+
+def test_headings_still_rejected_in_strict_finding_mode() -> None:
+    with pytest.raises(ConverterError):
+        html_to_md("<h2>x</h2>")  # default headings=False — the corruption tripwire
+    with pytest.raises(ConverterError):
+        md_to_html("## x")
+
+
 def test_html_to_md_raises_on_table() -> None:
     with pytest.raises(ConverterError):
         html_to_md("<table><tr><td>x</td></tr></table>")

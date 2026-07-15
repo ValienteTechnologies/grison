@@ -32,7 +32,12 @@ class ConverterError(ValueError):
 _BLOCK_TAGS = {"p", "ul", "li"}
 _INLINE_TAGS = {"strong", "code", "em", "a", "br"}
 _UNWRAP_TAGS = {"span"}
+_HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 _ALLOWED_TAGS = _BLOCK_TAGS | _INLINE_TAGS | _UNWRAP_TAGS
+# Report-narrative fields (report.extraFields) use the same vocabulary as finding
+# fields plus headings — the finding converter rejects headings as a corruption
+# tripwire, so heading support is opt-in via ``headings=True`` and never loosens the
+# strict finding path.
 
 
 def _esc(text: str) -> str:
@@ -59,10 +64,11 @@ class _Node:
 class _TreeBuilder(HTMLParser):
     """Builds a tiny tree from an HTML fragment, rejecting non-whitelisted tags."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, headings: bool = False) -> None:
         super().__init__(convert_charrefs=True)
         self.root = _Node("root")
         self.stack: list[_Node] = [self.root]
+        self._allowed = _ALLOWED_TAGS | _HEADING_TAGS if headings else _ALLOWED_TAGS
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._open(tag, attrs)
@@ -71,7 +77,7 @@ class _TreeBuilder(HTMLParser):
         self._open(tag, attrs)  # self-closing form, e.g. <br/>
 
     def _open(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag not in _ALLOWED_TAGS:
+        if tag not in self._allowed:
             raise ConverterError(f"unsupported HTML tag: <{tag}>")
         if tag == "br":
             self.stack[-1].children.append(_Node("br"))
@@ -88,7 +94,7 @@ class _TreeBuilder(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == "br":
             return
-        if tag not in _ALLOWED_TAGS:
+        if tag not in self._allowed:
             raise ConverterError(f"unsupported HTML tag: </{tag}>")
         if len(self.stack) <= 1 or self.stack[-1].tag != tag:
             raise ConverterError(f"mismatched closing tag: </{tag}>")
@@ -98,9 +104,10 @@ class _TreeBuilder(HTMLParser):
         self.stack[-1].children.append(data)
 
 
-def html_to_md(html: str) -> str:
-    """Convert a GW rich-text HTML fragment to markdown."""
-    builder = _TreeBuilder()
+def html_to_md(html: str, *, headings: bool = False) -> str:
+    """Convert a GW rich-text HTML fragment to markdown. ``headings=True`` also
+    accepts ``<h1>``–``<h6>`` (for report-narrative fields, not finding fields)."""
+    builder = _TreeBuilder(headings=headings)
     builder.feed(html)
     builder.close()
     if len(builder.stack) != 1:
@@ -110,8 +117,8 @@ def html_to_md(html: str) -> str:
 
 
 def _group_top_level(children: list[_Node | str]) -> list[_Node]:
-    """Split top-level children into p/ul blocks, wrapping stray inline content
-    in an implicit paragraph and dropping insignificant top-level whitespace."""
+    """Split top-level children into p/ul/heading blocks, wrapping stray inline
+    content in an implicit paragraph and dropping insignificant top-level whitespace."""
     blocks: list[_Node] = []
     buffer: list[_Node | str] = []
 
@@ -123,7 +130,7 @@ def _group_top_level(children: list[_Node | str]) -> list[_Node]:
     for child in children:
         if isinstance(child, str) and child.strip() == "":
             continue
-        if isinstance(child, _Node) and child.tag in ("p", "ul"):
+        if isinstance(child, _Node) and (child.tag in ("p", "ul") or child.tag in _HEADING_TAGS):
             flush()
             blocks.append(child)
         else:
@@ -135,6 +142,8 @@ def _group_top_level(children: list[_Node | str]) -> list[_Node]:
 def _render_block(node: _Node) -> str:
     if node.tag == "p":
         return _render_inline(node.children)
+    if node.tag in _HEADING_TAGS:
+        return "#" * int(node.tag[1]) + " " + _render_inline(node.children)
     if node.tag == "ul":
         lines = []
         for li in node.children:
@@ -237,16 +246,38 @@ _TOKEN_RE = re.compile(
 )
 
 
-def md_to_html(md: str) -> str:
-    """Convert markdown (the tiny closed GW subset) to an HTML fragment."""
+def md_to_html(md: str, *, headings: bool = False) -> str:
+    """Convert markdown (the tiny closed GW subset) to an HTML fragment. ``headings=True``
+    also accepts ATX headings ``# ``–``###### `` (for report-narrative fields)."""
     blocks = re.split(r"\n\s*\n", md)
-    return "\n\n".join(_render_md_block(block) for block in blocks)
+    return "\n\n".join(_render_md_block(block, headings=headings) for block in blocks)
 
 
-def _render_md_block(block: str) -> str:
+def _heading_html(line: str) -> str:
+    hashes, _, text = line.partition(" ")
+    return f"<h{len(hashes)}>{_inline_to_html(text.strip())}</h{len(hashes)}>"
+
+
+def _render_md_block(block: str, *, headings: bool = False) -> str:
     lines = block.split("\n")
     for line in lines:
-        _check_line_whitelist(line)
+        _check_line_whitelist(line, headings=headings)
+    if headings and any(_HEADING_RE.match(line) for line in lines):
+        # A heading is its own element; consecutive non-heading lines coalesce into a
+        # paragraph. GW emits each <hN> standalone, so a clean round-trip stays 1:1.
+        out: list[str] = []
+        para: list[str] = []
+        for line in lines:
+            if _HEADING_RE.match(line):
+                if para:
+                    out.append(f"<p>{'<br>'.join(_inline_to_html(p) for p in para)}</p>")
+                    para = []
+                out.append(_heading_html(line))
+            else:
+                para.append(line)
+        if para:
+            out.append(f"<p>{'<br>'.join(_inline_to_html(p) for p in para)}</p>")
+        return "\n\n".join(out)
     if lines and all(_is_list_line(line) for line in lines):
         items = "".join(f"<li>{_inline_to_html(line[2:])}</li>" for line in lines)
         return f"<ul>{items}</ul>"
@@ -258,9 +289,9 @@ def _is_list_line(line: str) -> bool:
     return line.startswith("- ") or line.startswith("* ")
 
 
-def _check_line_whitelist(line: str) -> None:
+def _check_line_whitelist(line: str, *, headings: bool = False) -> None:
     stripped = line.strip()
-    if _HEADING_RE.match(line):
+    if _HEADING_RE.match(line) and not headings:
         raise ConverterError(f"unsupported markdown: ATX heading ({line!r})")
     if _ORDERED_RE.match(line):
         raise ConverterError(f"unsupported markdown: ordered list ({line!r})")
