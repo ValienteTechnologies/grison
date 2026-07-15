@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -24,6 +25,7 @@ from grison.markdown import DocumentError, finding_to_markdown, markdown_to_find
 from grison.model import EvidenceGwRef, EvidenceItem, Finding
 from grison.remote.gwmap import (
     content_hash,
+    evidence_basename,
     finding_to_gw_fields,
     gw_pre_image,
     gw_record_to_finding,
@@ -95,6 +97,20 @@ def _report_dir(root: Path, report_id: int, reports: dict[int, dict]) -> Path:
     return root / "findings" / "reports" / f"{report_id}-{slugify(title)}"
 
 
+def _evidence_name_counters(
+    reported: list[dict], ev_by_finding: dict[int, list[dict]]
+) -> dict[int, Counter]:
+    """Evidence basename multiset per *report* — every finding in a report shares one
+    evidence/ directory, so filename-collision detection must span the whole report,
+    not a single finding's own rows."""
+    counters: dict[int, Counter] = {}
+    for rec in reported:
+        c = counters.setdefault(rec["reportId"], Counter())
+        for row in ev_by_finding.get(rec["id"], []):
+            c[evidence_basename(row)] += 1
+    return counters
+
+
 def pull(
     root: Path,
     client: GhostwriterClient,
@@ -122,9 +138,11 @@ def pull(
             dry_run=dry_run, on_event=on_event,
         )
 
+    ev_names = _evidence_name_counters(reported, ev_by)
     for rec in reported:
         evs = ev_by.get(rec["id"], [])
-        f = gw_record_to_finding(rec, tier="instance", evidence_rows=evs)
+        f = gw_record_to_finding(rec, tier="instance", evidence_rows=evs,
+                                 evidence_names=ev_names.get(rec["reportId"]))
         rdir = _report_dir(root, rec["reportId"], reports)
         _reconcile(result, f, local, rdir, evs, client, root, dry_run=dry_run, on_event=on_event)
 
@@ -326,6 +344,7 @@ def _classify(
     lr: _Local,
     remote_index: dict[tuple[str, int], dict],
     ev_by_finding: dict[int, list[dict]],
+    ev_names_by_report: dict[int, Counter],
     force_local: set[Path],
     force_remote: set[Path],
     dups: set[tuple[str, int]],
@@ -370,7 +389,9 @@ def _classify(
     base = f.grison.synced.hash
     local_hash = content_hash(f)
     ev_rows = ev_by_finding.get(rec["id"]) if lr.loc_table == "reportedFinding" else None
-    remote_f = gw_record_to_finding(rec, tier=_tier(lr.loc_table), evidence_rows=ev_rows)
+    ev_names = ev_names_by_report.get(rec.get("reportId")) if ev_rows else None
+    remote_f = gw_record_to_finding(rec, tier=_tier(lr.loc_table), evidence_rows=ev_rows,
+                                    evidence_names=ev_names)
     remote_hash = content_hash(remote_f)
     if local_hash == base and remote_hash == base:
         # clean prose, but a prior upload may have failed mid-batch, or an image's bytes
@@ -416,6 +437,7 @@ def sync(
     ev_by_finding: dict[int, list[dict]] = {}
     for e in client.fetch_evidence():
         ev_by_finding.setdefault(e["findingId"], []).append(e)
+    ev_names_by_report = _evidence_name_counters(reported, ev_by_finding)
     n_lib, n_rep, n_reports = len(findings), len(reported), len(reports)
     _emit(on_event, f"remote: {n_lib} library findings, {n_rep} reported, {n_reports} reports")
 
@@ -426,7 +448,8 @@ def sync(
     matched: set[tuple[str, int]] = set()
     for lr in locals_:
         try:
-            plan = _classify(lr, remote_index, ev_by_finding, force_local, force_remote, dups)
+            plan = _classify(lr, remote_index, ev_by_finding, ev_names_by_report,
+                             force_local, force_remote, dups)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
             result.errors.append(f"{lr.path}: {e}")
             _emit(on_event, f"error {_rel(root, lr.path)}: {e}")
@@ -449,6 +472,9 @@ def sync(
             tier = _tier(table)
             remote_f = gw_record_to_finding(
                 rec, tier=tier, evidence_rows=ev_by_finding.get(rec["id"]),
+                evidence_names=(
+                    ev_names_by_report.get(rec.get("reportId")) if tier == "instance" else None
+                ),
             )
             new_path = _remote_target_path(root, remote_f, rec, reports)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
@@ -493,8 +519,8 @@ def sync(
     try:
         for plan in plans:
             try:
-                _apply(plan, client, snap, result, ev_by_finding, root, dry_run=dry_run,
-                       on_event=on_event)
+                _apply(plan, client, snap, result, ev_by_finding, ev_names_by_report, root,
+                       dry_run=dry_run, on_event=on_event)
             except Exception as e:  # noqa: BLE001 — isolate one record, keep batch + snapshot
                 where = plan.local.path if plan.local else plan.new_path
                 result.errors.append(f"{where}: {e}")
@@ -519,6 +545,7 @@ def _apply(
     snap: Snapshot,
     result: SyncResult,
     ev_by_finding: dict[int, list[dict]],
+    ev_names_by_report: dict[int, Counter],
     root: Path,
     *,
     dry_run: bool,
@@ -550,7 +577,8 @@ def _apply(
         result.repaired.append(lr.path)
         _emit(on_event, f"{tense}repair {_rel(root, lr.path)}")
     elif action == "pull":
-        _apply_pull(plan, client, result, ev_by_finding, root, dry_run=dry_run, on_event=on_event)
+        _apply_pull(plan, client, result, ev_by_finding, ev_names_by_report, root,
+                    dry_run=dry_run, on_event=on_event)
     elif action == "push":
         _apply_push(plan, client, snap, result, ev_by_finding, root, dry_run=dry_run,
                      on_event=on_event)
@@ -560,7 +588,8 @@ def _apply(
 
 def _apply_pull(
     plan: _Plan, client: GhostwriterClient, result: SyncResult,
-    ev_by_finding: dict[int, list[dict]], root: Path, *, dry_run: bool,
+    ev_by_finding: dict[int, list[dict]], ev_names_by_report: dict[int, Counter],
+    root: Path, *, dry_run: bool,
     on_event: Callable[[str], None] | None = None,
 ) -> None:
     path = plan.new_path if plan.new_path is not None else plan.local.path
@@ -570,9 +599,13 @@ def _apply_pull(
         return
     remote_f = plan.remote_f
     if remote_f is None:
+        tier = _tier(plan.key[0])
         remote_f = gw_record_to_finding(
-            plan.rec, tier=_tier(plan.key[0]),
+            plan.rec, tier=tier,
             evidence_rows=ev_by_finding.get(plan.rec["id"]),
+            evidence_names=(
+                ev_names_by_report.get(plan.rec.get("reportId")) if tier == "instance" else None
+            ),
         )
     evidence_down = _download_finding_evidence(remote_f, client, path.parent, on_event=on_event)
     stamp_synced(remote_f)

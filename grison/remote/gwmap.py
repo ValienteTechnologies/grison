@@ -39,16 +39,23 @@ def _field_to_md(html: str | None) -> str:
     return html_to_md(clean_gw_html(html)).strip()
 
 
-def _evidence_entries(evidence_rows: list[dict]) -> list[dict]:
-    names = [
-        PurePosixPath(ev.get("document") or f"evidence-{ev['id']}").name for ev in evidence_rows
-    ]
-    dup = Counter(names)
+def evidence_basename(ev: dict) -> str:
+    """The local basename an evidence row wants — shared by the collision counter."""
+    return PurePosixPath(ev.get("document") or f"evidence-{ev['id']}").name
+
+
+def _evidence_entries(
+    evidence_rows: list[dict], sibling_names: Counter | None = None
+) -> list[dict]:
+    names = [evidence_basename(ev) for ev in evidence_rows]
+    # Disambiguate genuine collisions by GW id; unique names stay plain so a
+    # user-added image round-trips to the same path on re-pull. The counter must
+    # cover every evidence row that shares the report's evidence/ directory —
+    # findings in one report share it, so a per-finding count would let two
+    # findings' "screenshot.png" silently overwrite each other on disk.
+    dup = sibling_names if sibling_names is not None else Counter(names)
     entries = []
     for ev, name in zip(evidence_rows, names, strict=True):
-        # Disambiguate only genuine collisions (two rows on this finding sharing a
-        # basename, e.g. two "screenshot.png") by GW id; unique names stay plain so
-        # a user-added image round-trips to the same path on re-pull.
         local = f"evidence/{ev['id']}-{name}" if dup[name] > 1 else f"evidence/{name}"
         entries.append(
             {
@@ -66,6 +73,7 @@ def gw_record_to_finding(
     *,
     tier: str,
     evidence_rows: list[dict] | None = None,
+    evidence_names: Counter | None = None,
 ) -> Finding:
     """Build a (not-yet-synced) house Finding from a GW ``finding``/``reportedFinding`` row."""
     gw: dict = {
@@ -79,7 +87,11 @@ def gw_record_to_finding(
     cvss = {"vector": vec, "score": rec.get("cvssScore")} if vec else None
 
     affected = _field_to_md(rec.get("affectedEntities")) if tier == "instance" else None
-    ev_entries = _evidence_entries(evidence_rows) if (tier == "instance" and evidence_rows) else []
+    ev_entries = (
+        _evidence_entries(evidence_rows, evidence_names)
+        if (tier == "instance" and evidence_rows)
+        else []
+    )
 
     data = {
         "grison": {"tier": tier, "gw": gw},

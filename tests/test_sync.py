@@ -132,3 +132,33 @@ def test_pull_dry_run_emits_would_prefixed_events(tmp_path: Path) -> None:
     r = pull(tmp_path, FakeGW(), dry_run=True, on_event=events.append)
     assert len(r.written) == 2
     assert any(e.startswith("would pull ") for e in events)
+
+
+def test_evidence_basename_collision_across_findings_disambiguates(tmp_path: Path) -> None:
+    """Two findings in one report each carrying a 'shell.png' must map to distinct
+    local paths — a per-finding de-dup would let the second download silently
+    overwrite the first's image in the shared evidence/ directory."""
+    rf = [dict(_RF[0]), {**_RF[0], "id": 11, "title": "Inst B"}]
+    ev = [
+        {"id": 99, "findingId": 10, "reportId": None, "document": "evidence/9/shell.png",
+         "caption": "a", "friendlyName": "shell-a"},
+        {"id": 100, "findingId": 11, "reportId": None, "document": "evidence/12/shell.png",
+         "caption": "b", "friendlyName": "shell-b"},
+    ]
+
+    class CollidingGW(FakeGW):
+        def fetch_reported_findings(self):
+            return rf
+
+        def fetch_evidence(self):
+            return ev
+
+    r = pull(tmp_path, CollidingGW())
+    assert r.evidence_written == 2
+    ev_dir = tmp_path / "findings" / "reports" / "7-acme" / "evidence"
+    assert (ev_dir / "99-shell.png").exists()
+    assert (ev_dir / "100-shell.png").exists()
+    for md in (tmp_path / "findings" / "reports").rglob("*.md"):
+        f = markdown_to_finding(md.read_text())
+        assert len(f.evidence) == 1
+        assert f.evidence[0].file.startswith("evidence/") and "-shell.png" in f.evidence[0].file
