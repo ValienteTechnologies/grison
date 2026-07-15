@@ -2,7 +2,9 @@ name: release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch: # re-run backstop if a publish fails after the bump landed
 
 permissions: {}
 
@@ -11,15 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write # PyPI trusted publishing (OIDC)
-      contents: read
+      contents: write # push the derived release tag
     steps:
       - uses: actions/checkout@v4
-      - name: tag must match VERSION (the version SSOT)
-        run: |
-          test "v$(cat VERSION)" = "$GITHUB_REF_NAME" || {
-            echo "tag $GITHUB_REF_NAME != v$(cat VERSION) — bump VERSION before tagging"; exit 1; }
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
       - run: uv run pytest -q
       - run: uv build
-      - run: uv publish
+      - run: uv publish # duplicate version on PyPI fails loudly here — natural no-op guard
+      - name: tag the release (derived from VERSION, after successful publish)
+        run: |
+          git tag "v$(cat VERSION)"
+          git push origin "v$(cat VERSION)"
