@@ -31,7 +31,7 @@ from grison.workspace import bootstrap_tree, inbox_dir
 
 app = typer.Typer(
     name="grison",
-    help="A markdown hub between security scanners and Valiente's Ghostwriter + BookStack.",
+    help="A markdown hub between security scanners and Ghostwriter + BookStack.",
     no_args_is_help=True,
     add_completion=False,
 )

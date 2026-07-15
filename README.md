@@ -1,17 +1,27 @@
 # grison
 
-grison is a markdown hub between security scanners and Valiente's infra. It parses
+grison is a markdown hub between security scanners and Ghostwriter + BookStack. It parses
 scanner exports into a single house schema of markdown findings, and reconciles a local
-git-like workspace with Ghostwriter (findings) and BookStack (methodology) via a 3-way
-sync. Markdown is the lingua franca — which also makes an LLM editing the workspace the
-transform layer, so grison itself has no AI subsystem; its job is to validate and sync
+git-like workspace with Ghostwriter (findings, "GW") and BookStack (methodology) via a
+3-way sync. Markdown is the lingua franca — which also makes an LLM editing the workspace
+the transform layer, so grison itself has no AI subsystem; its job is to validate and sync
 those edits safely.
+
+Supported scanner exports (auto-detected): Acunetix, Burp, Nessus, Nmap, OpenVAS, Qualys,
+sslyze, ZAP.
 
 ## Install
 
 ```sh
-uv sync           # Python 3.11+, managed with uv
-uv run grison --help
+pipx install grison       # or: uv tool install grison
+grison --help
+```
+
+For development:
+
+```sh
+uv sync                   # Python 3.11+, managed with uv
+uv run pytest
 ```
 
 ## The three verbs
