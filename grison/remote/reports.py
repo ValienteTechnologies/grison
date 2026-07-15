@@ -369,6 +369,7 @@ def _apply_report(
             result.collisions.append(p.path)
             _emit(on_event, f"{'would ' if dry_run else ''}collision {_rel(root, p.path)}")
 
+    uncanonicalized: set[str] = set()
     if pushes and not dry_run:
         # one PUT for the whole report: merge pushed sections over the FRESH remote map
         # (re-fetched in _guard_stale_push right before this write — never the stale
@@ -381,6 +382,22 @@ def _apply_report(
         for p in pushes:
             result.pushed.append(p.path)
             _emit(on_event, f"push {_rel(root, p.path)}")
+            # GW stores this HTML byte-verbatim; the next pull rebuilds the section via
+            # html_section_to_md, which isn't guaranteed to reproduce p.body unless
+            # p.body was already a fixed point of md->html->md. Rebuild it now — same
+            # path the next pull uses — and write it back locally so the local file,
+            # the stamped base, and that future pull all agree instead of the base
+            # being taken from markdown a pull would never actually reproduce.
+            try:
+                canonical_md = html_section_to_md(new_extra[p.key])
+            except Exception as e:  # noqa: BLE001 — converter failure isolated to this section
+                uncanonicalized.add(p.key)
+                result.errors.append(
+                    f"{_rel(root, p.path)}: pushed but could not re-canonicalize section "
+                    f"'{p.key}' — re-run sync to reclassify ({e})"
+                )
+                continue
+            _write_section(p.path, canonical_md)
     elif pushes:  # dry-run — _guard_stale_push never runs, pushes is the plain plan list
         for p in pushes:
             result.pushed.append(p.path)
@@ -388,7 +405,7 @@ def _apply_report(
 
     # refresh the read-only metadata mirror + section merge bases (skip in dry-run)
     if not dry_run:
-        final_hashes, removed_remotely = _final_section_hashes(rdir, doc, plans)
+        final_hashes, removed_remotely = _final_section_hashes(rdir, doc, plans, uncanonicalized)
         meta_path = rdir / REPORT_META
         text = meta_to_yaml(doc, final_hashes, removed_remotely)
         if not meta_path.exists() or meta_path.read_text(encoding="utf-8") != text:
@@ -399,7 +416,8 @@ def _apply_report(
 
 
 def _final_section_hashes(
-    rdir: Path, doc: ReportDoc, plans: list[_SectionPlan]
+    rdir: Path, doc: ReportDoc, plans: list[_SectionPlan],
+    uncanonicalized: set[str] | None = None,
 ) -> tuple[dict[str, str], set[str]]:
     """The merge base to stamp after applying, plus which keys are flagged
     ``removed_remotely``. A pushed/clean/repaired section converges on its content; a
@@ -409,17 +427,26 @@ def _final_section_hashes(
     section gone — kept locally" skip note survives more than one sync cycle instead of
     degrading to "unknown field" after the first (F3: without this the base was only
     ever stamped for keys present in doc.sections, so it silently evaporated one cycle
-    after the remote key vanished)."""
+    after the remote key vanished).
+
+    ``uncanonicalized`` are keys that pushed successfully but whose post-push
+    html->md rebuild failed (see ``_apply_report``): left out of the returned map
+    entirely, so the next sync treats the section as base-less rather than trusting a
+    local markdown a pull would never actually reproduce."""
+    uncanonicalized = uncanonicalized or set()
     action_by_key = {p.key: p.action for p in plans}
     hashes: dict[str, str] = {}
     _, prior, _prior_removed = read_local_meta(rdir)
     for key, section in doc.sections.items():
+        if key in uncanonicalized:
+            continue
         action = action_by_key.get(key, "clean")
         if action == "collision":
             if key in prior:
                 hashes[key] = prior[key]  # leave the base untouched until resolved
             continue
-        # pull/repair converge on remote; push converges on local; clean already matches
+        # pull/repair converge on remote; push converges on local (rewritten to the
+        # canonical rebuild in _apply_report when the push succeeded); clean matches already
         local_md = read_local_section(rdir, key)
         hashes[key] = section_hash(local_md) if local_md is not None else section_hash(section.body)
 

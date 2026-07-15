@@ -176,3 +176,77 @@ def test_pull_surfaces_dropped_styling_span_as_warning_once(tmp_path: Path) -> N
 
     r2 = sync_reports(tmp_path, fake)  # nothing changed — must not re-warn every routine sync
     assert r2.warnings == [] and es in r2.unchanged
+
+
+# --- push stamps from the remote-rebuilt form, not the raw local markdown -----------
+
+
+def test_push_of_noncanonical_markdown_stamps_base_from_rebuilt_form(tmp_path: Path) -> None:
+    """``* `` bullets are valid push input (md_to_html accepts them) but html_to_md
+    always re-emits ``- `` — so a push of unmodified ``* `` markdown is NOT a fixed
+    point. Without the fix, the base is stamped from the raw local text and the very
+    next sync sees phantom remote drift (a pull) for a section nobody touched."""
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>base</p>"})
+    sync_reports(tmp_path, fake)
+    es = _sec(tmp_path, 6, "acme", "executive_summary")
+    es.write_text("* item one\n* item two\n")
+
+    r = sync_reports(tmp_path, fake)
+    assert es in r.pushed
+
+    # local file rewritten to the canonical form the next pull would produce
+    assert es.read_text().strip() == "- item one\n- item two"
+    assert fake.reports[6]["extraFields"]["executive_summary"] == (
+        "<ul><li>item one</li><li>item two</li></ul>"
+    )
+    from grison.remote.repmap import section_hash
+
+    meta = yaml.safe_load((es.parent.parent / ".report.yml").read_text())
+    assert meta["sections"]["executive_summary"]["hash"] == section_hash(es.read_text())
+
+    r2 = sync_reports(tmp_path, fake)  # nothing actually changed since the push
+    assert es in r2.unchanged
+    assert es not in r2.pulled and es not in r2.pushed
+
+
+def test_push_canonicalization_failure_surfaces_error_and_leaves_base_unstamped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The push itself (``update_report``) succeeded — GW has the new HTML — but the
+    post-push html->md rebuild used to compute the canonical base blew up. The section
+    must not be silently stamped from the local markdown (that's the exact bug this
+    module fixes); it's left base-less so the next sync reclassifies it explicitly."""
+    import grison.remote.reports as reports_mod
+
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>base</p>", "methodology": "<p>m</p>"})
+    sync_reports(tmp_path, fake)
+    es = _sec(tmp_path, 6, "acme", "executive_summary")
+    es.write_text("edited\n")
+
+    def boom(html, *, on_loss=None):
+        raise ValueError("boom")
+
+    with monkeypatch.context() as m:
+        m.setattr(reports_mod, "html_section_to_md", boom)
+        r = sync_reports(tmp_path, fake)
+
+    assert es in r.pushed  # the write to GW happened regardless
+    assert fake.reports[6]["extraFields"]["executive_summary"] == "<p>edited</p>"
+    assert any(
+        "could not re-canonicalize section" in e
+        and "executive_summary" in e
+        and "re-run sync to reclassify" in e
+        for e in r.errors
+    )
+    assert es.read_text().strip() == "edited"  # rebuild failed — nothing to write back
+
+    meta = yaml.safe_load((es.parent.parent / ".report.yml").read_text())
+    assert "executive_summary" not in meta["sections"]  # base left unstamped
+    assert "methodology" in meta["sections"]  # untouched section unaffected
+
+    r2 = sync_reports(tmp_path, fake)  # re-run without the injected failure: reclassifies
+    assert es in r2.repaired
+    r3 = sync_reports(tmp_path, fake)
+    assert es in r3.unchanged
