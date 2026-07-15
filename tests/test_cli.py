@@ -92,6 +92,39 @@ def test_sync_exit_code_reflects_result_errors(
     assert "boom" in r.output
 
 
+def test_sync_warnings_alone_do_not_flip_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean batch that only carries non-fatal warnings (a canonicalized construct, a
+    recomputed cvss score) must print them dimmed but still exit 0 — warnings are
+    visibility, not a failure signal."""
+    import grison.cli as cli_mod
+    from grison.remote.reports import ReportResult
+    from grison.remote.sync import SyncResult
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GRISON_GW_URL", "http://gw.test")
+    monkeypatch.setenv("GRISON_GW_TOKEN", "tok")
+    monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
+    monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
+
+    def fake_run_sync(
+        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
+    ):
+        return SyncResult(warnings=["findings/library/f.md: cvss score 5.0 disagreed..."])
+
+    def fake_sync_reports(
+        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
+    ):
+        return ReportResult()
+
+    monkeypatch.setattr(cli_mod, "run_sync", fake_run_sync)
+    monkeypatch.setattr(cli_mod, "sync_reports", fake_sync_reports)
+    r = _runner.invoke(app, ["sync"])
+    assert r.exit_code == 0
+    assert "warning:" in r.output and "cvss score" in r.output
+
+
 def test_status_flags_invalid(tmp_path: Path) -> None:
     bad = tmp_path / "bad.md"
     # valid frontmatter/schema but a table in the body → GW whitelist violation

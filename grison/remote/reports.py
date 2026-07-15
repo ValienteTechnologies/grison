@@ -57,6 +57,9 @@ class ReportResult:
     snapshot_dir: Path | None = None
     mass_change_blocked: bool = False
     errors: list[str] = field(default_factory=list)
+    # non-fatal: canonicalized/dropped constructs (converter on_loss) — never flip the
+    # exit code by themselves.
+    warnings: list[str] = field(default_factory=list)
 
 
 def _rel(root: Path, path: Path) -> str:
@@ -69,6 +72,15 @@ def _rel(root: Path, path: Path) -> str:
 def _emit(on_event: Callable[[str], None] | None, msg: str) -> None:
     if on_event:
         on_event(msg)
+
+
+def _surface_losses(result: ReportResult, root: Path, path: Path, losses: list[str]) -> None:
+    """Drain buffered on_loss messages (repmap html->md, tagged with section key by the
+    caller) into ``result.warnings`` — called only where the remote body is actually
+    written to disk (pull or a collision sidecar), mirroring sync.py's
+    ``_surface_remote_losses``."""
+    for msg in losses:
+        result.warnings.append(f"{_rel(root, path)}: {msg}")
 
 
 def _report_dir(root: Path, report_id: int, title: str) -> Path:
@@ -90,6 +102,12 @@ class _SectionPlan:
     path: Path
     body: str = ""  # markdown to write (pull/repair) or push source
     note: str = ""
+    # on_loss messages from converting this section's remote HTML (buffered at
+    # report_from_record time) — surfaced to result.warnings only when this plan
+    # actually writes the remote body to disk (pull/collision), mirroring sync.py's
+    # _Plan.remote_losses so a permanently-unconvertible construct doesn't re-warn
+    # every sync just from being compared against the local hash.
+    losses: list[str] = field(default_factory=list)
 
 
 def sync_reports(
@@ -117,11 +135,20 @@ def sync_reports(
     per_report: list[tuple[ReportDoc, Path, list[_SectionPlan]]] = []
     for rec in reports:
         try:
-            doc = report_from_record(rec)
+            # buffered per section key, not surfaced yet — report_from_record converts
+            # every section's remote HTML up front (needed for the hash comparison
+            # below regardless of outcome), so on_loss firing here must not become a
+            # result.warnings entry unless the section's plan actually writes the
+            # remote body to disk (pull/collision) — see _SectionPlan.losses.
+            losses: dict[str, list[str]] = {}
+            doc = report_from_record(
+                rec,
+                on_loss=lambda key, msg, losses=losses: losses.setdefault(key, []).append(msg),
+            )
             rdir = _report_dir(root, doc.report_id, doc.title)
             _, bases, _removed = read_local_meta(rdir)
             plans = _plan_report(
-                rdir, doc, bases, force_local, force_remote, result, on_event, root
+                rdir, doc, bases, force_local, force_remote, result, on_event, root, losses
             )
         except Exception as e:  # noqa: BLE001 — isolate one report's planning, keep the batch
             rid = rec.get("id")
@@ -166,7 +193,9 @@ def _plan_report(
     result: ReportResult,
     on_event: Callable[[str], None] | None,
     root: Path,
+    losses: dict[str, list[str]] | None = None,
 ) -> list[_SectionPlan]:
+    losses = losses or {}
     plans: list[_SectionPlan] = []
     for key, section in doc.sections.items():
         path = section_path(rdir, key)
@@ -174,33 +203,36 @@ def _plan_report(
         rhash = section_hash(remote_md)
         local_md = read_local_section(rdir, key)
         base = bases.get(key)
+        section_losses = losses.get(key, [])
 
         if path in force_remote:
-            plans.append(_SectionPlan("pull", key, path, remote_md))
+            plans.append(_SectionPlan("pull", key, path, remote_md, losses=section_losses))
             continue
         if path in force_local and local_md is not None:
             plans.append(_SectionPlan("push", key, path, local_md))
             continue
         if local_md is None:
-            plans.append(_SectionPlan("pull", key, path, remote_md))  # never pulled → new
+            # never pulled → new
+            plans.append(_SectionPlan("pull", key, path, remote_md, losses=section_losses))
             continue
         lhash = section_hash(local_md)
         if base is None:
             # file exists with no merge base (hand-created for an existing key): converge
             # if it already matches remote, otherwise surface — never silently overwrite.
-            plans.append(_SectionPlan("repair" if lhash == rhash else "collision", key, path,
-                                      remote_md))
+            action = "repair" if lhash == rhash else "collision"
+            plans.append(_SectionPlan(action, key, path, remote_md,
+                                      losses=section_losses if action == "collision" else []))
             continue
         if lhash == base and rhash == base:
             plans.append(_SectionPlan("clean", key, path))
         elif lhash != base and rhash == base:
             plans.append(_SectionPlan("push", key, path, local_md))
         elif lhash == base and rhash != base:
-            plans.append(_SectionPlan("pull", key, path, remote_md))
+            plans.append(_SectionPlan("pull", key, path, remote_md, losses=section_losses))
         elif lhash == rhash:
             plans.append(_SectionPlan("repair", key, path, remote_md))
         else:
-            plans.append(_SectionPlan("collision", key, path, remote_md))
+            plans.append(_SectionPlan("collision", key, path, remote_md, losses=section_losses))
 
     # local narrative files whose key no longer exists remotely
     ndir = rdir / NARRATIVE_DIR
@@ -268,13 +300,16 @@ def _guard_stale_push(
 
     plan_by_key = {p.key: p for p in plans}
     for key in drifted:
-        body = html_section_to_md((fresh or {}).get(key) or "")
+        losses: list[str] = []
+        body = html_section_to_md((fresh or {}).get(key) or "", on_loss=losses.append)
         plan = plan_by_key.get(key)
         if plan is not None:
-            plan.action, plan.body, plan.note = "collision", body, "concurrent remote edit"
+            plan.action, plan.body, plan.note, plan.losses = (
+                "collision", body, "concurrent remote edit", losses,
+            )
         else:
             plans.append(_SectionPlan("collision", key, section_path(rdir, key), body,
-                                       "concurrent remote edit"))
+                                       "concurrent remote edit", losses=losses))
 
     if fresh is None:
         reason = "report no longer exists remotely"
@@ -320,6 +355,7 @@ def _apply_report(
                 _write_section(p.path, p.body)
                 result.pulled.append(p.path)
                 _emit(on_event, f"pull {_rel(root, p.path)}")
+                _surface_losses(result, root, p.path, p.losses)
         elif p.action == "repair":
             if not dry_run:
                 _write_section(p.path, p.body)
@@ -329,6 +365,7 @@ def _apply_report(
             if not dry_run:
                 sidecar = p.path.with_name(f"{p.key}.remote.md")
                 _write_section(sidecar, p.body)
+                _surface_losses(result, root, sidecar, p.losses)
             result.collisions.append(p.path)
             _emit(on_event, f"{'would ' if dry_run else ''}collision {_rel(root, p.path)}")
 

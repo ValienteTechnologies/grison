@@ -5,8 +5,12 @@ only-remote → **pull**; both → **collision** (surface both sides via an ``x.
 sidecar, never overwrite); neither → clean; converged-under-a-stale-base → repair the
 hash. **Location is identity** — a file's directory fixes its Ghostwriter target
 (``findings/library/`` → ``finding``, ``findings/reports/N-…/`` → ``reportedFinding`` in
-report N); a file whose location disagrees with its stored id is a *move* → a new
-record. grison never creates the report itself. Every remote write is snapshot-backed.
+report N); a file whose location disagrees with its stored id is a *move*. A tier
+change (library ↔ instance) makes a new record, since the two live in different GW
+tables; a same-table cross-report move (``reportedFinding`` → a different report, no
+other local file still claiming the old id) **reparents the existing record** instead
+of forking a duplicate. grison never creates the report itself. Every remote write is
+snapshot-backed.
 """
 
 from __future__ import annotations
@@ -21,8 +25,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from grison.markdown import DocumentError, finding_to_markdown, markdown_to_finding
-from grison.model import EvidenceGwRef, EvidenceItem, Finding
+from grison.markdown import (
+    DocumentError,
+    extract_gw_identity,
+    finding_to_markdown,
+    markdown_to_finding,
+)
+from grison.model import (
+    EvidenceGwRef,
+    EvidenceItem,
+    Finding,
+    check_finding_type_drift,
+    check_severity_drift,
+    parse_cvss,
+)
 from grison.remote.gwmap import (
     content_hash,
     evidence_basename,
@@ -99,6 +115,17 @@ def _classify_evidence_meta(base: str | None, local: str, remote: str) -> str:
     if local == base:
         return "remote_ahead"
     return "collision"
+
+
+def _surface_remote_losses(
+    result: SyncResult, root: Path, path: Path, losses: list[str]
+) -> None:
+    """Drain buffered on_loss messages (gwmap html->md, tagged with field name) into
+    ``result.warnings`` — called only where ``remote_f`` is actually written to disk
+    (a pull or a collision sidecar), never for a build that was only used to compare
+    hashes, so a permanently-unconvertible remote construct doesn't re-warn every sync."""
+    for msg in losses:
+        result.warnings.append(f"{_rel(root, path)}: {msg}")
 
 
 def _evidence_meta_collision_msg(rel_path: str, evfile: str) -> str:
@@ -332,6 +359,7 @@ class SyncResult:
     repaired: list[Path] = field(default_factory=list)  # converged under a stale base
     collisions: list[Path] = field(default_factory=list)  # changed on both sides (sidecar written)
     invalid: list[Path] = field(default_factory=list)  # id set, base missing — broken link
+    corrupt: list[tuple[Path, str]] = field(default_factory=list)  # fails parse/validation
     skipped: list[tuple[Path, str]] = field(default_factory=list)
     evidence_up: int = 0
     evidence_down: int = 0
@@ -339,6 +367,9 @@ class SyncResult:
     snapshot_dir: Path | None = None
     mass_change_blocked: bool = False
     errors: list[str] = field(default_factory=list)
+    # non-fatal: canonicalized/dropped constructs (converter on_loss), recomputed cvss
+    # scores, etc — surfaced but never flip the exit code by themselves.
+    warnings: list[str] = field(default_factory=list)
 
 
 def _tier(loc_table: str) -> str:
@@ -390,15 +421,35 @@ class _Plan:
     note: str = ""
     # --force-local/--force-remote: evidence 3-way picks a side, not a collision
     forced: bool = False
+    # on_loss messages from building remote_f (gwmap html->md) — only surfaced to
+    # result.warnings when this plan actually writes remote_f to disk (pull/collision),
+    # never for a plan that only used remote_f for hash comparison (push/clean/repair),
+    # so a permanently-unconvertible remote construct doesn't re-warn every sync.
+    remote_losses: list[str] = field(default_factory=list)
 
 
 def _scan_synced(
     root: Path, result: SyncResult, *, on_event: Callable[[str], None] | None = None
-) -> tuple[list[_Local], set[tuple[str, int]]]:
-    """Scan synced trees → local records + the set of duplicate identities (trip-wire)."""
+) -> tuple[list[_Local], set[tuple[str, int]], set[tuple[str, int]], set[tuple[str, int]]]:
+    """Scan synced trees → local records + the set of duplicate identities (trip-wire) +
+    identities claimed by corrupt files + identities owned by a location-agreeing file.
+
+    Returns ``(locals, dups, claimed, agreeing)``:
+
+    * ``dups`` — an identity two *agreeing* local files both claim (existing trip-wire).
+    * ``claimed`` — identities pulled from the raw frontmatter of a file that failed
+      full parse/validation (corrupt-file guard, gw-pull F1): even though the file
+      itself can't be trusted, its remote identity still is, so the remote-only pull
+      loop below must not re-materialize a fresh copy over the broken file.
+    * ``agreeing`` — ``set(seen)`` — every identity legitimately owned by a file whose
+      location agrees with its own ``grison.gw`` fields, used by :func:`_classify` to
+      tell a genuine cross-report move (no other local claimant) from a copy (the
+      original still lives at its home location).
+    """
     locals_: list[_Local] = []
     seen: dict[tuple[str, int], Path] = {}
     dups: set[tuple[str, int]] = set()
+    claimed: set[tuple[str, int]] = set()
     for sub in ("findings/library", "findings/reports"):
         base = root / sub
         if not base.exists():
@@ -414,10 +465,19 @@ def _scan_synced(
                 _emit(on_event, f"skip {_rel(root, md)}: non-conforming path")
                 continue
             try:
-                f = markdown_to_finding(md.read_text(encoding="utf-8"))
-            except (DocumentError, ValueError, OSError) as e:
-                result.errors.append(f"{md}: {e}")
-                _emit(on_event, f"error {_rel(root, md)}: {e}")
+                text = md.read_text(encoding="utf-8")
+            except OSError as e:
+                result.corrupt.append((md, str(e)))
+                _emit(on_event, f"corrupt {_rel(root, md)}: {e}")
+                continue
+            try:
+                f = markdown_to_finding(text)
+            except (DocumentError, ValueError) as e:
+                identity = extract_gw_identity(text)
+                if identity is not None:
+                    claimed.add(identity)
+                result.corrupt.append((md, str(e)))
+                _emit(on_event, f"corrupt {_rel(root, md)}: {e}")
                 continue
             loc_table, loc_report = target
             locals_.append(_Local(md, f, loc_table, loc_report))
@@ -429,7 +489,7 @@ def _scan_synced(
                     _emit(on_event, f"skip {_rel(root, md)}: duplicate identity {key}")
                 else:
                     seen[key] = md
-    return locals_, dups
+    return locals_, dups, claimed, set(seen)
 
 
 def _relocate(f: Finding, loc_table: str, loc_report: int | None) -> Finding:
@@ -459,6 +519,7 @@ def _classify(
     force_local: set[Path],
     force_remote: set[Path],
     dups: set[tuple[str, int]],
+    agreeing: set[tuple[str, int]],
 ) -> _Plan:
     f = lr.finding
     gw = f.grison.gw
@@ -489,6 +550,24 @@ def _classify(
                 "skip", lr,
                 note="library findings can't carry evidence/affected_entities — remove them first",
             )
+        move_key = (lr.loc_table, gw.id)
+        if (
+            gw.table == "reportedFinding"
+            and lr.loc_table == "reportedFinding"
+            and move_key not in agreeing
+            and f.grison.synced is not None
+            and f.grison.synced.hash is not None
+        ):
+            # same record, only report_id disagrees, and no other local file still
+            # claims this id at its home location → a genuine cross-report move
+            # (gw-pull F2): reparent via push (finding_to_gw_fields already sends the
+            # new reportId), not a fresh insert that would fork a duplicate remotely.
+            # A file still present at the old location (a copy, not a move) keeps the
+            # old insert-a-new-record behavior via the ``move_key not in agreeing`` guard.
+            rec = remote_index.get(move_key)
+            if rec is not None:
+                gw.report_id = lr.loc_report
+                return _Plan("push", lr, move_key, rec)
         return _Plan("insert", lr)  # moved between cells → new record at the location target
     if f.grison.synced is None or f.grison.synced.hash is None:
         return _Plan("invalid", lr, key)  # id set, agrees, no base → broken link
@@ -521,8 +600,14 @@ def _classify(
     local_hash = content_hash(f)
     ev_rows = ev_by_finding.get(rec["id"]) if lr.loc_table == "reportedFinding" else None
     ev_names = ev_names_by_report.get(rec.get("reportId")) if ev_rows else None
+    # buffered, not surfaced yet: this build is needed for the hash comparison below on
+    # EVERY sync regardless of outcome, so an on_loss firing here must not become a
+    # result.warnings entry unless the outcome actually writes remote_f to disk (pull/
+    # collision) — see _Plan.remote_losses.
+    losses: list[str] = []
     remote_f = gw_record_to_finding(rec, tier=_tier(lr.loc_table), evidence_rows=ev_rows,
-                                    evidence_names=ev_names, tags=tag_map.get(key))
+                                    evidence_names=ev_names, tags=tag_map.get(key),
+                                    on_loss=losses.append)
     remote_hash = content_hash(remote_f)
     if local_hash == base and remote_hash == base:
         # clean prose, but a prior upload may have failed mid-batch, an image's bytes
@@ -535,14 +620,14 @@ def _classify(
     if local_hash != base and remote_hash == base:
         return _Plan("push", lr, key, rec)
     if local_hash == base and remote_hash != base:
-        return _Plan("pull", lr, key, rec, remote_f=remote_f)
+        return _Plan("pull", lr, key, rec, remote_f=remote_f, remote_losses=losses)
     if local_hash == remote_hash:
         # both moved but converged / stale base — still check evidence-only drift, same as
         # the clean branch above, since it's invisible to content_hash either way
         if lr.loc_table == "reportedFinding" and _evidence_needs_push(f, lr.path, ev_rows):
             return _Plan("push", lr, key, rec)
         return _Plan("repair", lr, key, rec)
-    return _Plan("collision", lr, key, rec, remote_f=remote_f)
+    return _Plan("collision", lr, key, rec, remote_f=remote_f, remote_losses=losses)
 
 
 def sync(
@@ -559,6 +644,13 @@ def sync(
     force_local = force_local or set()
     force_remote = force_remote or set()
     result = SyncResult()
+
+    # Severity/finding-type tripwire: grison.model.enums hardcodes the GW lookup-table
+    # gw_ids at import time (never re-derived per instance) — verify them against this
+    # instance before touching any finding, so a drifted/unknown row aborts loudly
+    # instead of silently mis-mapping every severity/finding-type synced afterward.
+    check_severity_drift(client.fetch_finding_severities())
+    check_finding_type_drift(client.fetch_finding_types())
 
     _emit(on_event, "pulling remote state from ghostwriter…")
     reports = {r["id"]: r for r in client.fetch_reports()}
@@ -578,15 +670,18 @@ def sync(
     n_lib, n_rep, n_reports = len(findings), len(reported), len(reports)
     _emit(on_event, f"remote: {n_lib} library findings, {n_rep} reported, {n_reports} reports")
 
-    locals_, dups = _scan_synced(root, result, on_event=on_event)
+    locals_, dups, claimed, agreeing = _scan_synced(root, result, on_event=on_event)
     _emit(on_event, f"reconciling {len(locals_)} records…")
 
     plans: list[_Plan] = []
-    matched: set[tuple[str, int]] = set()
+    # identities claimed by a corrupt file's raw frontmatter (gw-pull F1) — the file
+    # itself never became a _Local, so seed `matched` with them up front rather than
+    # only adding to it as plans are classified below.
+    matched: set[tuple[str, int]] = set(claimed)
     for lr in locals_:
         try:
             plan = _classify(lr, remote_index, ev_by_finding, ev_names_by_report, tag_map,
-                             force_local, force_remote, dups)
+                             force_local, force_remote, dups, agreeing)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
             result.errors.append(f"{lr.path}: {e}")
             _emit(on_event, f"error {_rel(root, lr.path)}: {e}")
@@ -607,19 +702,23 @@ def sync(
         try:
             table, _id = key
             tier = _tier(table)
+            losses: list[str] = []
             remote_f = gw_record_to_finding(
                 rec, tier=tier, evidence_rows=ev_by_finding.get(rec["id"]),
                 evidence_names=(
                     ev_names_by_report.get(rec.get("reportId")) if tier == "instance" else None
                 ),
-                tags=tag_map.get(key),
+                tags=tag_map.get(key), on_loss=losses.append,
             )
             new_path = _remote_target_path(root, remote_f, rec, reports, lib_slugs)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
             result.errors.append(f"{key[0]} {key[1]}: {e}")
             _emit(on_event, f"error {key[0]} {key[1]}: {e}")
             continue
-        plans.append(_Plan("pull", None, key, rec, remote_f=remote_f, new_path=new_path))
+        plans.append(
+            _Plan("pull", None, key, rec, remote_f=remote_f, new_path=new_path,
+                 remote_losses=losses)
+        )
 
     # duplicate-move trip-wire: two files relocated to the SAME target still carrying the
     # same source id would each insert a separate remote record — stop them.
@@ -709,6 +808,7 @@ def _apply(
             sidecar = lr.path.with_suffix(".remote.md")
             sidecar.write_text(finding_to_markdown(plan.remote_f), encoding="utf-8")
             _emit(on_event, f"collision {_rel(root, lr.path)} → sidecar written")
+            _surface_remote_losses(result, root, sidecar, plan.remote_losses)
         result.collisions.append(lr.path)
     elif action == "repair":
         tense = "would " if dry_run else ""
@@ -740,15 +840,17 @@ def _apply_pull(
         _emit(on_event, f"would pull {_rel(root, path)}")
         return
     remote_f = plan.remote_f
+    losses = plan.remote_losses
     if remote_f is None:
         tier = _tier(plan.key[0])
+        losses = []
         remote_f = gw_record_to_finding(
             plan.rec, tier=tier,
             evidence_rows=ev_by_finding.get(plan.rec["id"]),
             evidence_names=(
                 ev_names_by_report.get(plan.rec.get("reportId")) if tier == "instance" else None
             ),
-            tags=tag_map.get(plan.key),
+            tags=tag_map.get(plan.key), on_loss=losses.append,
         )
     if plan.local is not None:
         # --force-remote (plan.forced) picks remote unconditionally for every image,
@@ -766,6 +868,7 @@ def _apply_pull(
     result.pulled.append(path)  # local write succeeded — now safe to report as pulled
     _emit(on_event, f"pull {_rel(root, path)}")
     result.evidence_down += evidence_down
+    _surface_remote_losses(result, root, path, losses)
     _clear_sidecar(path)  # collision resolved via --force-remote
 
 
@@ -873,6 +976,23 @@ def _push_tags(
     client.set_tags(f.grison.gw.id, table, desired)
 
 
+def _reconcile_cvss_score(f: Finding) -> str | None:
+    """Never push a ``cvss.score`` that disagrees with ``parse_cvss(vector).base_score``
+    (F3/cvss-score-unhashed) — the base score is a pure function of the vector, so a
+    stale or hand-edited score riding along a push would land a mathematically
+    inconsistent pair on Ghostwriter. Recomputes ``f.cvss.score`` in place (the caller's
+    subsequent ``_finalize`` persists the correction to the local file too) and returns
+    a warning message when a correction happened, ``None`` when already consistent."""
+    if f.cvss is None:
+        return None
+    correct = parse_cvss(f.cvss.vector).base_score
+    if f.cvss.score == correct:
+        return None
+    stale = f.cvss.score
+    f.cvss.score = correct
+    return f"cvss score {stale} disagreed with vector-derived {correct} — recomputed"
+
+
 def _apply_push(
     plan: _Plan, client: GhostwriterClient, snap: Snapshot, result: SyncResult,
     ev_by_finding: dict[int, list[dict]], tag_map: dict[tuple[str, int], list[str]],
@@ -885,6 +1005,9 @@ def _apply_push(
         _emit(on_event, f"would push {_rel(root, lr.path)}")
         return
     f = lr.finding
+    score_warn = _reconcile_cvss_score(f)
+    if score_warn:
+        result.warnings.append(f"{_rel(root, lr.path)}: {score_warn}")
     pre = gw_pre_image(plan.rec, tier=_tier(lr.loc_table))
     snap.before_update(lr.loc_table, f.grison.gw.id, pre)
     fields = finding_to_gw_fields(f)
@@ -912,6 +1035,9 @@ def _apply_insert(
         _emit(on_event, f"would insert {_rel(root, lr.path)}")
         return
     f = _relocate(lr.finding, lr.loc_table, lr.loc_report)
+    score_warn = _reconcile_cvss_score(f)
+    if score_warn:
+        result.warnings.append(f"{_rel(root, lr.path)}: {score_warn}")
     fields = finding_to_gw_fields(f)
     if lr.loc_table == "finding":
         new_id = client.insert_finding(fields)

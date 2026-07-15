@@ -157,3 +157,22 @@ def test_force_remote_resolves_collision(tmp_path: Path) -> None:
 def json_undo(snapshot_dir: Path) -> list[dict]:
     import json
     return json.loads((snapshot_dir / "undo.json").read_text())
+
+
+# --- warnings wiring: dropped constructs surface on pull, not on every unrelated sync -----
+
+
+def test_pull_surfaces_dropped_styling_span_as_warning_once(tmp_path: Path) -> None:
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {
+        "executive_summary": (
+            '<p><span data-color="#ff0000" style="color: #ff0000;">urgent</span></p>'
+        ),
+    })
+    r = sync_reports(tmp_path, fake)
+    es = _sec(tmp_path, 6, "acme", "executive_summary")
+    assert es in r.pulled
+    assert any("executive_summary" in w and "styling span dropped" in w for w in r.warnings)
+
+    r2 = sync_reports(tmp_path, fake)  # nothing changed — must not re-warn every routine sync
+    assert r2.warnings == [] and es in r2.unchanged

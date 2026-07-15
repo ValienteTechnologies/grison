@@ -76,3 +76,64 @@ _FINDING_TYPE_GW_ID: dict[FindingType, int] = {
     FindingType.HOST: 7,
 }
 _FINDING_TYPE_BY_GW_ID: dict[int, FindingType] = {v: k for k, v in _FINDING_TYPE_GW_ID.items()}
+
+
+class EnumDriftError(RuntimeError):
+    """Raised when Ghostwriter's live ``findingSeverity``/``findingType`` lookup tables
+    disagree with the hardcoded gw_id maps above. Those ids are baked in at import
+    time (never re-derived per instance), so a per-install re-seed or a Ghostwriter
+    schema change that renumbers either table would otherwise silently mis-map every
+    severity/finding-type on every record synced afterward — this is checked once, up
+    front, so a real drift aborts loudly naming the row instead."""
+
+
+def check_severity_drift(rows: list[dict]) -> None:
+    """Verify live ``findingSeverity`` rows (``{id, severity, weight}``) against
+    :data:`_SEVERITY_GW_ID`. Only the ``id -> severity name`` mapping is asserted —
+    ``weight`` is fetched for context but not itself checked, since its exact live
+    values aren't a documented contract, just internal GW sort order."""
+    by_id = {row["id"]: row for row in rows}
+    for sev, gw_id in _SEVERITY_GW_ID.items():
+        row = by_id.get(gw_id)
+        if row is None:
+            raise EnumDriftError(
+                f"findingSeverity id {gw_id} ({sev.value}) is missing on the live instance"
+            )
+        live = str(row.get("severity") or "").strip().lower()
+        if live != sev.value:
+            raise EnumDriftError(
+                f"findingSeverity drift: live id {gw_id} is {row.get('severity')!r}, "
+                f"grison expects {sev.value!r} — the severity gw_id map has drifted"
+            )
+    known_ids = set(_SEVERITY_GW_ID.values())
+    for row in rows:
+        if row["id"] not in known_ids:
+            raise EnumDriftError(
+                f"findingSeverity: unknown live row id {row['id']} "
+                f"({row.get('severity')!r}) — not in grison's severity map"
+            )
+
+
+def check_finding_type_drift(rows: list[dict]) -> None:
+    """Verify live ``findingType`` rows (``{id, finding_type}``) against
+    :data:`_FINDING_TYPE_GW_ID` — same shape as :func:`check_severity_drift`."""
+    by_id = {row["id"]: row for row in rows}
+    for ft, gw_id in _FINDING_TYPE_GW_ID.items():
+        row = by_id.get(gw_id)
+        if row is None:
+            raise EnumDriftError(
+                f"findingType id {gw_id} ({ft.value}) is missing on the live instance"
+            )
+        live = str(row.get("finding_type") or "").strip().lower()
+        if live != ft.value:
+            raise EnumDriftError(
+                f"findingType drift: live id {gw_id} is {row.get('finding_type')!r}, "
+                f"grison expects {ft.value!r} — the finding-type gw_id map has drifted"
+            )
+    known_ids = set(_FINDING_TYPE_GW_ID.values())
+    for row in rows:
+        if row["id"] not in known_ids:
+            raise EnumDriftError(
+                f"findingType: unknown live row id {row['id']} "
+                f"({row.get('finding_type')!r}) — not in grison's finding-type map"
+            )

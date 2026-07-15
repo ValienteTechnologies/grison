@@ -186,7 +186,8 @@ def sync(
         bad = bool(phase_errors)
         if result is not None:
             bad = bad or bool(
-                result.collisions or result.invalid or result.mass_change_blocked or result.errors
+                result.collisions or result.invalid or result.corrupt
+                or result.mass_change_blocked or result.errors
             )
         if rep is not None:
             bad = bad or bool(rep.collisions or rep.mass_change_blocked or rep.errors)
@@ -306,6 +307,8 @@ def _print_report_summary(rep: ReportResult, *, dry_run: bool) -> None:
         typer.secho(f"skipped  {p}: {reason}", fg=typer.colors.YELLOW)
     for e in rep.errors:
         typer.secho(f"  error: {e}", fg=typer.colors.RED)
+    for w in rep.warnings:
+        typer.secho(f"  warning: {w}", dim=True)
 
 
 def _print_sync_summary(result: SyncResult, *, dry_run: bool) -> None:
@@ -342,10 +345,18 @@ def _print_sync_summary(result: SyncResult, *, dry_run: bool) -> None:
                     "--force-remote/--force-local:", fg=typer.colors.RED)
         for p in result.invalid:
             typer.echo(f"  ? {p}")
+    if result.corrupt:
+        typer.secho(
+            f"{len(result.corrupt)} corrupt local file(s) — fix and re-sync:", fg=typer.colors.RED
+        )
+        for p, msg in result.corrupt:
+            typer.echo(f"  ✕ {p}: {msg}")
     for p, reason in result.skipped:
         typer.secho(f"skipped  {p}: {reason}", fg=typer.colors.YELLOW)
     for e in result.errors:
         typer.secho(f"  error: {e}", fg=typer.colors.RED)
+    for w in result.warnings:
+        typer.secho(f"  warning: {w}", dim=True)
 
 
 def _resolve_md(paths: list[Path]) -> list[Path]:

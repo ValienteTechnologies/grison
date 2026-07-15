@@ -152,10 +152,43 @@ confirmation prompts, `--dry-run` is opt-in. Three layers:
 
 Ghostwriter's rich-text fields use a small closed vocabulary, and the converter fails
 loudly on anything outside it rather than corrupt silently. Inline: `**bold**`,
-`` `code` ``, `*em*`, `[links](…)`. Block: paragraphs and unordered lists. Rejected
-inside a field: tables, ordered lists, images, headings (the `##` section headers are
-grison structure mapping to Ghostwriter's separate fields, not field content).
-BookStack pages are markdown-native and mirror verbatim, no conversion.
+`` `code` ``, `*em*`, `[links](…)`. Block: paragraphs and unordered lists (one level
+of `  - ` sub-bullets). Rejected inside a field: tables, ordered lists, images,
+headings (the `##` section headers are grison structure mapping to Ghostwriter's
+separate fields, not field content). Constructs grison canonicalizes on purpose —
+editor highlight spans, non-standard link `rel`/`target` — are reported as sync
+warnings when dropped, never absorbed silently. BookStack pages are markdown-native
+and mirror verbatim, no conversion; pages authored in the WYSIWYG editor are skipped
+loudly until converted to markdown in BookStack.
+
+## What syncs, what doesn't
+
+Every remote field has an explicit verdict — "not synced" always means grison can
+neither lose it nor damage it (partial updates never touch unlisted columns).
+
+**Two-way synced (in the merge base — edits on either side propagate, both-changed
+collides):** finding title, severity, type, CVSS vector + score, all five prose
+sections, affected entities; tags and CWE ids (Ghostwriter's tag table, `CWE:<n>`
+convention); evidence images with caption / friendly name / description (per-image
+merge base); report narrative sections (`report.extraFields`), each section its own
+merge base; BookStack page body, name, priority, tags, and chapter/book location.
+
+**Mirrored read-only (pull-only; local edits are detected and rejected, never
+silently discarded):** report metadata (`.report.yml` — project, client, dates,
+lifecycle flags); BookStack book/chapter/shelf structure (`.book.yml`,
+`.chapter.yml`, `.shelves/*.yml` — carry a READ-ONLY header; hand-edits error with a
+`.remote.yml` sidecar).
+
+**Deliberately not synced (remote-owned, unreachable by grison's writes):**
+Ghostwriter report-finding `position` (per-severity kanban order, server renumbers),
+`complete`/`assignedTo` QA state, finding/report comments, Observations,
+report templates and `reportConfiguration`, report-level evidence rows (never
+deleted by grison), dead-in-corpus columns (`hostDetectionTechniques`,
+`networkDetectionTechniques`, `findingGuidance`, per-finding `extraFields`);
+BookStack container tags/covers/templates, page `template` flag, revision history.
+Renaming books/chapters happens in BookStack, not by renaming local dirs (a rename
+tripwire blocks the ambiguous case). Severity/finding-type id mappings are verified
+against the live instance at sync start and abort on drift.
 
 ## Configuration
 

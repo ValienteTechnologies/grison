@@ -65,6 +65,25 @@ query {
 }
 """
 
+_FINDING_SEVERITY_QUERY = """
+query {
+  findingSeverity {
+    id
+    severity
+    weight
+  }
+}
+"""
+
+_FINDING_TYPE_LOOKUP_QUERY = """
+query {
+  findingType {
+    id
+    finding_type
+  }
+}
+"""
+
 _CONTENT_TYPES_QUERY = """
 query {
   djangoContentType(
@@ -275,6 +294,18 @@ class GhostwriterClient:
 
     def fetch_reports(self) -> list[dict]:
         return self._post(_REPORT_QUERY)["report"]
+
+    def fetch_finding_severities(self) -> list[dict]:
+        """``{id, severity, weight}`` rows — the live source of truth checked at sync
+        start against grison's hardcoded severity gw_id map (severity/finding-type
+        drift tripwire)."""
+        return self._post(_FINDING_SEVERITY_QUERY)["findingSeverity"]
+
+    def fetch_finding_types(self) -> list[dict]:
+        """``{id, finding_type}`` rows (``finding_type`` is snake_case on this lookup
+        table, unlike most GW field names — a live schema quirk, same idiom as
+        ``replication_steps``)."""
+        return self._post(_FINDING_TYPE_LOOKUP_QUERY)["findingType"]
 
     def _resolve_content_types(self) -> dict[str, int]:
         """``{"finding": id, "reportedFinding": id}`` — content-type ids are per-install,

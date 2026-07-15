@@ -15,6 +15,7 @@ import hashlib
 import json
 import re
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
@@ -36,12 +37,15 @@ def clean_gw_html(html: str) -> str:
     return _HEADING_RE.sub(lambda m: f"<{m.group(1)}p>", html or "")
 
 
-def _field_to_md(html: str | None) -> str:
+def _field_to_md(
+    html: str | None, field: str = "", on_loss: Callable[[str], None] | None = None
+) -> str:
     if not html or not html.strip():
         return ""
     # Strip to canonical form so Finding -> md -> Finding is identity (the document
     # layer stores prose stripped).
-    return html_to_md(clean_gw_html(html)).strip()
+    tagged = (lambda msg: on_loss(f"{field}: {msg}")) if on_loss else None
+    return html_to_md(clean_gw_html(html), on_loss=tagged).strip()
 
 
 def evidence_basename(ev: dict) -> str:
@@ -119,12 +123,18 @@ def gw_record_to_finding(
     evidence_rows: list[dict] | None = None,
     evidence_names: Counter | None = None,
     tags: list[str] | None = None,
+    on_loss: Callable[[str], None] | None = None,
 ) -> Finding:
     """Build a (not-yet-synced) house Finding from a GW ``finding``/``reportedFinding`` row.
 
     ``tags`` is this record's raw GW tag-name list (from
     ``GhostwriterClient.fetch_tag_map()``, keyed by ``(table, id)`` by the caller) —
-    split into ``cwe``/``tags`` here (see :func:`_split_remote_tags`)."""
+    split into ``cwe``/``tags`` here (see :func:`_split_remote_tags`).
+
+    ``on_loss``, if given, is called once per dropped/canonicalized construct
+    (styling spans, non-canonical link rel/target — see
+    :func:`grison.markdown.converter.html_to_md`) across every prose field, each
+    message prefixed with the field name it came from (e.g. ``"impact: ..."``)."""
     gw: dict = {
         "table": "finding" if tier == "library" else "reportedFinding",
         "id": rec["id"],
@@ -135,7 +145,11 @@ def gw_record_to_finding(
     vec = (rec.get("cvssVector") or "").strip()
     cvss = {"vector": vec, "score": rec.get("cvssScore")} if vec else None
 
-    affected = _field_to_md(rec.get("affectedEntities")) if tier == "instance" else None
+    affected = (
+        _field_to_md(rec.get("affectedEntities"), "affected_entities", on_loss)
+        if tier == "instance"
+        else None
+    )
     ev_entries = (
         _evidence_entries(evidence_rows, evidence_names)
         if (tier == "instance" and evidence_rows)
@@ -153,11 +167,13 @@ def gw_record_to_finding(
         "affected_entities": affected or None,
         "evidence": ev_entries,
         "title": (rec.get("title") or "").strip() or "Untitled finding",
-        "description": _field_to_md(rec.get("description")),
-        "impact": _field_to_md(rec.get("impact")),
-        "mitigation": _field_to_md(rec.get("mitigation")),
-        "replication_steps": _field_to_md(rec.get("replication_steps")),
-        "references": _field_to_md(rec.get("references")),
+        "description": _field_to_md(rec.get("description"), "description", on_loss),
+        "impact": _field_to_md(rec.get("impact"), "impact", on_loss),
+        "mitigation": _field_to_md(rec.get("mitigation"), "mitigation", on_loss),
+        "replication_steps": _field_to_md(
+            rec.get("replication_steps"), "replication_steps", on_loss
+        ),
+        "references": _field_to_md(rec.get("references"), "references", on_loss),
     }
     return Finding.model_validate(data)
 
@@ -173,6 +189,10 @@ def _syncable_view(finding: Finding) -> dict:
         "severity": finding.severity.value,
         "finding_type": finding.finding_type.value,
         "cvss_vector": finding.cvss.vector if finding.cvss else None,
+        # a stored score that disagrees with the vector is real drift (F3/cvss-score-
+        # unhashed) — a score-only edit must classify push, a vector-only edit that
+        # leaves a now-stale score behind must too (sync.py recomputes+warns on push).
+        "cvss_score": finding.cvss.score if finding.cvss else None,
         # sorted: a pure reorder isn't a content change (GW tags are a set, not a list).
         "cwe": sorted(finding.cwe),
         "tags": sorted(finding.tags),

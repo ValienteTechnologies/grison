@@ -11,6 +11,7 @@ from __future__ import annotations
 from grison.markdown.converter import ConverterError, html_to_md, md_to_html
 from grison.markdown.document import (
     DocumentError,
+    extract_gw_identity,
     finding_to_markdown,
     markdown_to_finding,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "DocumentError",
     "MappingResult",
     "default_finding_type",
+    "extract_gw_identity",
     "finding_to_markdown",
     "html_to_md",
     "ir_to_finding",

@@ -145,6 +145,34 @@ def test_fetch_reports_parses_data_report() -> None:
     assert rows == _REPORT_ROWS
 
 
+_FINDING_SEVERITY_ROWS = [
+    {"id": 1, "severity": "Informational", "weight": 1},
+    {"id": 2, "severity": "Low", "weight": 2},
+]
+_FINDING_TYPE_LOOKUP_ROWS = [
+    {"id": 1, "finding_type": "Network"},
+    {"id": 2, "finding_type": "Physical"},
+]
+
+
+def test_fetch_finding_severities_parses_data() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _gql_response({"findingSeverity": _FINDING_SEVERITY_ROWS})
+
+    with GhostwriterClient(_CREDS, transport=httpx.MockTransport(handler)) as client:
+        rows = client.fetch_finding_severities()
+    assert rows == _FINDING_SEVERITY_ROWS
+
+
+def test_fetch_finding_types_parses_data() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _gql_response({"findingType": _FINDING_TYPE_LOOKUP_ROWS})
+
+    with GhostwriterClient(_CREDS, transport=httpx.MockTransport(handler)) as client:
+        rows = client.fetch_finding_types()
+    assert rows == _FINDING_TYPE_LOOKUP_ROWS
+
+
 def test_requests_carry_auth_and_cf_headers() -> None:
     captured: list[httpx.Request] = []
     with GhostwriterClient(_CREDS, transport=_make_transport(captured)) as client:

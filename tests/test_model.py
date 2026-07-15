@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from grison.model import Finding, FindingType, Severity
+from grison.model import EnumDriftError, Finding, FindingType, Severity
+from grison.model.enums import check_finding_type_drift, check_severity_drift
 
 
 def test_severity_gw_id_roundtrip() -> None:
@@ -25,6 +26,58 @@ def test_finding_type_gw_id_roundtrip() -> None:
         assert FindingType.from_gw_id(t.gw_id) is t
     with pytest.raises(ValueError, match="findingTypeId"):
         FindingType.from_gw_id(0)
+
+
+_OK_SEVERITIES = [
+    {"id": 1, "severity": "Informational", "weight": 1},
+    {"id": 2, "severity": "Low", "weight": 2},
+    {"id": 3, "severity": "Medium", "weight": 3},
+    {"id": 4, "severity": "High", "weight": 4},
+    {"id": 5, "severity": "Critical", "weight": 5},
+]
+_OK_FINDING_TYPES = [
+    {"id": 1, "finding_type": "Network"},
+    {"id": 2, "finding_type": "Physical"},
+    {"id": 3, "finding_type": "Wireless"},
+    {"id": 4, "finding_type": "Web"},
+    {"id": 5, "finding_type": "Mobile"},
+    {"id": 6, "finding_type": "Cloud"},
+    {"id": 7, "finding_type": "Host"},
+]
+
+
+def test_check_severity_drift_ok() -> None:
+    check_severity_drift(_OK_SEVERITIES)  # must not raise
+
+
+def test_check_severity_drift_renamed_row() -> None:
+    rows = [{**r} for r in _OK_SEVERITIES]
+    rows[2] = {"id": 3, "severity": "Moderate", "weight": 3}  # was "Medium"
+    with pytest.raises(EnumDriftError, match="findingSeverity"):
+        check_severity_drift(rows)
+
+
+def test_check_severity_drift_missing_row() -> None:
+    rows = [r for r in _OK_SEVERITIES if r["id"] != 5]
+    with pytest.raises(EnumDriftError, match="findingSeverity"):
+        check_severity_drift(rows)
+
+
+def test_check_severity_drift_unknown_row() -> None:
+    rows = [*_OK_SEVERITIES, {"id": 6, "severity": "Custom", "weight": 6}]
+    with pytest.raises(EnumDriftError, match="unknown"):
+        check_severity_drift(rows)
+
+
+def test_check_finding_type_drift_ok() -> None:
+    check_finding_type_drift(_OK_FINDING_TYPES)  # must not raise
+
+
+def test_check_finding_type_drift_renamed_row() -> None:
+    rows = [{**r} for r in _OK_FINDING_TYPES]
+    rows[3] = {"id": 4, "finding_type": "Application"}  # was "Web"
+    with pytest.raises(EnumDriftError, match="findingType"):
+        check_finding_type_drift(rows)
 
 
 def _library_finding(**over: object) -> dict[str, object]:

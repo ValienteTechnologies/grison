@@ -14,6 +14,7 @@ base is the section's markdown, which is a stable fixed point across md→html�
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -45,9 +46,12 @@ def section_hash(md: str) -> str:
     return "sha256:" + hashlib.sha256(md.strip().encode()).hexdigest()
 
 
-def html_section_to_md(html: str) -> str:
-    """GW extraField HTML → canonical narrative markdown (the merge-base surface)."""
-    return html_to_md(html or "", headings=True).strip()
+def html_section_to_md(html: str, *, on_loss: Callable[[str], None] | None = None) -> str:
+    """GW extraField HTML → canonical narrative markdown (the merge-base surface).
+
+    ``on_loss``, if given, is called once per dropped/canonicalized construct (styling
+    spans, non-canonical link rel/target) — see :func:`grison.markdown.html_to_md`."""
+    return html_to_md(html or "", headings=True, on_loss=on_loss).strip()
 
 
 def md_section_to_html(md: str) -> str:
@@ -55,8 +59,14 @@ def md_section_to_html(md: str) -> str:
     return md_to_html(md.strip(), headings=True)
 
 
-def report_from_record(rec: dict) -> ReportDoc:
-    """Build a ReportDoc from a GW report row (metadata + extraFields sections)."""
+def report_from_record(
+    rec: dict, *, on_loss: Callable[[str, str], None] | None = None
+) -> ReportDoc:
+    """Build a ReportDoc from a GW report row (metadata + extraFields sections).
+
+    ``on_loss``, if given, is called ``on_loss(section_key, message)`` once per
+    dropped/canonicalized construct in that section's HTML (styling spans,
+    non-canonical link rel/target)."""
     project = rec.get("project") or {}
     client = project.get("client") or {}
     meta = {
@@ -82,7 +92,9 @@ def report_from_record(rec: dict) -> ReportDoc:
     for key, value in raw.items():
         if not isinstance(value, str):
             continue  # extraFields is text-valued for narrative; skip any non-string key
-        sections[key] = ReportSection(key=key, body=html_section_to_md(value))
+        section_on_loss = (lambda msg, key=key: on_loss(key, msg)) if on_loss else None
+        body = html_section_to_md(value, on_loss=section_on_loss)
+        sections[key] = ReportSection(key=key, body=body)
     return ReportDoc(
         report_id=rec["id"], title=rec.get("title") or "", meta=meta,
         sections=sections, raw_extra_fields=raw,

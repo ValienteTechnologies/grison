@@ -122,3 +122,30 @@ def markdown_to_finding(text: str) -> Finding:
     for header, field in _SECTIONS:
         data[field] = sections.get(header, "")
     return Finding.model_validate(data)
+
+
+def extract_gw_identity(text: str) -> tuple[str, int] | None:
+    """Best-effort ``(gw.table, gw.id)`` from a document's raw frontmatter, used when
+    the document fails full parse/validation (corrupt-file guard, gw-pull F1) — a
+    broken body or an invalid field must not stop the sync engine from still knowing
+    which remote record this file claims, so the remote-only pull loop doesn't
+    re-materialize it from scratch over the broken file.
+
+    Tolerates every failure shape short of a clean ``(table, id)`` pair: no
+    frontmatter fence, unterminated fence, invalid YAML, non-mapping frontmatter,
+    missing/malformed ``grison.gw`` — all return ``None`` rather than raising.
+    """
+    try:
+        frontmatter, _body = _split_frontmatter(text)
+    except DocumentError:
+        return None
+    gw = frontmatter.get("grison")
+    if not isinstance(gw, dict):
+        return None
+    gw = gw.get("gw")
+    if not isinstance(gw, dict):
+        return None
+    table, gw_id = gw.get("table"), gw.get("id")
+    if table not in ("finding", "reportedFinding") or not isinstance(gw_id, int):
+        return None
+    return table, gw_id

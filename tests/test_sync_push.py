@@ -50,6 +50,26 @@ class FakeGW:
     def set_tags(self, record_id: int, table: str, tags: list[str]) -> None:
         self.tags[(table, record_id)] = list(tags)
 
+    def fetch_finding_severities(self):
+        return [
+            {"id": 1, "severity": "Informational", "weight": 1},
+            {"id": 2, "severity": "Low", "weight": 2},
+            {"id": 3, "severity": "Medium", "weight": 3},
+            {"id": 4, "severity": "High", "weight": 4},
+            {"id": 5, "severity": "Critical", "weight": 5},
+        ]
+
+    def fetch_finding_types(self):
+        return [
+            {"id": 1, "finding_type": "Network"},
+            {"id": 2, "finding_type": "Physical"},
+            {"id": 3, "finding_type": "Wireless"},
+            {"id": 4, "finding_type": "Web"},
+            {"id": 5, "finding_type": "Mobile"},
+            {"id": 6, "finding_type": "Cloud"},
+            {"id": 7, "finding_type": "Host"},
+        ]
+
     def download_evidence(self, evidence_id: int):
         return (f"{evidence_id}.png", self.images[evidence_id])
 
