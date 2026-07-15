@@ -20,7 +20,8 @@ Qualys, sslyze, ZAP.
 ## Install
 
 ```sh
-pipx install grison        # or: uv tool install grison
+pipx install grison            # or: uv tool install grison
+grison --install-completion    # optional: shell tab completion (once, then restart shell)
 ```
 
 For development: `uv sync && uv run pytest` (Python 3.11+, managed with
