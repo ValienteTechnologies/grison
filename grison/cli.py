@@ -33,12 +33,25 @@ app = typer.Typer(
     name="grison",
     help="A markdown hub between security scanners and Ghostwriter + BookStack.",
     no_args_is_help=True,
-    add_completion=False,
 )
 
 
+def _print_version(value: bool) -> None:
+    if value:
+        from grison import __version__
+
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
 @app.callback()
-def _root() -> None:
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_print_version, is_eager=True,
+                     help="Print the version and exit."),
+    ] = False,
+) -> None:
     """grison — parse scanner artifacts to markdown, then status/sync with the remotes."""
 
 
