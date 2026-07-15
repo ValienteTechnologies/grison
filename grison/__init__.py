@@ -1,4 +1,4 @@
-"""grison — a markdown hub between security scanners and Valiente's infra.
+"""grison — a markdown hub between security scanners and Ghostwriter + BookStack.
 
 Everything is a *source*, *transform*, or *sink* of markdown. See the module
 layout (ports & adapters): ``model`` (schema), ``scanners`` (source adapters),
@@ -6,4 +6,4 @@ layout (ports & adapters): ``model`` (schema), ``scanners`` (source adapters),
 ``remote`` (Ghostwriter + BookStack), and ``cli``.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

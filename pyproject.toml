@@ -1,7 +1,7 @@
 [project]
 name = "grison"
-version = "0.1.0"
-description = "A markdown hub between security scanners and Valiente's Ghostwriter + BookStack."
+version = "0.1.1"
+description = "A markdown hub between security scanners and Ghostwriter + BookStack."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Valiente Technologies" }]
