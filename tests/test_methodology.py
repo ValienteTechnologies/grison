@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from grison.remote import snapshot as snapshot_mod
-from grison.remote.bsmap import MethPage, bs_content_hash, markdown_to_page, page_to_markdown
+from grison.remote.bsmap import markdown_to_page
 from grison.remote.methodology import _BSSnapshot, sync_methodology
 
 
@@ -420,27 +420,6 @@ def test_remote_chapter_move_relocates_local_file(tmp_path: Path) -> None:
     assert fake.pages[100]["chapter_id"] == 5
 
 
-def test_legacy_flat_file_migrates_into_chapter(tmp_path: Path) -> None:
-    """A document written before chapter awareness (no chapter_id in frontmatter, hash
-    without chapter/priority) migrates via an ordinary pull-relocation — no collision."""
-    fake = FakeBS()
-    fake.add_chapter(5, "ios", "iOS")
-    fake.seed(100, "auth", "Auth", "body", chapter_id=5, priority=4)
-    legacy = MethPage(page_id=100, book_id=22, book="mobile", title="Auth", body="body")
-    legacy.synced_hash = bs_content_hash(legacy)  # pre-chapter-era merge base
-    legacy.synced_at = "2026-07-14T00:00:00+00:00"
-    flat = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
-    flat.parent.mkdir(parents=True)
-    text = page_to_markdown(legacy)
-    assert "chapter_id" not in text  # sanity: the doc really is pre-chapter-era
-    flat.write_text(text)
-    r = sync_methodology(tmp_path, fake)
-    new = tmp_path / "methodology" / "library" / "mobile" / "ios" / "auth.md"
-    assert (flat, new) in r.moved and not r.collisions
-    assert not flat.exists()
-    parsed = markdown_to_page(new.read_text())
-    assert parsed.chapter_id == 5 and parsed.priority == 4
-
 
 def test_push_does_not_eject_page_from_chapter(tmp_path: Path) -> None:
     """A bare content push of a chaptered page must not send a parent move — the old
@@ -456,28 +435,6 @@ def test_push_does_not_eject_page_from_chapter(tmp_path: Path) -> None:
     assert fake.pages[100]["markdown"] == "edited"
     assert fake.pages[100]["chapter_id"] == 5  # still in its chapter
 
-
-def test_legacy_flat_push_leaves_remote_chapter_alone(tmp_path: Path) -> None:
-    """A pre-chapter-era file at the book root states no chapter intent: pushing its
-    body edit must not eject the remotely chaptered page. The chapter then flows back
-    as a pull-relocation on the next sync."""
-    fake = FakeBS()
-    fake.add_chapter(5, "ios", "iOS")
-    fake.seed(100, "auth", "Auth", "original", chapter_id=5)
-    legacy = MethPage(page_id=100, book_id=22, book="mobile", title="Auth", body="original")
-    legacy.synced_hash = bs_content_hash(legacy)
-    legacy.synced_at = "2026-07-14T00:00:00+00:00"
-    flat = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
-    flat.parent.mkdir(parents=True)
-    flat.write_text(page_to_markdown(legacy).replace("original", "edited"))
-    r = sync_methodology(tmp_path, fake)
-    assert flat in r.pushed
-    assert fake.pages[100]["markdown"] == "edited"
-    assert fake.pages[100]["chapter_id"] == 5  # never ejected
-    r2 = sync_methodology(tmp_path, fake)  # now the chapter flows down
-    new = tmp_path / "methodology" / "library" / "mobile" / "ios" / "auth.md"
-    assert (flat, new) in r2.moved
-    assert fake.pages[100]["markdown"] == "edited"
 
 
 def test_local_chapter_move_pushes(tmp_path: Path) -> None:
@@ -592,25 +549,6 @@ def test_local_tag_edit_pushes(tmp_path: Path) -> None:
     assert fake.pages[100]["tags"] == [{"name": "reviewed", "value": ""}]
     assert page in sync_methodology(tmp_path, fake).unchanged
 
-
-def test_legacy_push_preserves_remote_tags(tmp_path: Path) -> None:
-    """A pre-tag-era doc pushing a body edit must not clear the page's remote tags."""
-    fake = FakeBS()
-    fake.seed(100, "auth", "Auth", "original")
-    fake.pages[100]["tags"] = [{"name": "keep", "value": ""}]
-    legacy = MethPage(page_id=100, book_id=22, book="mobile", title="Auth", body="original")
-    legacy.synced_hash = bs_content_hash(legacy)
-    legacy.synced_at = "2026-07-14T00:00:00+00:00"
-    flat = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
-    flat.parent.mkdir(parents=True)
-    flat.write_text(page_to_markdown(legacy).replace("original", "edited"))
-    r = sync_methodology(tmp_path, fake)
-    assert flat in r.pushed and not r.collisions
-    assert fake.pages[100]["markdown"] == "edited"
-    assert fake.pages[100]["tags"] == [{"name": "keep", "value": ""}]  # never cleared
-    r2 = sync_methodology(tmp_path, fake)  # the tags then flow down
-    assert flat in r2.pulled
-    assert markdown_to_page(flat.read_text()).tags == [{"name": "keep", "value": ""}]
 
 
 def test_remote_reorder_pulls_priority(tmp_path: Path) -> None:

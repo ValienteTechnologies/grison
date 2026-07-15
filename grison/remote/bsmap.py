@@ -1,27 +1,21 @@
 """BookStack page ⇄ local methodology markdown document, and its content hash.
 
-Methodology pages are markdown-native since the 2026-07-14 migration, so — unlike
-Ghostwriter findings — there is no HTML converter: grison mirrors the page's
-``markdown`` field verbatim and PUTs it straight back. The document is YAML
-frontmatter (grison + BookStack ids + the merge base) followed by the page body.
+Methodology pages are markdown-native, so — unlike Ghostwriter findings — there is
+no converter: grison mirrors the page's ``markdown`` field verbatim and PUTs it
+straight back. The document is YAML frontmatter (grison + BookStack ids + the merge
+base) followed by the page body.
 
 Structure is part of the mirror: a page's chapter (BookStack's book > chapter > page
-nesting) and its sort order (``priority``) live in the frontmatter and in the content
-hash. Both hash keys are emitted only when set, so documents written before chapter
-awareness keep their merge base valid — the first chapter-aware sync sees them as
-remote-changed and migrates them via ordinary pulls.
-
-``chapter_id`` is tri-state: ``None`` means the document predates chapter awareness
-(its book-root location says nothing about chapters), ``0`` means deliberately at the
-book root, ``>0`` names the chapter. Push uses this to avoid ejecting a remotely
-chaptered page just because a legacy file sits at the book root.
+nesting), its sort order (``priority``) and its tags live in the frontmatter and in
+the content hash, so structure changes reconcile 3-way exactly like body edits.
+``chapter_id: 0`` means the page sits at the book root.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import yaml
@@ -35,26 +29,27 @@ class MethPage:
     title: str
     body: str  # the page markdown
     chapter: str | None = None  # chapter slug (also the subdirectory); None = book root
-    chapter_id: int | None = None  # None = pre-chapter-era doc; 0 = book root; >0 = chapter
+    chapter_id: int = 0  # 0 = book root
     priority: int | None = None  # BookStack sort order within the parent
-    tags: list[dict] | None = None  # [{"name","value"}]; None = pre-tag-era doc
+    tags: list[dict] = field(default_factory=list)  # [{"name","value"}]
     synced_hash: str | None = None
     synced_at: str | None = None
 
 
 def bs_content_hash(page: MethPage) -> str:
-    """Merge base over the syncable surface: title + book + chapter + priority + body.
-
-    ``chapter``/``priority`` join the payload only when set — pre-chapter-era hashes
-    stay valid, so upgrading grison migrates via pulls instead of collisions."""
-    payload_dict: dict = {"title": page.title, "book": page.book, "body": page.body}
-    if page.chapter:
-        payload_dict["chapter"] = page.chapter
-    if page.priority is not None:
-        payload_dict["priority"] = page.priority
-    if page.tags:
-        payload_dict["tags"] = page.tags
-    payload = json.dumps(payload_dict, sort_keys=True, ensure_ascii=False)
+    """Merge base over the full syncable surface: title + location + order + tags + body."""
+    payload = json.dumps(
+        {
+            "title": page.title,
+            "book": page.book,
+            "chapter": page.chapter or "",
+            "priority": page.priority,
+            "tags": page.tags,
+            "body": page.body,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
     return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -104,8 +99,6 @@ def page_to_markdown(page: MethPage) -> str:
         fm["grison"]["bs"].pop("page_id")
     if page.book_id is None:
         fm["grison"]["bs"].pop("book_id")
-    if page.chapter_id is None:
-        fm["grison"]["bs"].pop("chapter_id")  # chapter_id: 0 stays — it marks chapter awareness
     if page.chapter:
         fm["chapter"] = page.chapter
     if page.priority is not None:
@@ -145,9 +138,9 @@ def markdown_to_page(text: str) -> MethPage:
         title=fm.get("title", ""),
         body=body,
         chapter=fm.get("chapter"),
-        chapter_id=bs.get("chapter_id"),
+        chapter_id=bs.get("chapter_id") or 0,
         priority=fm.get("priority"),
-        tags=_norm_tags(fm["tags"]) if fm.get("tags") is not None else None,
+        tags=_norm_tags(fm.get("tags") or []),
         synced_hash=synced.get("hash"),
         synced_at=at,
     )

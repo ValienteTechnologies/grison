@@ -18,10 +18,9 @@ Doctrine per structure level:
   by *relocating* the local file (no ping-pong), a local chapter move pushes as a
   parent move. Push sends a parent param (``chapter_id``/``book_id``) only when the
   local directory disagrees with the remote parent — a bare content push must never
-  eject a page from its chapter. A file whose frontmatter predates chapter awareness
-  (no ``chapter_id``) states no chapter intent at all.
-* **priority** (sort order) — content: remote reorders pull into frontmatter, local
-  edits push.
+  eject a page from its chapter.
+* **priority** (sort order) and **tags** — content: remote changes pull into
+  frontmatter, local edits push.
 
 Extras BookStack needs: a post-push **literal-artifact scan** (leaked ``**`` /
 ``](http`` that signalled corruption during the migration). Snapshots capture each
@@ -34,7 +33,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -444,17 +443,6 @@ def sync_methodology(
             lpage.book_id = rpage.book_id
             lpage.chapter_id = rpage.chapter_id
             plans.append(_MethPlan("repair", path, lpage))
-        elif (
-            lpage.chapter is None and lpage.chapter_id is None
-            and lpage.priority is None and lpage.tags is None
-            and bs_content_hash(replace(rpage, chapter=None, priority=None, tags=None)) == base
-        ):
-            # pre-structure-era doc: the remote "change" is only newly-visible structure
-            # (chapter/priority/tags the old hash couldn't see) — the local edit is the
-            # only real content change, so it pushes; the structure then flows back down
-            # as an ordinary pull-relocation on the next sync. Not a collision.
-            plans.append(_MethPlan("push", path, lpage, rpage=rpage))
-            planned_writes += 1
         else:
             plans.append(_MethPlan("collision", path, rpage))
 
@@ -511,11 +499,7 @@ def _parent_move(
 ) -> tuple[int | None, int | None]:
     """The parent param (book_id, chapter_id) a push must send — at most one, and only
     when the local directory disagrees with the remote parent. A bare content push must
-    never move the page; in particular it must never eject it from its chapter.
-
-    A file at the book root whose frontmatter predates chapter awareness (chapter_id
-    absent) states no intent — the remote parent is left alone; the chapter then flows
-    down as an ordinary pull-relocation on the next reconcile."""
+    never move the page; in particular it must never eject it from its chapter."""
     cur_book = pre.get("book_id")
     cur_chapter = pre.get("chapter_id") or 0
     if page.chapter:  # file sits in a chapter dir → that chapter is the intent
@@ -526,8 +510,6 @@ def _parent_move(
                 "create the chapter in BookStack first"
             )
         return (None, cid) if cid != cur_chapter else (None, None)
-    if page.chapter_id is None and cur_chapter:
-        return (None, None)  # legacy doc at book root — no chapter intent, don't eject
     if bid != cur_book or cur_chapter:
         return (bid, None)  # deliberate move to this book's root
     return (None, None)
@@ -601,21 +583,18 @@ def _apply(  # noqa: PLR0913
         move_book, move_chapter = _parent_move(page, pre, bid, chap_ids)
         prio = page.priority if page.priority != pre.get("priority") else None
         snap.before_update(page.page_id, pre)
-        # tags go only when the doc is tag-aware — a pre-tag-era doc must not clear them
         client.update_page(page.page_id, markdown=page.body, name=page.title,
                            book_id=move_book, chapter_id=move_chapter, priority=prio,
                            tags=page.tags)
         result.pushed.append(path)
         _emit(on_event, f"push {_rel(root, path)}")
-        # keep frontmatter truthful — the drift witnesses depend on it. A legacy doc
-        # that stated no chapter intent keeps chapter_id unset; the remote chapter
-        # then flows back as an ordinary pull-relocation on the next sync.
+        # keep frontmatter truthful — the drift witnesses depend on it
         page.book_id = bid
         if move_chapter is not None:
             page.chapter_id = move_chapter
         elif move_book is not None:
             page.chapter_id = 0
-        elif page.chapter or page.chapter_id is not None:
+        else:
             page.chapter_id = pre.get("chapter_id") or 0
         stamp(page, now=now)
         path.write_text(page_to_markdown(page), encoding="utf-8")
