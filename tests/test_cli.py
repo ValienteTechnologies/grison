@@ -74,7 +74,9 @@ def test_sync_exit_code_reflects_result_errors(
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
 
-    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+    def fake_run_sync(
+        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
+    ):
         return SyncResult(errors=["findings/library/bad.md: boom"])
 
     monkeypatch.setattr(cli_mod, "run_sync", fake_run_sync)

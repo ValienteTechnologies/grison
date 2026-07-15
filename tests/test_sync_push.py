@@ -494,3 +494,48 @@ def test_instance_to_instance_move_reuploads_evidence(tmp_path: Path) -> None:
     new_row = next(e for e in fake.evidence.values() if e["findingId"] == new_rf["id"])
     moved_f = markdown_to_finding(moved.read_text())
     assert moved_f.evidence[0].gw is not None and moved_f.evidence[0].gw.id == new_row["id"]
+
+
+# --- on_event progress callback ------------------------------------------------------------
+
+
+def test_push_emits_event(tmp_path: Path) -> None:
+    fake = FakeGW()
+    path, rid = _seed_synced(tmp_path, fake, title="Push Event")
+    path.write_text(path.read_text().replace("body", "edited body"))
+    events: list[str] = []
+    r = sync(tmp_path, fake, on_event=events.append)
+    assert path in r.pushed
+    assert f"push {path.relative_to(tmp_path)}" in events
+
+
+def test_pull_emits_event(tmp_path: Path) -> None:
+    fake = FakeGW()
+    fake.insert_finding(finding_to_gw_fields(_finding(title="Pull Event", desc="r")))
+    events: list[str] = []
+    r = sync(tmp_path, fake, on_event=events.append)
+    pulled = tmp_path / "findings" / "library" / "pull-event.md"
+    assert pulled in r.pulled
+    assert f"pull {pulled.relative_to(tmp_path)}" in events
+
+
+def test_collision_emits_event(tmp_path: Path) -> None:
+    fake = FakeGW()
+    path, rid = _seed_synced(tmp_path, fake, title="Collision Event")
+    path.write_text(path.read_text().replace("body", "LOCAL change"))
+    fake.findings[rid]["description"] = "<p>REMOTE change</p>"
+    events: list[str] = []
+    r = sync(tmp_path, fake, on_event=events.append)
+    assert path in r.collisions
+    assert f"collision {path.relative_to(tmp_path)} → sidecar written" in events
+
+
+def test_dry_run_emits_would_prefixed_events(tmp_path: Path) -> None:
+    fake = FakeGW()
+    path, rid = _seed_synced(tmp_path, fake, title="Dry Push")
+    path.write_text(path.read_text().replace("body", "edited body"))
+    events: list[str] = []
+    r = sync(tmp_path, fake, dry_run=True, on_event=events.append)
+    assert path in r.pushed
+    assert any(e.startswith("would push ") for e in events)
+    assert "edited" not in fake.findings[rid]["description"]  # dry-run wrote nothing remotely

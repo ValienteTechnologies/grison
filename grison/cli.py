@@ -146,7 +146,10 @@ def sync(
     fr = {force_remote.resolve()} if force_remote else set()
     with _workspace_lock(root):  # one sync at a time per workspace (GW has no compare-and-swap)
         with GhostwriterClient(creds) as client:
-            result = run_sync(root, client, dry_run=dry_run, force_local=fl, force_remote=fr)
+            result = run_sync(
+                root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
+                on_event=lambda msg: typer.secho(msg, dim=True),
+            )
         _print_sync_summary(result, dry_run=dry_run)
         bad = bool(
             result.collisions or result.invalid or result.mass_change_blocked or result.errors
@@ -154,7 +157,10 @@ def sync(
 
         if creds.bs_url and creds.bs_token_id and creds.bs_token_secret:
             with BookStackClient(creds) as bs:
-                m = sync_methodology(root, bs, dry_run=dry_run, force_local=fl, force_remote=fr)
+                m = sync_methodology(
+                    root, bs, dry_run=dry_run, force_local=fl, force_remote=fr,
+                    on_event=lambda msg: typer.secho(msg, dim=True),
+                )
             _print_meth_summary(m, dry_run=dry_run)
             bad = bad or bool(
                 m.collisions or m.invalid or m.drift or m.artifacts

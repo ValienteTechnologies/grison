@@ -115,3 +115,20 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
     r = pull(tmp_path, FakeGW(), dry_run=True)
     assert len(r.written) == 2  # would-write reported
     assert not (tmp_path / "findings" / "library" / "lib-a.md").exists()
+
+
+def test_pull_emits_progress_events(tmp_path: Path) -> None:
+    events: list[str] = []
+    r = pull(tmp_path, FakeGW(), on_event=events.append)
+    assert len(r.written) == 2
+    assert any("pulling remote state from ghostwriter" in e for e in events)
+    assert any(e.startswith("remote: ") for e in events)
+    libf = tmp_path / "findings" / "library" / "lib-a.md"
+    assert f"pull {libf.relative_to(tmp_path)}" in events
+
+
+def test_pull_dry_run_emits_would_prefixed_events(tmp_path: Path) -> None:
+    events: list[str] = []
+    r = pull(tmp_path, FakeGW(), dry_run=True, on_event=events.append)
+    assert len(r.written) == 2
+    assert any(e.startswith("would pull ") for e in events)

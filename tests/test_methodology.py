@@ -288,3 +288,56 @@ def test_snapshot_rollback(tmp_path: Path) -> None:
     assert fake.pages[100]["markdown"] == "changed"
     snap.rollback(fake)
     assert fake.pages[100]["markdown"] == "original"
+
+
+# --- on_event progress callback ------------------------------------------------------------
+
+
+def test_push_emits_event(tmp_path: Path) -> None:
+    fake = FakeBS()
+    fake.seed(100, "auth", "Auth", "original")
+    sync_methodology(tmp_path, fake)
+    page = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
+    page.write_text(page.read_text().replace("original", "edited body"))
+    events: list[str] = []
+    r = sync_methodology(tmp_path, fake, on_event=events.append)
+    assert page in r.pushed
+    assert f"push {page.relative_to(tmp_path)}" in events
+
+
+def test_pull_emits_event(tmp_path: Path) -> None:
+    fake = FakeBS()
+    fake.seed(100, "auth", "Auth", "body")
+    events: list[str] = []
+    r = sync_methodology(tmp_path, fake, on_event=events.append)
+    page = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
+    assert page in r.pulled
+    assert f"pull {page.relative_to(tmp_path)}" in events
+    assert any("pulling bookstack state" in e for e in events)
+    assert any(e.startswith("bookstack: ") for e in events)
+
+
+def test_collision_emits_event(tmp_path: Path) -> None:
+    fake = FakeBS()
+    fake.seed(100, "auth", "Auth", "base")
+    sync_methodology(tmp_path, fake)
+    page = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
+    page.write_text(page.read_text().replace("base", "LOCAL"))
+    fake.pages[100]["markdown"] = "REMOTE"
+    events: list[str] = []
+    r = sync_methodology(tmp_path, fake, on_event=events.append)
+    assert page in r.collisions
+    assert f"collision {page.relative_to(tmp_path)} → sidecar written" in events
+
+
+def test_dry_run_emits_would_prefixed_events(tmp_path: Path) -> None:
+    fake = FakeBS()
+    fake.seed(100, "auth", "Auth", "original")
+    sync_methodology(tmp_path, fake)
+    page = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
+    page.write_text(page.read_text().replace("original", "edited body"))
+    events: list[str] = []
+    r = sync_methodology(tmp_path, fake, dry_run=True, on_event=events.append)
+    assert page in r.pushed
+    assert any(e.startswith("would push ") for e in events)
+    assert fake.pages[100]["markdown"] == "original"  # dry-run wrote nothing remotely

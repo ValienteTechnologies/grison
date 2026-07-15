@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +42,18 @@ _ARTIFACT_RES = [
     (re.compile(r'<span class="?citation'), "leaked citation span", True),
     (re.compile(r'<div class="?notice'), "leaked notice-block div", True),
 ]
+
+
+def _rel(root: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def _emit(on_event: Callable[[str], None] | None, msg: str) -> None:
+    if on_event:
+        on_event(msg)
 
 
 @dataclass
@@ -99,7 +112,7 @@ class _BSSnapshot:
 
 
 def _scan_local(
-    root: Path, result: MethResult
+    root: Path, result: MethResult, *, on_event: Callable[[str], None] | None = None
 ) -> tuple[dict[int, tuple[Path, MethPage]], set[int]]:
     """Index local pages by ``page_id`` — two files claiming the same id is a trip-wire:
     report every one of them via ``result.skipped`` and exclude the id from the index
@@ -119,6 +132,7 @@ def _scan_local(
             page = markdown_to_page(md.read_text(encoding="utf-8"))
         except (ValueError, OSError) as e:
             result.errors.append(f"{md}: {e}")
+            _emit(on_event, f"error {_rel(root, md)}: {e}")
             continue
         # location: methodology/library/<book-slug>/<page-slug>.md
         page.book = md.parent.name
@@ -128,16 +142,26 @@ def _scan_local(
         if pid in seen:
             dups.add(pid)
             result.skipped.append((md, f"duplicate page_id {pid} (also {seen[pid]})"))
+            _emit(on_event, f"skip {_rel(root, md)}: duplicate page_id {pid}")
             if pid in index:  # first occurrence — report it too, then evict from the index
                 first_path, _ = index.pop(pid)
                 result.skipped.append((first_path, f"duplicate page_id {pid} (also {md})"))
+                _emit(on_event, f"skip {_rel(root, first_path)}: duplicate page_id {pid}")
             continue
         seen[pid] = md
         index[pid] = (md, page)
     return index, dups
 
 
-def _artifact_scan(path: Path, body: str, remote_body: str, result: MethResult) -> bool:
+def _artifact_scan(
+    path: Path,
+    body: str,
+    remote_body: str,
+    result: MethResult,
+    root: Path,
+    *,
+    on_event: Callable[[str], None] | None = None,
+) -> bool:
     """Record literal-artifact hits; return True only if a *blocking* artifact is newly
     introduced (present locally, absent in the remote baseline) — pre-existing cruft is
     surfaced but must not block a legitimate edit."""
@@ -145,6 +169,7 @@ def _artifact_scan(path: Path, body: str, remote_body: str, result: MethResult) 
     for rx, label, blocking in _ARTIFACT_RES:
         if rx.search(body):
             result.artifacts.append((path, label))
+            _emit(on_event, f"artifact {_rel(root, path)}: {label}")
             if blocking and not rx.search(remote_body):
                 block = True
     return block
@@ -158,6 +183,7 @@ def sync_methodology(
     force_local: set[Path] | None = None,
     force_remote: set[Path] | None = None,
     mass_change_ratio: float = 0.2,
+    on_event: Callable[[str], None] | None = None,
 ) -> MethResult:
     """Reconcile methodology/library/ with BookStack (3-way per page)."""
     force_local = force_local or set()
@@ -165,16 +191,21 @@ def sync_methodology(
     result = MethResult()
     now = datetime.now(UTC)
 
-    books = {b["id"]: b["slug"] for b in client.fetch_books()}
+    _emit(on_event, "pulling bookstack state…")
+    books_list = client.fetch_books()
+    books = {b["id"]: b["slug"] for b in books_list}
     remote: dict[int, MethPage] = {}
     remote_slug: dict[int, tuple[str, str]] = {}  # page_id -> (book_slug, page_slug)
-    for item in client.fetch_pages():
+    pages_list = client.fetch_pages()
+    for item in pages_list:
         detail = client.fetch_page(item["id"])
         book_slug = books.get(item["book_id"], item.get("book_slug", "book"))
         remote[item["id"]] = page_from_record(detail, book_slug=book_slug)
         remote_slug[item["id"]] = (book_slug, item["slug"])
+    _emit(on_event, f"bookstack: {len(books_list)} books, {len(pages_list)} pages")
 
-    local, dup_pids = _scan_local(root, result)
+    local, dup_pids = _scan_local(root, result, on_event=on_event)
+    _emit(on_event, f"reconciling {len(local)} pages…")
     snap = _BSSnapshot()
 
     planned_writes = 0
@@ -191,9 +222,11 @@ def sync_methodology(
             continue
         if lpage.synced_hash is None:
             result.invalid.append(path)
+            _emit(on_event, f"broken link {_rel(root, path)}")
             continue
         if rpage is None:
             result.skipped.append((path, "remote page gone (orphan)"))
+            _emit(on_event, f"skip {_rel(root, path)}: remote page gone (orphan)")
             continue
         # structure drift: local dir = book identity. A page's filename is cosmetic
         # (same doctrine as findings — a remote rename is just a title change, pulled
@@ -204,11 +237,12 @@ def sync_methodology(
         # drift; book_id stays the witness, and it flows as an ordinary push.
         book_slug, page_slug = remote_slug[pid]
         if rpage.book_id != lpage.book_id and path.parent.name != book_slug:
-            result.drift.append((
-                path,
+            why = (
                 f"moved on BookStack → {book_slug}/{page_slug} — move the file to match, "
-                "or --force-local to move it back",
-            ))
+                "or --force-local to move it back"
+            )
+            result.drift.append((path, why))
+            _emit(on_event, f"structure-drift {_rel(root, path)}: {why}")
             continue
         base = lpage.synced_hash
         lh = bs_content_hash(lpage)
@@ -257,16 +291,22 @@ def sync_methodology(
     try:
         for action, path, page in plans:
             try:
-                _apply(action, path, page, client, snap, result, books, now, dry_run=dry_run)
+                _apply(action, path, page, client, snap, result, books, now, root,
+                       dry_run=dry_run, on_event=on_event)
             except Exception as e:  # noqa: BLE001 — isolate one page, keep batch + snapshot
                 result.errors.append(f"{path}: {e}")
+                _emit(on_event, f"error {_rel(root, path)}: {e}")
     finally:
         if not dry_run and not snap.empty:
             result.snapshot_dir = snap.persist(now.strftime("%Y%m%dT%H%M%SZ"))
+            _emit(on_event, f"snapshot → {_rel(root, result.snapshot_dir)}")
     return result
 
 
-def _apply(action, path, page, client, snap, result, books, now, *, dry_run):  # noqa: ANN001, PLR0913
+def _apply(  # noqa: ANN001, PLR0913
+    action, path, page, client, snap, result, books, now, root, *, dry_run,
+    on_event: Callable[[str], None] | None = None,
+):
     # Every branch below appends to its result list only after its primary write
     # (client call, or filesystem write when there's no client call) succeeds — a
     # raised exception must leave the page uncounted, not double-counted alongside
@@ -274,55 +314,70 @@ def _apply(action, path, page, client, snap, result, books, now, *, dry_run):  #
     if action == "repair":
         if dry_run:
             result.repaired.append(path)
+            _emit(on_event, f"would repair {_rel(root, path)}")
             return
         stamp(page, now=now)
         path.write_text(page_to_markdown(page), encoding="utf-8")
         result.repaired.append(path)
+        _emit(on_event, f"repair {_rel(root, path)}")
     elif action == "collision":
         if dry_run:
             result.collisions.append(path)
+            _emit(on_event, f"would collision {_rel(root, path)}")
             return
         path.with_suffix(".remote.md").write_text(page_to_markdown(page), encoding="utf-8")
         result.collisions.append(path)
+        _emit(on_event, f"collision {_rel(root, path)} → sidecar written")
     elif action == "pull":
         if dry_run:
             result.pulled.append(path)
+            _emit(on_event, f"would pull {_rel(root, path)}")
             return
         stamp(page, now=now)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(page_to_markdown(page), encoding="utf-8")
         result.pulled.append(path)
+        _emit(on_event, f"pull {_rel(root, path)}")
     elif action == "push":
         remote_body = "" if dry_run else _remote_markdown(client, page.page_id)
-        if _artifact_scan(path, page.body, remote_body, result) and not dry_run:
-            result.skipped.append((path, "refused: new corruption artifact introduced in body"))
+        if _artifact_scan(path, page.body, remote_body, result, root,
+                           on_event=on_event) and not dry_run:
+            note = "refused: new corruption artifact introduced in body"
+            result.skipped.append((path, note))
+            _emit(on_event, f"skip {_rel(root, path)}: {note}")
             return
         if dry_run:
             result.pushed.append(path)
+            _emit(on_event, f"would push {_rel(root, path)}")
             return
         snap.before_update(page.page_id, remote_body)
         bid = _book_id_for(books, page.book)
         # push title + book too, so a local rename/move actually reaches BookStack
         client.update_page(page.page_id, markdown=page.body, name=page.title, book_id=bid)
         result.pushed.append(path)
+        _emit(on_event, f"push {_rel(root, path)}")
         page.book_id = bid  # keep frontmatter truthful — the drift witness depends on it
         stamp(page, now=now)
         path.write_text(page_to_markdown(page), encoding="utf-8")
     elif action == "create":
-        if _artifact_scan(path, page.body, "", result):  # new page → any artifact is new
-            result.skipped.append((path, "refused: corruption artifact in new page body"))
+        if _artifact_scan(path, page.body, "", result, root, on_event=on_event):
+            note = "refused: corruption artifact in new page body"
+            result.skipped.append((path, note))
+            _emit(on_event, f"skip {_rel(root, path)}: {note}")
             return
         if dry_run:
             result.created.append(path)
+            _emit(on_event, f"would create {_rel(root, path)}")
             return
         book_id = _book_id_for(books, page.book)
         if book_id is None:
-            result.errors.append(
-                f"{path}: unknown book '{page.book}' — create the book in BookStack first"
-            )
+            msg = f"{path}: unknown book '{page.book}' — create the book in BookStack first"
+            result.errors.append(msg)
+            _emit(on_event, f"error {_rel(root, path)}: unknown book '{page.book}'")
             return
         new_id = client.create_page(book_id=book_id, name=page.title, markdown=page.body)
         result.created.append(path)
+        _emit(on_event, f"create {_rel(root, path)}")
         snap.after_create(new_id)
         page.page_id, page.book_id = new_id, book_id
         stamp(page, now=now)

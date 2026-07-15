@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,6 +52,18 @@ def _image_hash(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def _rel(root: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def _emit(on_event: Callable[[str], None] | None, msg: str) -> None:
+    if on_event:
+        on_event(msg)
+
+
 def _stem(f: Finding) -> str:
     slug = slugify(f.title)
     if f.grison.tier == "instance" and f.grison.gw.id is not None:
@@ -82,24 +95,38 @@ def _report_dir(root: Path, report_id: int, reports: dict[int, dict]) -> Path:
     return root / "findings" / "reports" / f"{report_id}-{slugify(title)}"
 
 
-def pull(root: Path, client: GhostwriterClient, *, dry_run: bool = False) -> PullResult:
+def pull(
+    root: Path,
+    client: GhostwriterClient,
+    *,
+    dry_run: bool = False,
+    on_event: Callable[[str], None] | None = None,
+) -> PullResult:
     """Mirror Ghostwriter down into the workspace (read side of sync)."""
     result = PullResult()
+    _emit(on_event, "pulling remote state from ghostwriter…")
     reports = {r["id"]: r for r in client.fetch_reports()}
     ev_by: dict[int, list[dict]] = {}
     for e in client.fetch_evidence():
         ev_by.setdefault(e["findingId"], []).append(e)
+    findings = client.fetch_findings()
+    reported = client.fetch_reported_findings()
+    n_lib, n_rep, n_reports = len(findings), len(reported), len(reports)
+    _emit(on_event, f"remote: {n_lib} library findings, {n_rep} reported, {n_reports} reports")
     local = _scan_local(root)
 
-    for rec in client.fetch_findings():
+    for rec in findings:
         f = gw_record_to_finding(rec, tier="library")
-        _reconcile(result, f, local, root / "findings" / "library", None, client, dry_run=dry_run)
+        _reconcile(
+            result, f, local, root / "findings" / "library", None, client, root,
+            dry_run=dry_run, on_event=on_event,
+        )
 
-    for rec in client.fetch_reported_findings():
+    for rec in reported:
         evs = ev_by.get(rec["id"], [])
         f = gw_record_to_finding(rec, tier="instance", evidence_rows=evs)
         rdir = _report_dir(root, rec["reportId"], reports)
-        _reconcile(result, f, local, rdir, evs, client, dry_run=dry_run)
+        _reconcile(result, f, local, rdir, evs, client, root, dry_run=dry_run, on_event=on_event)
 
     return result
 
@@ -111,8 +138,10 @@ def _reconcile(
     target_dir: Path,
     ev_rows: list[dict] | None,
     client: GhostwriterClient,
+    root: Path,
     *,
     dry_run: bool,
+    on_event: Callable[[str], None] | None = None,
 ) -> None:
     key = (remote.grison.gw.table, remote.grison.gw.id)
     remote_hash = content_hash(remote)
@@ -137,13 +166,15 @@ def _reconcile(
 
     if dry_run:
         result.written.append(target_path)
+        _emit(on_event, f"would pull {_rel(root, target_path)}")
         return
 
-    _download_evidence(remote, ev_rows, client, target_dir, result)
+    _download_evidence(remote, ev_rows, client, target_dir, result, on_event=on_event)
     stamp_synced(remote)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(finding_to_markdown(remote), encoding="utf-8")
     result.written.append(target_path)
+    _emit(on_event, f"pull {_rel(root, target_path)}")
 
 
 def _download_evidence(
@@ -152,6 +183,8 @@ def _download_evidence(
     client: GhostwriterClient,
     target_dir: Path,
     result: PullResult,
+    *,
+    on_event: Callable[[str], None] | None = None,
 ) -> None:
     if not ev_rows:
         return
@@ -164,6 +197,7 @@ def _download_evidence(
         img_path.write_bytes(data)
         entry.gw.hash = _image_hash(data)
         result.evidence_written += 1
+        _emit(on_event, f"evidence ↓ {Path(entry.file).name}")
 
 
 # --- full 3-way sync (Phase 8) ----------------------------------------------
@@ -232,7 +266,9 @@ class _Plan:
     note: str = ""
 
 
-def _scan_synced(root: Path, result: SyncResult) -> tuple[list[_Local], set[tuple[str, int]]]:
+def _scan_synced(
+    root: Path, result: SyncResult, *, on_event: Callable[[str], None] | None = None
+) -> tuple[list[_Local], set[tuple[str, int]]]:
     """Scan synced trees → local records + the set of duplicate identities (trip-wire)."""
     locals_: list[_Local] = []
     seen: dict[tuple[str, int], Path] = {}
@@ -247,11 +283,13 @@ def _scan_synced(root: Path, result: SyncResult) -> tuple[list[_Local], set[tupl
             target = target_from_location(root, md)
             if target is None:
                 result.skipped.append((md, "non-conforming path"))
+                _emit(on_event, f"skip {_rel(root, md)}: non-conforming path")
                 continue
             try:
                 f = markdown_to_finding(md.read_text(encoding="utf-8"))
             except (DocumentError, ValueError, OSError) as e:
                 result.errors.append(f"{md}: {e}")
+                _emit(on_event, f"error {_rel(root, md)}: {e}")
                 continue
             loc_table, loc_report = target
             locals_.append(_Local(md, f, loc_table, loc_report))
@@ -260,6 +298,7 @@ def _scan_synced(root: Path, result: SyncResult) -> tuple[list[_Local], set[tupl
                 if key in seen:
                     dups.add(key)
                     result.skipped.append((md, f"duplicate identity {key} (also {seen[key]})"))
+                    _emit(on_event, f"skip {_rel(root, md)}: duplicate identity {key}")
                 else:
                     seen[key] = md
     return locals_, dups
@@ -358,23 +397,30 @@ def sync(
     force_local: set[Path] | None = None,
     force_remote: set[Path] | None = None,
     mass_change_ratio: float = 0.2,
+    on_event: Callable[[str], None] | None = None,
 ) -> SyncResult:
     """Full 3-way sync with Ghostwriter: push/pull/collision derived per record."""
     force_local = force_local or set()
     force_remote = force_remote or set()
     result = SyncResult()
 
+    _emit(on_event, "pulling remote state from ghostwriter…")
     reports = {r["id"]: r for r in client.fetch_reports()}
     remote_index: dict[tuple[str, int], dict] = {}
-    for rec in client.fetch_findings():
+    findings = client.fetch_findings()
+    for rec in findings:
         remote_index[("finding", rec["id"])] = rec
-    for rec in client.fetch_reported_findings():
+    reported = client.fetch_reported_findings()
+    for rec in reported:
         remote_index[("reportedFinding", rec["id"])] = rec
     ev_by_finding: dict[int, list[dict]] = {}
     for e in client.fetch_evidence():
         ev_by_finding.setdefault(e["findingId"], []).append(e)
+    n_lib, n_rep, n_reports = len(findings), len(reported), len(reports)
+    _emit(on_event, f"remote: {n_lib} library findings, {n_rep} reported, {n_reports} reports")
 
-    locals_, dups = _scan_synced(root, result)
+    locals_, dups = _scan_synced(root, result, on_event=on_event)
+    _emit(on_event, f"reconciling {len(locals_)} records…")
 
     plans: list[_Plan] = []
     matched: set[tuple[str, int]] = set()
@@ -383,6 +429,7 @@ def sync(
             plan = _classify(lr, remote_index, ev_by_finding, force_local, force_remote, dups)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
             result.errors.append(f"{lr.path}: {e}")
+            _emit(on_event, f"error {_rel(root, lr.path)}: {e}")
             # still register this identity so the remote-only pull loop below doesn't
             # treat the errored-out local record as absent and clobber it.
             f = lr.finding
@@ -406,6 +453,7 @@ def sync(
             new_path = _remote_target_path(root, remote_f, rec, reports)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
             result.errors.append(f"{key[0]} {key[1]}: {e}")
+            _emit(on_event, f"error {key[0]} {key[1]}: {e}")
             continue
         plans.append(_Plan("pull", None, key, rec, remote_f=remote_f, new_path=new_path))
 
@@ -427,8 +475,16 @@ def sync(
     total = max(len(remote_index), 1)
     if not dry_run and len(remote_writes) > 5 and len(remote_writes) > mass_change_ratio * total:
         result.mass_change_blocked = True
+        _emit(
+            on_event,
+            f"mass-change guard tripped: withholding {len(remote_writes)} remote writes",
+        )
         for p in remote_writes:
             result.skipped.append((p.local.path, "mass-change guard — remote write withheld"))
+            _emit(
+                on_event,
+                f"skip {_rel(root, p.local.path)}: mass-change guard — remote write withheld",
+            )
         plans = [p for p in plans if p.action not in ("push", "insert")]
 
     # Persist the snapshot even if a record fails mid-batch (one bad record must not lose
@@ -437,14 +493,17 @@ def sync(
     try:
         for plan in plans:
             try:
-                _apply(plan, client, snap, result, ev_by_finding, dry_run=dry_run)
+                _apply(plan, client, snap, result, ev_by_finding, root, dry_run=dry_run,
+                       on_event=on_event)
             except Exception as e:  # noqa: BLE001 — isolate one record, keep batch + snapshot
                 where = plan.local.path if plan.local else plan.new_path
                 result.errors.append(f"{where}: {e}")
+                _emit(on_event, f"error {_rel(root, where)}: {e}")
     finally:
         if not dry_run and not snap.empty:
             when = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             result.snapshot_dir = snap.persist(when)
+            _emit(on_event, f"snapshot → {_rel(root, result.snapshot_dir)}")
     return result
 
 
@@ -460,42 +519,54 @@ def _apply(
     snap: Snapshot,
     result: SyncResult,
     ev_by_finding: dict[int, list[dict]],
+    root: Path,
     *,
     dry_run: bool,
+    on_event: Callable[[str], None] | None = None,
 ) -> None:
     action, lr = plan.action, plan.local
     if action == "clean":
         result.unchanged.append(lr.path)
     elif action == "invalid":
         result.invalid.append(lr.path)
+        _emit(on_event, f"broken link {_rel(root, lr.path)}")
     elif action == "skip":
         if plan.note and lr is not None:
             result.skipped.append((lr.path, plan.note))
+            _emit(on_event, f"skip {_rel(root, lr.path)}: {plan.note}")
     elif action == "collision":
-        if not dry_run:
+        if dry_run:
+            _emit(on_event, f"would collision {_rel(root, lr.path)}")
+        else:
             sidecar = lr.path.with_suffix(".remote.md")
             sidecar.write_text(finding_to_markdown(plan.remote_f), encoding="utf-8")
+            _emit(on_event, f"collision {_rel(root, lr.path)} → sidecar written")
         result.collisions.append(lr.path)
     elif action == "repair":
+        tense = "would " if dry_run else ""
         if not dry_run:
             stamp_synced(lr.finding)
             lr.path.write_text(finding_to_markdown(lr.finding), encoding="utf-8")
         result.repaired.append(lr.path)
+        _emit(on_event, f"{tense}repair {_rel(root, lr.path)}")
     elif action == "pull":
-        _apply_pull(plan, client, result, ev_by_finding, dry_run=dry_run)
+        _apply_pull(plan, client, result, ev_by_finding, root, dry_run=dry_run, on_event=on_event)
     elif action == "push":
-        _apply_push(plan, client, snap, result, ev_by_finding, dry_run=dry_run)
+        _apply_push(plan, client, snap, result, ev_by_finding, root, dry_run=dry_run,
+                     on_event=on_event)
     elif action == "insert":
-        _apply_insert(plan, client, snap, result, dry_run=dry_run)
+        _apply_insert(plan, client, snap, result, root, dry_run=dry_run, on_event=on_event)
 
 
 def _apply_pull(
     plan: _Plan, client: GhostwriterClient, result: SyncResult,
-    ev_by_finding: dict[int, list[dict]], *, dry_run: bool,
+    ev_by_finding: dict[int, list[dict]], root: Path, *, dry_run: bool,
+    on_event: Callable[[str], None] | None = None,
 ) -> None:
     path = plan.new_path if plan.new_path is not None else plan.local.path
     if dry_run:
         result.pulled.append(path)
+        _emit(on_event, f"would pull {_rel(root, path)}")
         return
     remote_f = plan.remote_f
     if remote_f is None:
@@ -503,11 +574,12 @@ def _apply_pull(
             plan.rec, tier=_tier(plan.key[0]),
             evidence_rows=ev_by_finding.get(plan.rec["id"]),
         )
-    evidence_down = _download_finding_evidence(remote_f, client, path.parent)
+    evidence_down = _download_finding_evidence(remote_f, client, path.parent, on_event=on_event)
     stamp_synced(remote_f)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(finding_to_markdown(remote_f), encoding="utf-8")
     result.pulled.append(path)  # local write succeeded — now safe to report as pulled
+    _emit(on_event, f"pull {_rel(root, path)}")
     result.evidence_down += evidence_down
     _clear_sidecar(path)  # collision resolved via --force-remote
 
@@ -545,11 +617,13 @@ def _has_stale_evidence(f: Finding, path: Path) -> bool:
 
 def _apply_push(
     plan: _Plan, client: GhostwriterClient, snap: Snapshot, result: SyncResult,
-    ev_by_finding: dict[int, list[dict]], *, dry_run: bool,
+    ev_by_finding: dict[int, list[dict]], root: Path, *, dry_run: bool,
+    on_event: Callable[[str], None] | None = None,
 ) -> None:
     lr = plan.local
     if dry_run:
         result.pushed.append(lr.path)
+        _emit(on_event, f"would push {_rel(root, lr.path)}")
         return
     f = lr.finding
     pre = gw_pre_image(plan.rec, tier=_tier(lr.loc_table))
@@ -560,19 +634,22 @@ def _apply_push(
     else:
         client.update_reported_finding(f.grison.gw.id, fields)
     result.pushed.append(lr.path)  # remote write succeeded — now safe to report as pushed
+    _emit(on_event, f"push {_rel(root, lr.path)}")
     _finalize(f, lr.path)  # persist the record as synced before touching evidence
     tier_is_instance = lr.loc_table == "reportedFinding"
     remote_rows = ev_by_finding.get(f.grison.gw.id) if tier_is_instance else None
-    _push_evidence(f, lr.path, client, snap, result, remote_rows)  # each write persisted
+    _push_evidence(f, lr.path, client, snap, result, remote_rows, on_event=on_event)
     _clear_sidecar(lr.path)  # collision resolved via --force-local
 
 
 def _apply_insert(
-    plan: _Plan, client: GhostwriterClient, snap: Snapshot, result: SyncResult, *, dry_run: bool,
+    plan: _Plan, client: GhostwriterClient, snap: Snapshot, result: SyncResult, root: Path,
+    *, dry_run: bool, on_event: Callable[[str], None] | None = None,
 ) -> None:
     lr = plan.local
     if dry_run:
         result.inserted.append(lr.path)
+        _emit(on_event, f"would insert {_rel(root, lr.path)}")
         return
     f = _relocate(lr.finding, lr.loc_table, lr.loc_report)
     fields = finding_to_gw_fields(f)
@@ -583,14 +660,16 @@ def _apply_insert(
     snap.after_insert(lr.loc_table, new_id)
     f.grison.gw.id = new_id
     result.inserted.append(lr.path)  # insert succeeded — now safe to report as inserted
+    _emit(on_event, f"insert {_rel(root, lr.path)}")
     # Persist the new id + base BEFORE evidence: if an upload then fails, the next sync
     # sees the id (no duplicate re-insert) and retries only the pending evidence.
     _finalize(f, lr.path)
-    _push_evidence(f, lr.path, client, snap, result, None)  # fresh record has no remote rows
+    _push_evidence(f, lr.path, client, snap, result, None, on_event=on_event)
 
 
 def _download_finding_evidence(
-    remote_f: Finding, client: GhostwriterClient, target_dir: Path
+    remote_f: Finding, client: GhostwriterClient, target_dir: Path,
+    *, on_event: Callable[[str], None] | None = None,
 ) -> int:
     count = 0
     for entry in remote_f.evidence:
@@ -602,6 +681,7 @@ def _download_finding_evidence(
         img.write_bytes(data)
         entry.gw.hash = _image_hash(data)
         count += 1
+        _emit(on_event, f"evidence ↓ {Path(entry.file).name}")
     return count
 
 
@@ -612,6 +692,8 @@ def _push_evidence(
     snap: Snapshot,
     result: SyncResult,
     remote_rows: list[dict] | None,
+    *,
+    on_event: Callable[[str], None] | None = None,
 ) -> None:
     """Upload pending/stale local evidence, then delete any remote row an image no longer
     claims (removed-from-frontmatter or superseded-by-a-reupload) — both directions are
@@ -625,6 +707,7 @@ def _push_evidence(
         img = path.parent / entry.file
         if not img.exists():
             result.errors.append(f"evidence image missing: {entry.file}")
+            _emit(on_event, f"error: evidence image missing: {entry.file}")
             continue
         data = img.read_bytes()
         filename = Path(entry.file).name
@@ -638,6 +721,7 @@ def _push_evidence(
         snap.after_upload_evidence(new_id)
         entry.gw = EvidenceGwRef(id=new_id, hash=_image_hash(data))  # old row (if any) reaped below
         result.evidence_up += 1
+        _emit(on_event, f"evidence ↑ {filename}")
         _finalize(f, path)  # persist this upload's id before attempting the next
 
     local_ids = {e.gw.id for e in f.evidence if e.gw is not None and e.gw.id is not None}
@@ -655,3 +739,4 @@ def _push_evidence(
         )
         client.delete_evidence(row["id"])
         result.evidence_deleted += 1
+        _emit(on_event, f"evidence ✕ {filename}")
