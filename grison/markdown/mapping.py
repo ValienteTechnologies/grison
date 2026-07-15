@@ -51,18 +51,31 @@ class MappingResult:
 
 
 class _TagStripper(HTMLParser):
-    """Lenient fallback: reduce HTML to text when it's outside the GW whitelist."""
+    """Lenient fallback: reduce HTML to text when it's outside the GW whitelist.
+    Table cells are joined with `` | `` — without a separator, row values would run
+    together into one ambiguous token (``22/tcpsshOpenSSH``)."""
 
     def __init__(self) -> None:
         super().__init__()
         self._parts: list[str] = []
+        self._pending_cell_sep = False
 
     def handle_data(self, data: str) -> None:
+        if data.strip() and self._pending_cell_sep:
+            self._parts.append(" | ")
+            self._pending_cell_sep = False
         self._parts.append(data)
 
     def handle_starttag(self, tag: str, attrs: object) -> None:
         if tag in ("li", "p", "br", "ul", "ol", "tr", "div"):
             self._parts.append("\n")
+            self._pending_cell_sep = False
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th"):
+            self._pending_cell_sep = True
+        elif tag in ("tr", "table", "thead", "tbody"):
+            self._pending_cell_sep = False
 
     def text(self) -> str:
         lines = [ln.strip() for ln in "".join(self._parts).splitlines()]

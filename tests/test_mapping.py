@@ -72,3 +72,21 @@ def test_mapped_finding_serializes_and_roundtrips() -> None:
     )
     md = finding_to_markdown(res.finding)
     assert markdown_to_finding(md) == res.finding
+
+
+def test_table_fallback_keeps_cells_separated() -> None:
+    """The whitelist-degrade path must not run table cells together — an nmap port
+    table previously collapsed to '22/tcpsshOpenSSH 8.9'."""
+    from grison.markdown.mapping import _prose_to_md
+
+    html = (
+        "<table><thead><tr><th>Port</th><th>Service</th><th>Product</th></tr></thead>"
+        "<tbody><tr><td>22/tcp</td><td>ssh</td><td>OpenSSH 8.9</td></tr>"
+        "<tr><td>80/tcp</td><td>http</td><td>Apache 2.4</td></tr></tbody></table>"
+    )
+    warnings: list[str] = []
+    out = _prose_to_md(html, "description", warnings)
+    assert warnings  # still surfaced as degraded
+    assert "Port | Service | Product" in out
+    assert "22/tcp | ssh | OpenSSH 8.9" in out
+    assert "80/tcp | http | Apache 2.4" in out
