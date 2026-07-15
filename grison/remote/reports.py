@@ -8,9 +8,13 @@ derived per section from the ``.report.yml`` merge base: only-local-changed → 
 only-remote → pull, both → collision (``<key>.remote.md`` sidecar, never overwritten).
 
 A push rewrites the report's whole ``extraFields`` map in one ``update_report`` (GW's
-jsonb ``_set`` replaces the column), merging the pushed sections over the verbatim
-remote map so untouched keys keep their exact remote HTML. The pre-image is snapshotted
-so rollback restores every section at once.
+jsonb ``_set`` replaces the column). Immediately before that write, the report is
+re-fetched fresh and the pushed sections are merged over *that* map — not the
+top-of-run snapshot — so a concurrent remote edit to an untouched section survives
+instead of being silently clobbered by a stale merge; if an untouched section drifted
+between planning and this write, the whole report's push is aborted as a collision
+(``<key>.remote.md`` sidecar) rather than guessed at. The undo pre-image is that same
+fresh fetch, so rollback restores exactly what was live right before the write.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from grison.remote.repmap import (
     NARRATIVE_DIR,
     REPORT_META,
     ReportDoc,
+    html_section_to_md,
     md_section_to_html,
     meta_to_yaml,
     read_local_meta,
@@ -111,10 +116,18 @@ def sync_reports(
     planned_pushes = 0
     per_report: list[tuple[ReportDoc, Path, list[_SectionPlan]]] = []
     for rec in reports:
-        doc = report_from_record(rec)
-        rdir = _report_dir(root, doc.report_id, doc.title)
-        _, bases = read_local_meta(rdir)
-        plans = _plan_report(rdir, doc, bases, force_local, force_remote, result, on_event, root)
+        try:
+            doc = report_from_record(rec)
+            rdir = _report_dir(root, doc.report_id, doc.title)
+            _, bases, _removed = read_local_meta(rdir)
+            plans = _plan_report(
+                rdir, doc, bases, force_local, force_remote, result, on_event, root
+            )
+        except Exception as e:  # noqa: BLE001 — isolate one report's planning, keep the batch
+            rid = rec.get("id")
+            result.errors.append(f"report {rid}: {e}")
+            _emit(on_event, f"error report {rid}: {e}")
+            continue
         planned_pushes += sum(1 for p in plans if p.action == "push")
         per_report.append((doc, rdir, plans))
 
@@ -210,6 +223,69 @@ def _write_section(path: Path, body: str) -> None:
     path.write_text(body.strip() + "\n" if body.strip() else "", encoding="utf-8")
 
 
+def _fetch_report_extra_fields(client: GhostwriterClient, report_id: int) -> dict | None:
+    """Re-fetch a single report's live ``extraFields`` right before a push (the client
+    has no by-id report query, so this re-lists and filters). ``None`` if the report
+    no longer exists remotely."""
+    for rec in client.fetch_reports():
+        if rec.get("id") == report_id:
+            return dict(rec.get("extraFields") or {})
+    return None
+
+
+def _drifted_untouched_keys(doc: ReportDoc, fresh: dict | None, pushed_keys: set[str]) -> set[str]:
+    """Keys in ``doc.sections`` this run isn't pushing whose live remote value (the
+    fresh re-fetch taken right before the write) no longer matches the top-of-run
+    snapshot — a concurrent edit landed after this run planned and before it wrote."""
+    if fresh is None:
+        return set()
+    return {
+        key for key in doc.sections
+        if key not in pushed_keys and doc.raw_extra_fields.get(key) != fresh.get(key)
+    }
+
+
+def _guard_stale_push(
+    doc: ReportDoc,
+    rdir: Path,
+    plans: list[_SectionPlan],
+    pushes: list[_SectionPlan],
+    client: GhostwriterClient,
+    result: ReportResult,
+    on_event: Callable[[str], None] | None,
+    root: Path,
+) -> dict | None:
+    """Re-fetch this report's extraFields immediately before the write. If a section
+    NOT being pushed this run drifted since the top-of-run snapshot (or the report
+    vanished), abort the whole report's push as a collision — surfacing the drift via
+    the usual ``.remote.md`` sidecar — instead of clobbering it with the stale merge.
+    Returns the fresh extraFields to push over when safe, ``None`` when aborted."""
+    fresh = _fetch_report_extra_fields(client, doc.report_id)
+    pushed_keys = {p.key for p in pushes}
+    drifted = _drifted_untouched_keys(doc, fresh, pushed_keys)
+    if fresh is not None and not drifted:
+        return fresh
+
+    plan_by_key = {p.key: p for p in plans}
+    for key in drifted:
+        body = html_section_to_md((fresh or {}).get(key) or "")
+        plan = plan_by_key.get(key)
+        if plan is not None:
+            plan.action, plan.body, plan.note = "collision", body, "concurrent remote edit"
+        else:
+            plans.append(_SectionPlan("collision", key, section_path(rdir, key), body,
+                                       "concurrent remote edit"))
+
+    if fresh is None:
+        reason = "report no longer exists remotely"
+        result.errors.append(f"{rdir}: push withheld — {reason}")
+    else:
+        reason = f"concurrent remote edit to {', '.join(sorted(drifted))}"
+    for p in pushes:
+        p.action, p.note = "skip", f"push withheld — {reason}"
+    return None
+
+
 def _apply_report(
     doc: ReportDoc,
     rdir: Path,
@@ -224,6 +300,12 @@ def _apply_report(
     root: Path,
 ) -> None:
     pushes = [p for p in plans if p.action == "push"]
+    fresh_extra: dict | None = None
+    if pushes and not dry_run:
+        fresh_extra = _guard_stale_push(doc, rdir, plans, pushes, client, result, on_event, root)
+        if fresh_extra is None:
+            pushes = []  # aborted — see _guard_stale_push's collision/skip plan rewrites
+
     for p in plans:
         if p.action == "clean":
             result.unchanged.append(p.path)
@@ -251,25 +333,27 @@ def _apply_report(
             _emit(on_event, f"{'would ' if dry_run else ''}collision {_rel(root, p.path)}")
 
     if pushes and not dry_run:
-        # one PUT for the whole report: merge pushed sections over the verbatim remote map
-        new_extra = dict(doc.raw_extra_fields)
+        # one PUT for the whole report: merge pushed sections over the FRESH remote map
+        # (re-fetched in _guard_stale_push right before this write — never the stale
+        # top-of-run snapshot, so an untouched section's concurrent edit survives).
+        new_extra = dict(fresh_extra or {})
         for p in pushes:
             new_extra[p.key] = md_section_to_html(p.body)
-        snap.before_update_report(doc.report_id, doc.raw_extra_fields)
+        snap.before_update_report(doc.report_id, fresh_extra or {})
         client.update_report(doc.report_id, {"extraFields": new_extra})
         for p in pushes:
             result.pushed.append(p.path)
             _emit(on_event, f"push {_rel(root, p.path)}")
-    elif pushes:  # dry-run
+    elif pushes:  # dry-run — _guard_stale_push never runs, pushes is the plain plan list
         for p in pushes:
             result.pushed.append(p.path)
             _emit(on_event, f"would push {_rel(root, p.path)}")
 
     # refresh the read-only metadata mirror + section merge bases (skip in dry-run)
     if not dry_run:
-        final_hashes = _final_section_hashes(rdir, doc, plans)
+        final_hashes, removed_remotely = _final_section_hashes(rdir, doc, plans)
         meta_path = rdir / REPORT_META
-        text = meta_to_yaml(doc, final_hashes)
+        text = meta_to_yaml(doc, final_hashes, removed_remotely)
         if not meta_path.exists() or meta_path.read_text(encoding="utf-8") != text:
             meta_path.parent.mkdir(parents=True, exist_ok=True)
             meta_path.write_text(text, encoding="utf-8")
@@ -279,13 +363,19 @@ def _apply_report(
 
 def _final_section_hashes(
     rdir: Path, doc: ReportDoc, plans: list[_SectionPlan]
-) -> dict[str, str]:
-    """The merge base to stamp after applying: a pushed/clean/repaired section converges
-    on its content; a collision keeps the prior base (unresolved). Only real remote keys
-    get a base."""
+) -> tuple[dict[str, str], set[str]]:
+    """The merge base to stamp after applying, plus which keys are flagged
+    ``removed_remotely``. A pushed/clean/repaired section converges on its content; a
+    collision keeps the prior base (unresolved). A key that dropped out of the fresh
+    fetch entirely but still has an active local narrative file keeps its last-known
+    base (rather than losing it, per the note below) and is flagged so the "remote
+    section gone — kept locally" skip note survives more than one sync cycle instead of
+    degrading to "unknown field" after the first (F3: without this the base was only
+    ever stamped for keys present in doc.sections, so it silently evaporated one cycle
+    after the remote key vanished)."""
     action_by_key = {p.key: p.action for p in plans}
     hashes: dict[str, str] = {}
-    _, prior = read_local_meta(rdir)
+    _, prior, _prior_removed = read_local_meta(rdir)
     for key, section in doc.sections.items():
         action = action_by_key.get(key, "clean")
         if action == "collision":
@@ -295,4 +385,12 @@ def _final_section_hashes(
         # pull/repair converge on remote; push converges on local; clean already matches
         local_md = read_local_section(rdir, key)
         hashes[key] = section_hash(local_md) if local_md is not None else section_hash(section.body)
-    return hashes
+
+    removed: set[str] = set()
+    for key, base in prior.items():
+        if key in doc.sections or key in hashes:
+            continue  # still live remotely (or already covered above)
+        if read_local_section(rdir, key) is not None:
+            hashes[key] = base
+            removed.add(key)
+    return hashes, removed

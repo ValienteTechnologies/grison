@@ -89,28 +89,46 @@ def report_from_record(rec: dict) -> ReportDoc:
     )
 
 
-def meta_to_yaml(doc: ReportDoc, section_hashes: dict[str, str]) -> str:
+def meta_to_yaml(
+    doc: ReportDoc, section_hashes: dict[str, str], removed_remotely: set[str] | None = None
+) -> str:
     """Serialize ``.report.yml`` — the read-only metadata mirror plus the per-section
-    merge base. The narrative bodies live in their own files, not here."""
+    merge base. The narrative bodies live in their own files, not here.
+
+    A key in ``removed_remotely`` is a section whose base is carried forward from a
+    prior sync even though the fresh fetch no longer has it (the local narrative file
+    is still around) — its entry gets a ``removed_remotely: true`` marker so the
+    "kept locally" state is visible and survives more than one sync cycle.
+    """
+    removed_remotely = removed_remotely or set()
+    sections: dict[str, dict] = {}
+    for k, h in sorted(section_hashes.items()):
+        entry: dict = {"hash": h}
+        if k in removed_remotely:
+            entry["removed_remotely"] = True
+        sections[k] = entry
     fm = {
         "grison": {"kind": "report", "gw": {"report_id": doc.report_id}},
         "title": doc.title,
         **doc.meta,
-        "sections": {k: {"hash": h} for k, h in sorted(section_hashes.items())},
+        "sections": sections,
     }
     return yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)
 
 
-def read_local_meta(report_dir: Path) -> tuple[int | None, dict[str, str]]:
-    """Return ``(report_id, {section_key: base_hash})`` from a report dir's
-    ``.report.yml`` — the merge base for reconcile. Missing file → ``(None, {})``."""
+def read_local_meta(report_dir: Path) -> tuple[int | None, dict[str, str], set[str]]:
+    """Return ``(report_id, {section_key: base_hash}, {removed_remotely keys})`` from a
+    report dir's ``.report.yml`` — the merge base for reconcile. Missing file →
+    ``(None, {}, set())``."""
     path = report_dir / REPORT_META
     if not path.exists():
-        return None, {}
+        return None, {}, set()
     fm = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     gw = (fm.get("grison") or {}).get("gw") or {}
-    bases = {k: (v or {}).get("hash") for k, v in (fm.get("sections") or {}).items()}
-    return gw.get("report_id"), bases
+    sections = fm.get("sections") or {}
+    bases = {k: (v or {}).get("hash") for k, v in sections.items()}
+    removed = {k for k, v in sections.items() if (v or {}).get("removed_remotely")}
+    return gw.get("report_id"), bases, removed
 
 
 def read_local_section(report_dir: Path, key: str) -> str | None:

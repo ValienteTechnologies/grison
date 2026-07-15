@@ -9,10 +9,10 @@ and methodology with BookStack (push/pull/collision derived per record).
 from __future__ import annotations
 
 import fcntl
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TypeVar
 
 import typer
 
@@ -158,37 +158,74 @@ def sync(
 
     fl = {force_local.resolve()} if force_local else set()
     fr = {force_remote.resolve()} if force_remote else set()
+    # Each phase (findings / reports / methodology) is isolated: a raised exception in
+    # one is recorded and printed, never left to silently cancel the phases after it.
+    phase_errors: list[str] = []
     with _workspace_lock(root):  # one sync at a time per workspace (GW has no compare-and-swap)
         with GhostwriterClient(creds) as client:
-            result = run_sync(
-                root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
-                on_event=lambda msg: typer.secho(msg, dim=True),
+            result = _run_phase(
+                "findings",
+                lambda: run_sync(
+                    root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
+                    on_event=lambda msg: typer.secho(msg, dim=True),
+                ),
+                phase_errors,
             )
-            rep = sync_reports(
-                root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
-                on_event=lambda msg: typer.secho(msg, dim=True),
+            rep = _run_phase(
+                "report",
+                lambda: sync_reports(
+                    root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
+                    on_event=lambda msg: typer.secho(msg, dim=True),
+                ),
+                phase_errors,
             )
-        _print_sync_summary(result, dry_run=dry_run)
-        _print_report_summary(rep, dry_run=dry_run)
-        bad = bool(
-            result.collisions or result.invalid or result.mass_change_blocked or result.errors
-            or rep.collisions or rep.mass_change_blocked or rep.errors
-        )
+        if result is not None:
+            _print_sync_summary(result, dry_run=dry_run)
+        if rep is not None:
+            _print_report_summary(rep, dry_run=dry_run)
+        bad = bool(phase_errors)
+        if result is not None:
+            bad = bad or bool(
+                result.collisions or result.invalid or result.mass_change_blocked or result.errors
+            )
+        if rep is not None:
+            bad = bad or bool(rep.collisions or rep.mass_change_blocked or rep.errors)
 
         if creds.bs_url and creds.bs_token_id and creds.bs_token_secret:
-            with BookStackClient(creds) as bs:
-                m = sync_methodology(
-                    root, bs, dry_run=dry_run, force_local=fl, force_remote=fr,
-                    on_event=lambda msg: typer.secho(msg, dim=True),
+            def _do_methodology() -> MethResult:
+                with BookStackClient(creds) as bs:
+                    return sync_methodology(
+                        root, bs, dry_run=dry_run, force_local=fl, force_remote=fr,
+                        on_event=lambda msg: typer.secho(msg, dim=True),
+                    )
+
+            m = _run_phase("methodology", _do_methodology, phase_errors)
+            if m is not None:
+                _print_meth_summary(m, dry_run=dry_run)
+                bad = bad or bool(
+                    m.collisions or m.invalid or m.drift or m.artifacts
+                    or m.mass_change_blocked or m.errors
                 )
-            _print_meth_summary(m, dry_run=dry_run)
-            bad = bad or bool(
-                m.collisions or m.invalid or m.drift or m.artifacts
-                or m.mass_change_blocked or m.errors
-            )
+        bad = bad or bool(phase_errors)  # catches a methodology-phase failure too
 
     if bad:
         raise typer.Exit(code=1)
+
+
+_T = TypeVar("_T")
+
+
+def _run_phase(name: str, fn: Callable[[], _T], phase_errors: list[str]) -> _T | None:
+    """Run one sync phase (findings / reports / methodology) in isolation. An exception
+    here is recorded in ``phase_errors`` and printed, but never propagated — the phases
+    that follow still get to run, and the run exits nonzero at the end regardless."""
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001 — isolate this phase, subsequent phases still run
+        msg = f"{name} sync failed: {e}"
+        phase_errors.append(msg)
+        typer.secho(msg, fg=typer.colors.RED)
+        return None
 
 
 @contextmanager
