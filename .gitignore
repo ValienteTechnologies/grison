@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# uv / venv
+.venv/
+
+# grison private workspace dir (creds + state) — never commit
+.grison/
+
+# grison workspace content — real engagement data lands here after `grison sync`
+findings/
+methodology/

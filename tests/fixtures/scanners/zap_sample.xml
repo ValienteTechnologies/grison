@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<OWASPZAPReport version="2.14.0" generated="Mon, 1 Jan 2026 00:00:00">
+  <site name="https://example.com" host="example.com" port="443" ssl="true">
+    <alerts>
+      <alertitem>
+        <pluginid>40012</pluginid>
+        <alertRef>40012</alertRef>
+        <alert>Cross Site Scripting (Reflected)</alert>
+        <name>Cross Site Scripting (Reflected)</name>
+        <riskcode>3</riskcode>
+        <confidence>2</confidence>
+        <riskdesc>High (Medium)</riskdesc>
+        <desc>&lt;p&gt;Reflected XSS was found in the search parameter.&lt;/p&gt;</desc>
+        <solution>&lt;p&gt;Sanitize and encode all user-supplied input.&lt;/p&gt;</solution>
+        <reference>https://owasp.org/www-community/attacks/xss/</reference>
+        <cweid>79</cweid>
+        <wascid>8</wascid>
+        <instances>
+          <instance>
+            <uri>https://example.com/search?q=test</uri>
+            <method>GET</method>
+            <param>q</param>
+          </instance>
+        </instances>
+      </alertitem>
+    </alerts>
+  </site>
+</OWASPZAPReport>

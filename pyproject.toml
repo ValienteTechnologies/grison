@@ -1,0 +1,58 @@
+[project]
+name = "grison"
+version = "0.1.0"
+description = "A markdown hub between security scanners and Valiente's Ghostwriter + BookStack."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Valiente Technologies" }]
+requires-python = ">=3.11"
+keywords = ["security", "pentest", "ghostwriter", "bookstack", "scanner", "markdown"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+dependencies = [
+    "pydantic>=2",
+    "defusedxml>=0.7",
+    "pyyaml>=6",
+    "typer>=0.12",
+    "httpx>=0.27",
+]
+# NOTE: no LLM SDK by design — "AI is not a subsystem". An LLM editing the
+# markdown workspace IS the transform layer; grison only validates + syncs it.
+
+[project.urls]
+Homepage = "https://github.com/ValienteTechnologies/grison"
+Issues = "https://github.com/ValienteTechnologies/grison/issues"
+
+[project.scripts]
+grison = "grison.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["grison"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

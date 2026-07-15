@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<report>
+  <report>
+    <results>
+      <result id="r1">
+        <name>Weak SSH Host Key</name>
+        <description>The remote SSH server offers a weak host key algorithm.</description>
+        <severity>6.5</severity>
+        <host>192.0.2.20<hostname>host.example.com</hostname></host>
+        <port>22/tcp</port>
+        <qod><value>80</value></qod>
+        <nvt oid="1.3.6.1.4.1.25623.1.0.999001">
+          <name>Weak SSH Host Key</name>
+          <tags>summary=Weak SSH host key algorithm detected.|solution=Disable weak key exchange algorithms.|cvss_base_vector=CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N</tags>
+          <refs>
+            <ref type="url" id="https://example.com/advisory/ssh"/>
+          </refs>
+        </nvt>
+      </result>
+    </results>
+  </report>
+</report>

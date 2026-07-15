@@ -1,0 +1,137 @@
+"""Tests for the bespoke HTML<->markdown converter used for GW rich-text fields."""
+
+from __future__ import annotations
+
+from html.parser import HTMLParser
+
+import pytest
+
+from grison.markdown.converter import ConverterError, html_to_md, md_to_html
+
+# --- markdown samples that must round-trip: html_to_md(md_to_html(m)) == m --
+
+MD_SAMPLES = [
+    "This is a plain paragraph.",
+    "Mix **bold**, `code`, *em*, and a [link](https://example.com/x).",
+    "- Item one\n- Item two",
+    "First paragraph.\n\nSecond paragraph.",
+    "Line one\nLine two",
+]
+
+
+@pytest.mark.parametrize("md", MD_SAMPLES)
+def test_md_round_trips_through_html(md: str) -> None:
+    assert html_to_md(md_to_html(md)) == md
+
+
+# --- html samples that must round-trip (DOM-normalized) --------------------
+
+
+def _norm(html: str) -> str:
+    """Canonicalize an HTML fragment: sorted attrs, collapsed/dropped
+    insignificant whitespace. Independent of the converter's own tree builder,
+    so it's a real cross-check rather than a tautology."""
+
+    class _Normalizer(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.out: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            attr_str = " ".join(f'{k}="{v}"' for k, v in sorted(attrs))
+            self.out.append(f"<{tag} {attr_str}>" if attr_str else f"<{tag}>")
+
+        def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            self.handle_starttag(tag, attrs)
+
+        def handle_endtag(self, tag: str) -> None:
+            self.out.append(f"</{tag}>")
+
+        def handle_data(self, data: str) -> None:
+            collapsed = " ".join(data.split())
+            if collapsed:
+                self.out.append(collapsed)
+
+    parser = _Normalizer()
+    parser.feed(html)
+    parser.close()
+    return "".join(parser.out)
+
+
+HTML_SAMPLES = [
+    "<p>Plain paragraph.</p>",
+    '<p>Mix <strong>bold</strong>, <code>code</code>, <em>em</em> and '
+    '<a href="https://example.com/x" target="_blank" rel="noopener">link</a>.</p>',
+    "<ul><li>Item one</li><li>Item two</li></ul>",
+    "<p>Line one<br>Line two</p>",
+]
+
+
+@pytest.mark.parametrize("html", HTML_SAMPLES)
+def test_html_round_trips_through_md(html: str) -> None:
+    assert _norm(md_to_html(html_to_md(html))) == _norm(html)
+
+
+def test_span_wrapper_survives_as_inner_text_only() -> None:
+    wrapped = '<p>a <span data-color="tomato">wrapped</span> c</p>'
+    assert _norm(md_to_html(html_to_md(wrapped))) == _norm("<p>a wrapped c</p>")
+
+
+# --- fail loud ---------------------------------------------------------------
+
+
+def test_md_to_html_raises_on_table() -> None:
+    with pytest.raises(ConverterError):
+        md_to_html("a | b\n---|---\nc | d")
+
+
+def test_md_to_html_raises_on_ordered_list() -> None:
+    with pytest.raises(ConverterError):
+        md_to_html("1. First\n2. Second")
+
+
+def test_md_to_html_raises_on_image() -> None:
+    with pytest.raises(ConverterError):
+        md_to_html("![alt text](image.png)")
+
+
+def test_md_to_html_raises_on_heading() -> None:
+    with pytest.raises(ConverterError):
+        md_to_html("# Heading")
+
+
+def test_html_to_md_raises_on_table() -> None:
+    with pytest.raises(ConverterError):
+        html_to_md("<table><tr><td>x</td></tr></table>")
+
+
+def test_html_to_md_raises_on_ordered_list() -> None:
+    with pytest.raises(ConverterError):
+        html_to_md("<ol><li>x</li></ol>")
+
+
+def test_html_to_md_raises_on_image() -> None:
+    with pytest.raises(ConverterError):
+        html_to_md('<img src="x.png">')
+
+
+def test_html_to_md_raises_on_heading() -> None:
+    with pytest.raises(ConverterError):
+        html_to_md("<h3>Heading</h3>")
+
+
+def test_html_to_md_unwraps_span_without_raising() -> None:
+    assert html_to_md('<p>a <span style="x">b</span> c</p>') == "a b c"
+
+
+# --- entity escaping round-trips --------------------------------------------
+
+
+def test_html_to_md_unescapes_entities() -> None:
+    assert html_to_md("<p>a &amp; b &lt; c</p>") == "a & b < c"
+
+
+def test_md_to_html_escapes_entities() -> None:
+    html = md_to_html("a & b < c")
+    assert "&amp;" in html
+    assert "&lt;" in html

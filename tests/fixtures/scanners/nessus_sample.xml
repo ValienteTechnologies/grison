@@ -1,0 +1,14 @@
+<?xml version="1.0" ?>
+<NessusClientData_v2>
+  <Report name="example-scan">
+    <ReportHost name="host.example.com">
+      <ReportItem pluginID="12345" pluginName="Outdated TLS Version" svc_name="https" port="443" protocol="tcp" severity="2">
+        <risk_factor>Medium</risk_factor>
+        <description>The remote host supports an outdated version of TLS.</description>
+        <solution>Disable TLS 1.0 and TLS 1.1.</solution>
+        <synopsis>An outdated TLS version is in use.</synopsis>
+        <see_also>https://example.com/advisory/tls</see_also>
+      </ReportItem>
+    </ReportHost>
+  </Report>
+</NessusClientData_v2>

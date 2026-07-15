@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<SCAN>
+  <IP value="192.0.2.30">
+    <VULNS>
+      <CAT value="Vulnerabilities">
+        <VULN number="86000">
+          <TITLE>Outdated Apache Version</TITLE>
+          <CONSEQUENCE>An attacker may exploit known vulnerabilities in the outdated software.</CONSEQUENCE>
+          <DIAGNOSIS>The remote host is running an outdated version of Apache HTTPD.</DIAGNOSIS>
+          <SOLUTION>Upgrade Apache HTTPD to the latest stable release.</SOLUTION>
+          <CVE_ID_LIST>
+            <CVE_ID>CVE-2023-9999</CVE_ID>
+          </CVE_ID_LIST>
+        </VULN>
+      </CAT>
+    </VULNS>
+  </IP>
+</SCAN>

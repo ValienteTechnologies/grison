@@ -1,0 +1,112 @@
+{
+  "server_scan_results": [
+    {
+      "scan_status": "COMPLETED",
+      "server_location": {"hostname": "vulnhost.example.com", "port": 443},
+      "scan_result": {
+        "ssl_2_0_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {
+            "accepted_cipher_suites": [
+              {"cipher_suite": {"name": "SSL_CK_RC4_128_WITH_MD5", "key_size": 128}}
+            ]
+          }
+        },
+        "ssl_3_0_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {"accepted_cipher_suites": []}
+        },
+        "tls_1_0_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {
+            "accepted_cipher_suites": [
+              {"cipher_suite": {"name": "TLS_RSA_WITH_AES_128_CBC_SHA", "key_size": 128}}
+            ]
+          }
+        },
+        "tls_1_1_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {"accepted_cipher_suites": []}
+        },
+        "heartbleed": {
+          "status": "COMPLETED",
+          "result": {"is_vulnerable_to_heartbleed": true}
+        },
+        "robot": {
+          "status": "COMPLETED",
+          "result": {"robot_attack_enum": "NOT_VULNERABLE_NO_ORACLE"}
+        },
+        "openssl_ccs_injection": {
+          "status": "COMPLETED",
+          "result": {"is_vulnerable_to_ccs_injection": false}
+        },
+        "tls_compression": {
+          "status": "COMPLETED",
+          "result": {"supports_compression": false}
+        },
+        "certificate_info": {
+          "status": "COMPLETED",
+          "result": {
+            "certificate_deployments": [
+              {
+                "leaf_certificate_is_within_validity_period": false,
+                "leaf_certificate_subject_matches_hostname": true,
+                "path_validation_results": [
+                  {"verified_certificate_chain": null}
+                ],
+                "received_chain": []
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "scan_status": "ERROR",
+      "server_location": {"hostname": "errored.example.com", "port": 443},
+      "scan_result": null
+    },
+    {
+      "scan_status": "COMPLETED",
+      "server_location": {"hostname": "clean.example.com", "port": 443},
+      "scan_result": {
+        "ssl_2_0_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {"accepted_cipher_suites": []}
+        },
+        "ssl_3_0_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {"accepted_cipher_suites": []}
+        },
+        "tls_1_0_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {"accepted_cipher_suites": []}
+        },
+        "tls_1_1_cipher_suites": {
+          "status": "COMPLETED",
+          "result": {"accepted_cipher_suites": []}
+        },
+        "heartbleed": {
+          "status": "COMPLETED",
+          "result": {"is_vulnerable_to_heartbleed": false}
+        },
+        "robot": {
+          "status": "COMPLETED",
+          "result": {"robot_attack_enum": "NOT_VULNERABLE_NO_ORACLE"}
+        },
+        "openssl_ccs_injection": {
+          "status": "COMPLETED",
+          "result": {"is_vulnerable_to_ccs_injection": false}
+        },
+        "tls_compression": {
+          "status": "COMPLETED",
+          "result": {"supports_compression": false}
+        },
+        "certificate_info": {
+          "status": "COMPLETED",
+          "result": {"certificate_deployments": []}
+        }
+      }
+    }
+  ]
+}

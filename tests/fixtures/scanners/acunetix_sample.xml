@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScanGroup>
+  <Scan>
+    <StartURL>https://example.com</StartURL>
+    <ReportItems>
+      <ReportItem>
+        <Name>SQL Injection</Name>
+        <VulnID>sqli-001</VulnID>
+        <Severity>high</Severity>
+        <Description>&lt;p&gt;SQL injection vulnerability detected in login parameter.&lt;/p&gt;</Description>
+        <Impact>Data exfiltration, authentication bypass, remote code execution.</Impact>
+        <Recommendation>Use parameterized queries or prepared statements.</Recommendation>
+        <AffectedItem>/login.php?id=1</AffectedItem>
+        <CWE>89</CWE>
+        <Tags>
+          <Tag>CVE-2023-1234</Tag>
+          <Tag>injection</Tag>
+        </Tags>
+      </ReportItem>
+      <ReportItem>
+        <Name>Cross-Site Scripting</Name>
+        <VulnID>xss-001</VulnID>
+        <Severity>2</Severity>
+        <Description>&lt;p&gt;Reflected XSS detected in search parameter.&lt;/p&gt;</Description>
+        <Impact>Session hijacking, credential theft.</Impact>
+        <Recommendation>Encode all user-supplied output. Use a Content Security Policy.</Recommendation>
+        <AffectedItem>/search?q=test</AffectedItem>
+        <CWE>CWE-79</CWE>
+      </ReportItem>
+      <ReportItem>
+        <Name>Informational Finding</Name>
+        <VulnID>info-001</VulnID>
+        <Severity>0</Severity>
+        <Description>&lt;p&gt;Server version disclosure.&lt;/p&gt;</Description>
+        <AffectedItem>/</AffectedItem>
+      </ReportItem>
+    </ReportItems>
+  </Scan>
+  <Scan>
+    <StartURL>https://other.example.com</StartURL>
+    <ReportItems>
+      <ReportItem>
+        <Name>SQL Injection</Name>
+        <VulnID>sqli-001</VulnID>
+        <Severity>high</Severity>
+        <Description>&lt;p&gt;SQL injection vulnerability detected.&lt;/p&gt;</Description>
+        <AffectedItem>/admin/users.php?id=1</AffectedItem>
+        <CWE>89</CWE>
+      </ReportItem>
+      <ReportItem>
+        <Name>Critical Remote Code Execution</Name>
+        <VulnID>rce-001</VulnID>
+        <Severity>4</Severity>
+        <Description>&lt;p&gt;Remote code execution via deserialization.&lt;/p&gt;</Description>
+        <Impact>Full system compromise.</Impact>
+        <Recommendation>Update the affected library. Disable deserialization of untrusted data.</Recommendation>
+        <AffectedItem>/api/upload</AffectedItem>
+        <CWE>502</CWE>
+      </ReportItem>
+    </ReportItems>
+  </Scan>
+</ScanGroup>

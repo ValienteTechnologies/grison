@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues burpVersion="2023.1" exportTime="Mon Jan 01 00:00:00 UTC 2026">
+  <issue>
+    <serialNumber>1</serialNumber>
+    <type>1048832</type>
+    <name>SQL injection</name>
+    <host ip="192.0.2.10">https://example.com</host>
+    <path>/login</path>
+    <location>/login</location>
+    <severity>High</severity>
+    <confidence>Certain</confidence>
+    <issueBackground>SQL injection background.</issueBackground>
+    <issueDetail>SQL injection was detected in the username parameter.</issueDetail>
+    <remediationBackground>Use parameterized queries.</remediationBackground>
+    <references>&lt;a href="https://portswigger.net/kb/issues/00100200_sql-injection"&gt;SQL injection&lt;/a&gt;</references>
+  </issue>
+</issues>

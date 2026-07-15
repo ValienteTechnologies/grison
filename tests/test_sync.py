@@ -1,0 +1,117 @@
+"""Phase-7 pull tests with a fake Ghostwriter client (no live calls)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from grison.markdown import markdown_to_finding
+from grison.remote.sync import pull
+
+_LIB = [
+    {
+        "id": 1,
+        "title": "Lib A",
+        "severityId": 3,
+        "findingTypeId": 4,
+        "cvssVector": "",
+        "cvssScore": None,
+        "description": "<p>alpha</p>",
+        "impact": "",
+        "mitigation": "",
+        "references": "",
+        "replication_steps": "",
+    }
+]
+_RF = [
+    {
+        "id": 10,
+        "reportId": 7,
+        "title": "Inst A",
+        "severityId": 4,
+        "findingTypeId": 4,
+        "cvssVector": "",
+        "cvssScore": None,
+        "description": "<p>beta</p>",
+        "impact": "",
+        "mitigation": "",
+        "references": "",
+        "replication_steps": "",
+        "affectedEntities": "<p>192.0.2.9</p>",
+    }
+]
+_EV = [{"id": 99, "findingId": 10, "reportId": None, "document": "evidence/9/shot.png",
+        "caption": "c", "friendlyName": "shot"}]
+_REPORTS = [{"id": 7, "title": "Acme"}]
+_IMG = b"\x89PNG\r\n\x1a\n-fake-png-bytes"
+
+
+class FakeGW:
+    def __init__(self, findings=None):
+        self._findings = findings if findings is not None else _LIB
+
+    def fetch_findings(self):
+        return self._findings
+
+    def fetch_reported_findings(self):
+        return _RF
+
+    def fetch_evidence(self):
+        return _EV
+
+    def fetch_reports(self):
+        return _REPORTS
+
+    def download_evidence(self, evidence_id: int):
+        return ("shot.png", _IMG)
+
+
+def test_pull_mirrors_and_is_idempotent(tmp_path: Path) -> None:
+    r1 = pull(tmp_path, FakeGW())
+    assert len(r1.written) == 2 and r1.evidence_written == 1
+    libf = tmp_path / "findings" / "library" / "lib-a.md"
+    assert libf.exists()
+    rf_files = list((tmp_path / "findings" / "reports").rglob("*.md"))
+    assert len(rf_files) == 1 and rf_files[0].name == "10-inst-a.md"
+    img = tmp_path / "findings" / "reports" / "7-acme" / "evidence" / "shot.png"
+    assert img.exists() and img.read_bytes() == _IMG
+
+    f = markdown_to_finding(libf.read_text())
+    assert f.grison.synced is not None and f.grison.synced.hash  # merge base stamped
+    assert f.evidence == []
+
+    r2 = pull(tmp_path, FakeGW())  # re-pull is a no-op
+    assert r2.written == [] and len(r2.unchanged) == 2
+
+
+def test_pull_preserves_local_edit(tmp_path: Path) -> None:
+    pull(tmp_path, FakeGW())
+    libf = tmp_path / "findings" / "library" / "lib-a.md"
+    libf.write_text(libf.read_text().replace("Lib A", "Lib A EDITED"))
+    r = pull(tmp_path, FakeGW())
+    assert libf in r.local_ahead  # not clobbered
+    assert "EDITED" in libf.read_text()
+
+
+def test_pull_fast_forwards_clean_local(tmp_path: Path) -> None:
+    pull(tmp_path, FakeGW())
+    changed = [{**_LIB[0], "description": "<p>alpha CHANGED</p>"}]
+    r = pull(tmp_path, FakeGW(findings=changed))
+    libf = tmp_path / "findings" / "library" / "lib-a.md"
+    assert libf in r.written
+    assert "CHANGED" in libf.read_text()
+
+
+def test_pull_detects_collision(tmp_path: Path) -> None:
+    pull(tmp_path, FakeGW())
+    libf = tmp_path / "findings" / "library" / "lib-a.md"
+    libf.write_text(libf.read_text().replace("alpha", "alpha LOCAL"))
+    changed = [{**_LIB[0], "description": "<p>alpha REMOTE</p>"}]
+    r = pull(tmp_path, FakeGW(findings=changed))
+    assert libf in r.collisions
+    assert "LOCAL" in libf.read_text()  # collision never overwrites local
+
+
+def test_dry_run_writes_nothing(tmp_path: Path) -> None:
+    r = pull(tmp_path, FakeGW(), dry_run=True)
+    assert len(r.written) == 2  # would-write reported
+    assert not (tmp_path / "findings" / "library" / "lib-a.md").exists()
