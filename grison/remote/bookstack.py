@@ -51,34 +51,82 @@ class BookStackClient:
             return None
         return resp.json()
 
+    def _list(self, path: str) -> list[dict]:
+        """Fetch *every* row of a list endpoint. BookStack caps a response at ``count``
+        rows — without following ``offset`` up to ``total``, a wiki past the cap would
+        silently truncate (and previously-synced pages beyond it would look deleted)."""
+        rows: list[dict] = []
+        while True:
+            data = self._request(
+                "GET", path, params={"count": _LIST_COUNT, "offset": len(rows)}
+            )
+            batch = data["data"]
+            rows.extend(batch)
+            if not batch or len(rows) >= data.get("total", len(rows)):
+                return rows
+
     def fetch_books(self) -> list[dict]:
-        data = self._request("GET", "/api/books", params={"count": _LIST_COUNT})
-        return data["data"]
+        return self._list("/api/books")
+
+    def fetch_chapters(self) -> list[dict]:
+        return self._list("/api/chapters")
+
+    def fetch_shelves(self) -> list[dict]:
+        return self._list("/api/shelves")
+
+    def fetch_shelf(self, shelf_id: int) -> dict:
+        return self._request("GET", f"/api/shelves/{shelf_id}")
 
     def fetch_pages(self) -> list[dict]:
-        data = self._request("GET", "/api/pages", params={"count": _LIST_COUNT})
-        return data["data"]
+        return self._list("/api/pages")
 
     def fetch_page(self, page_id: int) -> dict:
         return self._request("GET", f"/api/pages/{page_id}")
 
     def update_page(
-        self, page_id: int, *, markdown: str, name: str | None = None, book_id: int | None = None
+        self,
+        page_id: int,
+        *,
+        markdown: str,
+        name: str | None = None,
+        book_id: int | None = None,
+        chapter_id: int | None = None,
+        priority: int | None = None,
+        tags: list[dict] | None = None,
     ) -> None:
+        # book_id and chapter_id are both *parent moves*: book_id re-parents the page to
+        # the book root (ejecting it from any chapter), chapter_id moves it into a chapter.
+        # Callers must send at most one, and only when they intend a move.
         body: dict = {"markdown": markdown}
         if name is not None:
             body["name"] = name  # so a local title rename actually reaches BookStack
-        if book_id is not None:
-            body["book_id"] = book_id  # move the page to another book
+        if chapter_id is not None:
+            body["chapter_id"] = chapter_id
+        elif book_id is not None:
+            body["book_id"] = book_id
+        if priority is not None:
+            body["priority"] = priority
+        if tags is not None:
+            body["tags"] = tags
         self._request("PUT", f"/api/pages/{page_id}", json=body)
 
-    def create_page(self, *, book_id: int, name: str, markdown: str) -> int:
-        data = self._request(
-            "POST",
-            "/api/pages",
-            json={"book_id": book_id, "name": name, "markdown": markdown},
-        )
-        return data["id"]
+    def create_page(
+        self,
+        *,
+        name: str,
+        markdown: str,
+        book_id: int | None = None,
+        chapter_id: int | None = None,
+        tags: list[dict] | None = None,
+    ) -> dict:
+        body: dict = {"name": name, "markdown": markdown}
+        if chapter_id is not None:
+            body["chapter_id"] = chapter_id
+        else:
+            body["book_id"] = book_id
+        if tags is not None:
+            body["tags"] = tags
+        return self._request("POST", "/api/pages", json=body)
 
     def delete_page(self, page_id: int) -> None:
         self._request("DELETE", f"/api/pages/{page_id}")

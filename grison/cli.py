@@ -212,6 +212,10 @@ def _print_meth_summary(m: MethResult, *, dry_run: bool) -> None:
         f"{tense}create {len(m.created)}  ({len(m.unchanged)} clean, {len(m.repaired)} repaired)",
         fg=typer.colors.GREEN,
     )
+    if m.materialized:
+        typer.echo(f"structure: {tense}materialize {len(m.materialized)} book/chapter mirror(s)")
+    for old, new in m.moved:
+        typer.echo(f"  {tense}move {old} → {new}")
     if m.snapshot_dir:
         typer.echo(f"snapshot: {m.snapshot_dir}")
     if m.mass_change_blocked:

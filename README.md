@@ -61,7 +61,7 @@ findings/
   reports/<id>-<slug>/
     evidence/
 methodology/
-  library/<book>/
+  library/<book>/<chapter>/
   checklists/<engagement>/
 .grison/
 ```
@@ -72,9 +72,18 @@ methodology/
 | `findings/library/` | Ghostwriter finding library | reusable templates |
 | `findings/reports/<id>-<slug>/` | Ghostwriter reported findings | one dir per *existing* report; grison never creates reports |
 | `findings/reports/…/evidence/` | Ghostwriter evidence | images attached to a finding |
-| `methodology/library/` | BookStack books/pages | markdown-native, mirrors verbatim |
+| `methodology/library/` | BookStack books/chapters/pages | markdown-native, mirrors verbatim |
 | `methodology/checklists/` | nothing | per-engagement working copies, `cp -r` from library |
 | `.grison/` | — | creds + sync state; auto-gitignored, never commit |
+
+BookStack's structure mirrors losslessly: `library/<book>/<page>.md` for pages at a
+book's root, `library/<book>/<chapter>/<page>.md` for chaptered pages. Every book and
+chapter — including empty ones — materializes as a directory holding a `.book.yml` /
+`.chapter.yml` mirror (ids, name, description, shelf membership, chapter order;
+pull-only). Page sort order (`priority`) and page tags live in the page frontmatter
+and sync in both directions. Moving a file between chapter directories moves the page
+on BookStack; a page moved into a chapter remotely relocates the local file on the
+next sync.
 
 Sync matches records by remote id stored in the file, not by filename (filenames are
 cosmetic). A file whose directory disagrees with its stored id is a *move* and becomes
