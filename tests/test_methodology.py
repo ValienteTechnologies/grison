@@ -46,10 +46,22 @@ class FakeBS:
     def fetch_page(self, page_id: int):
         return dict(self.pages[page_id])  # a fresh dict, like a real HTTP response
 
-    def update_page(self, page_id, *, markdown, name=None, book_id=None,  # type: ignore[no-untyped-def]
+    def update_page(self, page_id, *, markdown=None, html=None, name=None, book_id=None,  # type: ignore[no-untyped-def]
                     chapter_id=None, priority=None, tags=None):
+        if (markdown is None) == (html is None):
+            raise ValueError("update_page requires exactly one of markdown or html")
         p = self.pages[page_id]
-        p["markdown"] = markdown
+        if html is not None:
+            # mirrors real BookStack: an html PUT is wysiwyg-authored content — the
+            # markdown column goes empty, editor flips to a wysiwyg flavor. This is
+            # ONLY ever sent by _BSSnapshot.rollback restoring a wysiwyg pre-image.
+            p["raw_html"] = html
+            p["html"] = html
+            p["markdown"] = ""
+            p["editor"] = "wysiwyg"
+        else:
+            p["markdown"] = markdown
+            p["editor"] = "markdown"
         if name is not None:
             p["name"] = name
         if chapter_id is not None:  # move into a chapter (implies its book)
@@ -83,11 +95,16 @@ class FakeBS:
         self.pages.pop(page_id, None)
 
     def seed(self, pid: int, slug: str, name: str, md: str, *,
-             book_id: int = 22, chapter_id: int = 0, priority: int | None = None) -> None:
+             book_id: int = 22, chapter_id: int = 0, priority: int | None = None,
+             editor: str | None = None, raw_html: str | None = None) -> None:
         rec = {"id": pid, "book_id": book_id, "chapter_id": chapter_id,
                "name": name, "slug": slug, "markdown": md}
         if priority is not None:
             rec["priority"] = priority
+        if editor is not None:  # e.g. "wysiwyg" — a page authored via BookStack's WYSIWYG editor
+            rec["editor"] = editor
+        if raw_html is not None:
+            rec["raw_html"] = raw_html
         self.pages[pid] = rec
 
     def add_chapter(self, cid: int, slug: str, name: str, *, book_id: int = 22,

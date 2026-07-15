@@ -41,3 +41,11 @@ def bootstrap_tree(root: Path) -> list[Path]:
 def inbox_dir(root: Path) -> Path:
     """Where ``parse`` writes proto-instances for triage (local-only, never synced)."""
     return root / "findings" / "inbox"
+
+
+def mirrors_path(root: Path) -> Path:
+    """Where read-only BookStack structure mirrors (``.book.yml``/``.chapter.yml``/
+    ``.shelves/*.yml``) record the sha256 of the exact bytes last written by grison,
+    so a hand-edit to a generated mirror can be detected on the next sync instead of
+    silently overwritten."""
+    return root / ".grison" / "mirrors.json"

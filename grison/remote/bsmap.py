@@ -68,6 +68,24 @@ def page_from_record(rec: dict, *, book_slug: str, chapter_slug: str | None = No
     )
 
 
+def is_markdown_native(rec: dict) -> bool:
+    """True when a BookStack page record is safe for grison's markdown mirror.
+
+    BookStack pages carry content in either ``markdown`` (``editor="markdown"``) or
+    ``html``/``raw_html`` (wysiwyg flavors); grison only ever reads/writes the former.
+    False when ``editor`` is a non-markdown flavor, or — defensively, for installs
+    where ``editor`` itself might be stale or absent — when ``markdown`` is empty
+    while real rendered content exists (``raw_html``/``html`` non-empty), which is
+    exactly the wysiwyg-authored-page shape that must never be silently mirrored as
+    an empty body nor overwritten via the markdown PUT param."""
+    editor = rec.get("editor")
+    if editor and editor != "markdown":
+        return False
+    markdown = (rec.get("markdown") or "").strip()
+    html = (rec.get("raw_html") or rec.get("html") or "").strip()
+    return bool(markdown) or not html
+
+
 def _norm_tags(raw: list) -> list[dict]:
     """Normalize tags to [{"name","value"}] — the shape hashed and PUT back. Accepts
     BookStack records (extra keys dropped) and frontmatter shorthand (a bare string

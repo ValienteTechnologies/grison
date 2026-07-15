@@ -87,7 +87,8 @@ class BookStackClient:
         self,
         page_id: int,
         *,
-        markdown: str,
+        markdown: str | None = None,
+        html: str | None = None,
         name: str | None = None,
         book_id: int | None = None,
         chapter_id: int | None = None,
@@ -97,7 +98,15 @@ class BookStackClient:
         # book_id and chapter_id are both *parent moves*: book_id re-parents the page to
         # the book root (ejecting it from any chapter), chapter_id moves it into a chapter.
         # Callers must send at most one, and only when they intend a move.
-        body: dict = {"markdown": markdown}
+        #
+        # `html` exists ONLY for the wysiwyg-rollback path (grison/remote/methodology.py's
+        # _BSSnapshot.rollback): sending markdown ALWAYS regenerates page.html from it and
+        # permanently discards any wysiwyg-authored content, so every normal push path must
+        # send markdown and only rollback of a wysiwyg pre-image may send html instead —
+        # never both.
+        if (markdown is None) == (html is None):
+            raise ValueError("update_page requires exactly one of markdown or html")
+        body: dict = {"html": html} if html is not None else {"markdown": markdown}
         if name is not None:
             body["name"] = name  # so a local title rename actually reaches BookStack
         if chapter_id is not None:

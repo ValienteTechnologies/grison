@@ -30,6 +30,7 @@ BookStack's own revision history is the second rollback layer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -40,12 +41,14 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from grison import workspace
 from grison.remote import snapshot as _snapshot  # module ref so tests can monkeypatch SNAPSHOT_ROOT
 from grison.remote.bookstack import BookStackError
 from grison.remote.bsmap import (
     MethPage,
     _norm_tags,
     bs_content_hash,
+    is_markdown_native,
     markdown_to_page,
     page_from_record,
     page_to_markdown,
@@ -95,6 +98,7 @@ class MethResult:
     snapshot_dir: Path | None = None
     mass_change_blocked: bool = False
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -107,6 +111,8 @@ class _BSUndo:
     chapter_id: int | None = None  # 0 = book root (pre-image), None = unknown
     priority: int | None = None
     tags: list[dict] | None = None
+    editor: str | None = None  # pre-image's editor — decides markdown vs html on rollback
+    raw_html: str | None = None  # pre-image's html, for restoring a wysiwyg page
 
 
 class _BSSnapshot:
@@ -114,6 +120,9 @@ class _BSSnapshot:
         self.undos: list[_BSUndo] = []
 
     def before_update(self, page_id: int, pre: dict) -> None:
+        # Capture editor + raw html on EVERY pre-image, not just wysiwyg ones — belt
+        # and suspenders so rollback can restore a wysiwyg page even if some future
+        # code path ever manages to push over one despite the guard in _apply.
         self.undos.append(
             _BSUndo(
                 "update_page",
@@ -124,6 +133,8 @@ class _BSSnapshot:
                 chapter_id=pre.get("chapter_id") or 0,
                 priority=pre.get("priority"),
                 tags=_norm_tags(pre.get("tags") or []),
+                editor=pre.get("editor"),
+                raw_html=pre.get("raw_html") or pre.get("html"),
             )
         )
 
@@ -139,15 +150,21 @@ class _BSSnapshot:
             if u.op == "update_page":
                 # restore content AND location — the pre-image's parent is the chapter
                 # when it had one, else the book root
-                client.update_page(
-                    u.id,
-                    markdown=u.markdown or "",
+                parent = dict(
                     name=u.name,
                     book_id=u.book_id if not u.chapter_id else None,
                     chapter_id=u.chapter_id or None,
                     priority=u.priority,
                     tags=u.tags,
                 )
+                # a wysiwyg pre-image restores via the html param — the ONLY permitted
+                # use of it outside this rollback path — never markdown, which would
+                # regenerate (and destroy) the page's html from an empty/stale string.
+                if not is_markdown_native({"editor": u.editor, "markdown": u.markdown,
+                                           "raw_html": u.raw_html}):
+                    client.update_page(u.id, html=u.raw_html or "", **parent)
+                else:
+                    client.update_page(u.id, markdown=u.markdown or "", **parent)
             elif u.op == "delete_page":
                 client.delete_page(u.id)
 
@@ -168,6 +185,7 @@ class _MethPlan:
     page: MethPage
     old_path: Path | None = None  # pull relocation source (chapter move / migration)
     rpage: MethPage | None = None  # remote counterpart, for push parent/priority diffs
+    forced: bool = False  # --force-local: skip the concurrent-edit collision guard
 
 
 def _split_location(base: Path, md: Path) -> tuple[str, str | None] | str:
@@ -250,34 +268,85 @@ def _artifact_scan(
     return block
 
 
+_MIRROR_HEADER = "# READ-ONLY mirror — regenerated every sync; edits here are discarded\n"
+
+
+def _mirror_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _load_mirrors(root: Path) -> dict[str, str]:
+    path = workspace.mirrors_path(root)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_mirrors(root: Path, mirrors: dict[str, str]) -> None:
+    path = workspace.mirrors_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(mirrors, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _write_mirror(
     path: Path,
     meta: dict,
     result: MethResult,
     root: Path,
+    mirrors: dict[str, str],
     *,
     dry_run: bool,
     on_event: Callable[[str], None] | None,
 ) -> None:
-    text = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True)
-    if path.exists() and path.read_text(encoding="utf-8") == text:
-        return
+    """Render + write a book/chapter/shelf mirror — but these files are read-only
+    (grison never pushes book/chapter entities): a hand-edit must never be silently
+    clobbered by the next sync's regenerate. ``mirrors`` records the sha256 of the
+    exact bytes grison last wrote per path (``.grison/mirrors.json``); on-disk bytes
+    that no longer match that hash mean the user edited the file — keep it untouched,
+    write the fresh remote render to a ``.remote.yml`` sidecar instead, and surface an
+    error. No recorded hash (first materialization) always writes normally."""
+    text = _MIRROR_HEADER + yaml.safe_dump(meta, sort_keys=False, allow_unicode=True)
+    key = _rel(root, path)
+    recorded = mirrors.get(key)
+    if path.exists():
+        on_disk = path.read_text(encoding="utf-8")
+        if recorded is not None and _mirror_hash(on_disk) != recorded:
+            sidecar = path.with_suffix(".remote.yml")
+            wrote = "would write" if dry_run else "wrote"
+            msg = (
+                f"{path} was hand-edited but mirrors are read-only (regenerated every "
+                f"sync) — {wrote} fresh remote state to {sidecar.name}; move edits to "
+                "BookStack instead"
+            )
+            result.errors.append(msg)
+            _emit(on_event, f"error {_rel(root, path)}: mirror hand-edited, kept local copy")
+            if not dry_run:
+                sidecar.write_text(text, encoding="utf-8")
+            return
+        if on_disk == text:
+            return  # unchanged — nothing to (re)materialize
     result.materialized.append(path)
     if dry_run:
         _emit(on_event, f"would materialize {_rel(root, path.parent)}")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    mirrors[key] = _mirror_hash(text)
     _emit(on_event, f"materialize {_rel(root, path.parent)}")
 
 
-def _materialize_structure(
+def _materialize_structure(  # noqa: PLR0913
     root: Path,
     client: BookStackClient,
     books_list: list[dict],
     chapters_list: list[dict],
     books: dict[int, str],
     result: MethResult,
+    mirrors: dict[str, str],
     *,
     dry_run: bool,
     on_event: Callable[[str], None] | None,
@@ -306,7 +375,7 @@ def _materialize_structure(
                 "books": ordered_books,
             }
             _write_mirror(base / ".shelves" / f"{shelf['slug']}.yml", shelf_meta, result, root,
-                          dry_run=dry_run, on_event=on_event)
+                          mirrors, dry_run=dry_run, on_event=on_event)
     except BookStackError as e:
         _emit(on_event, f"shelves unavailable ({e}) — book mirrors written without shelves")
     for b in books_list:
@@ -319,7 +388,7 @@ def _materialize_structure(
         if shelf_map.get(b["id"]):
             meta["shelves"] = shelf_map[b["id"]]
         _write_mirror(base / b["slug"] / ".book.yml", meta, result, root,
-                      dry_run=dry_run, on_event=on_event)
+                      mirrors, dry_run=dry_run, on_event=on_event)
     for c in chapters_list:
         book_slug = books.get(c["book_id"])
         if book_slug is None:
@@ -333,7 +402,7 @@ def _materialize_structure(
         if c.get("priority") is not None:
             meta["priority"] = c["priority"]
         _write_mirror(base / book_slug / c["slug"] / ".chapter.yml", meta, result, root,
-                      dry_run=dry_run, on_event=on_event)
+                      mirrors, dry_run=dry_run, on_event=on_event)
 
 
 def _pull_target(root: Path, path: Path, rpage: MethPage) -> Path:
@@ -360,35 +429,69 @@ def sync_methodology(
     force_remote = force_remote or set()
     result = MethResult()
     now = datetime.now(UTC)
+    lib_root = root / "methodology" / "library"
+    # Snapshot BEFORE _materialize_structure recreates every remote book's directory
+    # below — the book-rename tripwire needs to know whether a book's dir was ALREADY
+    # gone (a real `mv <old-dir> <new-dir>`) vs merely page-less (materialize would
+    # otherwise make every remote book's dir "exist" again regardless, masking it).
+    pre_existing_dirs = (
+        {d.name for d in lib_root.iterdir() if d.is_dir()} if lib_root.exists() else set()
+    )
+    mirrors = _load_mirrors(root)
 
     _emit(on_event, "pulling bookstack state…")
     books_list = client.fetch_books()
     books = {b["id"]: b["slug"] for b in books_list}
+    slug_to_book_id = {b["slug"]: b["id"] for b in books_list}
     chapters_list = client.fetch_chapters()
     chap_slug_by_id = {c["id"]: c["slug"] for c in chapters_list}
     chap_ids = {(c["book_id"], c["slug"]): c["id"] for c in chapters_list}
     remote: dict[int, MethPage] = {}
     remote_loc: dict[int, tuple[str, str | None, str]] = {}  # pid -> (book, chapter, page slug)
+    wysiwyg: dict[int, str] = {}  # pid -> description, for pages grison must never mirror
     pages_list = client.fetch_pages()
     for item in pages_list:
         detail = client.fetch_page(item["id"])
         book_slug = books.get(item["book_id"], item.get("book_slug", "book"))
         cid = detail.get("chapter_id") or 0
         chapter_slug = chap_slug_by_id.get(cid) if cid else None
+        remote_loc[item["id"]] = (book_slug, chapter_slug, item["slug"])
+        if not is_markdown_native(detail):
+            editor = detail.get("editor") or "wysiwyg"
+            wysiwyg[item["id"]] = f"id={item['id']}, name={detail.get('name')!r}, editor={editor}"
+            continue
         remote[item["id"]] = page_from_record(detail, book_slug=book_slug,
                                               chapter_slug=chapter_slug)
-        remote_loc[item["id"]] = (book_slug, chapter_slug, item["slug"])
     _emit(
         on_event,
         f"bookstack: {len(books_list)} books, {len(chapters_list)} chapters, "
         f"{len(pages_list)} pages",
     )
 
-    _materialize_structure(root, client, books_list, chapters_list, books, result,
+    _materialize_structure(root, client, books_list, chapters_list, books, result, mirrors,
                            dry_run=dry_run, on_event=on_event)
+    if not dry_run:
+        _save_mirrors(root, mirrors)
 
     local, dup_pids = _scan_local(root, result, on_event=on_event)
     _emit(on_event, f"reconciling {len(local)} pages…")
+
+    # wysiwyg pages are never mirrored — no empty-body stub written, and one already
+    # (wrongly, pre-fix) sitting on disk is never pulled-over — just a loud, durable
+    # skip until the page is converted to markdown in BookStack.
+    for pid, desc in wysiwyg.items():
+        if pid in local:
+            wpath = local[pid][0]
+        else:
+            book_slug, chapter_slug, page_slug = remote_loc[pid]
+            wpath = lib_root / book_slug
+            if chapter_slug:
+                wpath = wpath / chapter_slug
+            wpath = wpath / f"{page_slug}.md"
+        msg = f"wysiwyg page ({desc}) — convert to markdown in BookStack before grison can sync it"
+        result.skipped.append((wpath, msg))
+        _emit(on_event, f"skip {_rel(root, wpath)}: {msg}")
+
     snap = _BSSnapshot()
 
     planned_writes = 0
@@ -408,12 +511,37 @@ def sync_methodology(
                                old_path=path if target != path else None))
 
     for pid, (path, lpage) in local.items():
+        if pid in wysiwyg:
+            continue  # already reported above — never a candidate for push/pull
+        # Book-rename tripwire (bs-structure F7): the local dir now names a DIFFERENT
+        # existing remote book than the one this page is still stamped under, and the
+        # OLD book's directory is genuinely gone (not just page-less — see
+        # pre_existing_dirs above) — that's `mv <bookdir> <bookdir>`, not a per-page
+        # move. grison has no update_book/rename-book call; never silently mass-reparent
+        # onto an unrelated book that happens to share the new directory's slug.
+        old_book_slug = books.get(lpage.book_id)
+        new_book_id = slug_to_book_id.get(lpage.book)
+        if (
+            old_book_slug is not None
+            and lpage.book != old_book_slug
+            and new_book_id is not None
+            and new_book_id != lpage.book_id
+            and old_book_slug not in pre_existing_dirs
+        ):
+            msg = (
+                f"looks like a book rename ({old_book_slug} → {lpage.book}) — grison "
+                "cannot rename books; rename the book in BookStack or restore the "
+                "directory name"
+            )
+            result.errors.append(f"{path}: {msg}")
+            _emit(on_event, f"error {_rel(root, path)}: {msg}")
+            continue
         rpage = remote.get(pid)
         if force_remote and path in force_remote and rpage is not None:
             _plan_pull(path, rpage)
             continue
         if force_local and path in force_local and rpage is not None:
-            plans.append(_MethPlan("push", path, lpage, rpage=rpage))
+            plans.append(_MethPlan("push", path, lpage, rpage=rpage, forced=True))
             planned_writes += 1
             continue
         if lpage.synced_hash is None:
@@ -454,7 +582,10 @@ def sync_methodology(
         elif lh == base and rh != base:
             _plan_pull(path, rpage)
         elif lh == rh:
-            # user moved the file to match a remote move — adopt the remote ids
+            # local == remote regardless of base: either the user moved the file to
+            # match a remote move, or `base` is stale purely because bs_content_hash's
+            # schema changed underneath it (new field added) — either way there's
+            # nothing to reconcile, just restamp clean instead of a phantom collision.
             lpage.book_id = rpage.book_id
             lpage.chapter_id = rpage.chapter_id
             plans.append(_MethPlan("repair", path, lpage))
@@ -530,6 +661,16 @@ def _parent_move(
     return (None, None)
 
 
+def _remote_drifted(local_val: object, pre_val: object, base_val: object) -> bool:
+    """True when the fresh pre-image disagrees with the merge base (something changed
+    on BookStack since this batch's up-front snapshot) AND sending ``local_val`` would
+    actually overwrite that fresh value — i.e. pushing would clobber a concurrent
+    remote edit this run never even saw. Covers both ``base==local≠pre`` (local didn't
+    touch the field, remote did) and both sides diverging to different values; excludes
+    the safe case where local's value already matches what's now on remote."""
+    return pre_val != base_val and local_val != pre_val
+
+
 def _apply(  # noqa: PLR0913
     plan: _MethPlan, client, snap, result: MethResult, books: dict[int, str],
     chap_ids: dict, now: datetime, root: Path, *, dry_run: bool,
@@ -589,18 +730,54 @@ def _apply(  # noqa: PLR0913
             result.pushed.append(path)
             _emit(on_event, f"would push {_rel(root, path)}")
             return
+        if not is_markdown_native(pre):
+            # the page turned wysiwyg on BookStack since we last pulled it (editor
+            # switch, or a revision restore) — sending markdown here would regenerate
+            # (and permanently destroy) its html. Refuse, never update_page(markdown=…).
+            note = ("refused: remote page is no longer markdown-native (wysiwyg) — "
+                    "grison never pushes markdown over wysiwyg-authored content")
+            result.skipped.append((path, note))
+            _emit(on_event, f"skip {_rel(root, path)}: {note}")
+            return
         bid = _book_id_for(books, page.book)
         if bid is None:
             msg = f"unknown book '{page.book}' — create the book in BookStack first"
             result.errors.append(f"{path}: {msg}")
             _emit(on_event, f"error {_rel(root, path)}: {msg}")
             return
+        pre_tags = _norm_tags(pre.get("tags") or [])
+        # Concurrent-edit guard: priority already re-validated against a fresh
+        # pre-image before sending (below) — name/tags did not, so a rename/retag
+        # that happened on BookStack *during this batch* (after the up-front remote
+        # snapshot, before this page's own apply step) was silently overwritten.
+        # `plan.rpage` is that up-front snapshot, which by construction equals the
+        # merge base for this page (rh == base was required to reach a push plan) —
+        # so it doubles as the per-field "base" for a real 3-way diff against `pre`.
+        # `--force-local` explicitly asks to push local regardless of remote drift,
+        # so it skips this guard; it never skips the wysiwyg guard above.
+        if not plan.forced and plan.rpage is not None:
+            base = plan.rpage
+            if (
+                _remote_drifted(page.title, pre.get("name"), base.title)
+                or _remote_drifted(page.tags, pre_tags, base.tags)
+                or _remote_drifted(page.priority, pre.get("priority"), base.priority)
+            ):
+                fresh_book = books.get(pre.get("book_id"), page.book)
+                fresh = page_from_record(pre, book_slug=fresh_book, chapter_slug=page.chapter)
+                path.with_suffix(".remote.md").write_text(page_to_markdown(fresh),
+                                                           encoding="utf-8")
+                result.collisions.append(path)
+                _emit(on_event, f"collision {_rel(root, path)} → name/tags/priority "
+                                "changed on BookStack mid-sync")
+                return
         move_book, move_chapter = _parent_move(page, pre, bid, chap_ids)
         prio = page.priority if page.priority != pre.get("priority") else None
+        name_val = page.title if page.title != pre.get("name") else None
+        tags_val = page.tags if page.tags != pre_tags else None
         snap.before_update(page.page_id, pre)
-        client.update_page(page.page_id, markdown=page.body, name=page.title,
+        client.update_page(page.page_id, markdown=page.body, name=name_val,
                            book_id=move_book, chapter_id=move_chapter, priority=prio,
-                           tags=page.tags)
+                           tags=tags_val)
         result.pushed.append(path)
         _emit(on_event, f"push {_rel(root, path)}")
         # keep frontmatter truthful — the drift witnesses depend on it
