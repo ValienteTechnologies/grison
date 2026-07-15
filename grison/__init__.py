@@ -6,4 +6,4 @@ layout (ports & adapters): ``model`` (schema), ``scanners`` (source adapters),
 ``remote`` (Ghostwriter + BookStack), and ``cli``.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
