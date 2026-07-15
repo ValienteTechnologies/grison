@@ -19,6 +19,7 @@ from grison.remote.gwmap import finding_to_gw_fields, stamp_synced
 from grison.remote.snapshot import Snapshot, Undo
 from grison.remote.sync import pull, sync
 from grison.sinks.file_sink import slugify
+from grison.state import StateStore, persist_finding
 
 
 class FakeGW:
@@ -170,6 +171,7 @@ def _seed_synced(
     else:
         path = root / "findings" / "reports" / f"{report_id}-acme" / f"{rid}-{slugify(title)}.md"
     _write(path, f)
+    persist_finding(StateStore(root), f)  # base now lives in the store, not the file
     return path, rid
 
 

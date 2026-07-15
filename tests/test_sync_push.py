@@ -16,6 +16,7 @@ from grison.remote.gwmap import finding_to_gw_fields, stamp_synced
 from grison.remote.snapshot import Snapshot, Undo
 from grison.remote.sync import sync
 from grison.sinks.file_sink import slugify
+from grison.state import StateStore, hydrate_finding, persist_finding
 
 
 class FakeGW:
@@ -167,6 +168,7 @@ def _seed_synced(
     else:
         path = root / "findings" / "reports" / f"{report_id}-acme" / f"{rid}-{slugify(title)}.md"
     _write(path, f)
+    persist_finding(StateStore(root), f)  # base now lives in the store, not the file
     return path, rid
 
 
@@ -182,7 +184,8 @@ def test_insert_new_library_finding(tmp_path: Path) -> None:
     r = sync(tmp_path, fake)
     assert path in r.inserted and len(fake.findings) == 1
     back = markdown_to_finding(path.read_text())
-    assert back.grison.gw.id is not None and back.grison.synced.hash  # id + base written back
+    hydrate_finding(StateStore(tmp_path), back)
+    assert back.grison.gw.id is not None and back.grison.synced.hash  # id + base (base from store)
     r2 = sync(tmp_path, fake)  # now clean
     assert path in r2.unchanged and not r2.pushed and not r2.inserted
 
@@ -233,8 +236,10 @@ def test_stale_base_self_repair(tmp_path: Path) -> None:
     # simulate a crash after the remote write but before the hash write-back: base is stale,
     # but local and remote content are identical.
     f = markdown_to_finding(path.read_text())
+    hydrate_finding(StateStore(tmp_path), f)
     f.grison.synced.hash = "sha256:stale"
     _write(path, f)
+    persist_finding(StateStore(tmp_path), f)  # stale base lands in the store, where sync reads it
     r = sync(tmp_path, fake)
     assert path in r.repaired and not r.pushed and not r.collisions
 
@@ -727,6 +732,7 @@ def test_server_renamed_evidence_upload_renames_local_file(tmp_path: Path) -> No
     assert renamed_path.exists() and renamed_path.read_bytes() == b"\x89PNG\r\n\x1a\nDATA"
 
     f2 = markdown_to_finding(path.read_text())
+    hydrate_finding(StateStore(tmp_path), f2)  # basename lives in the store now
     assert f2.evidence[0].file == "evidence/renamed_ab12345_shot.png"
     assert f2.evidence[0].gw is not None
     assert f2.evidence[0].gw.basename == "renamed_ab12345_shot.png"

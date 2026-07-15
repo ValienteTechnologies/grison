@@ -10,6 +10,7 @@ import yaml
 from grison.remote import snapshot as snapshot_mod
 from grison.remote.bsmap import markdown_to_page
 from grison.remote.methodology import _BSSnapshot, sync_methodology
+from grison.state import StateStore
 
 
 class FakeBS:
@@ -128,7 +129,7 @@ def test_pull_and_idempotent(tmp_path: Path) -> None:
     page = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
     assert page in r.pulled and page.exists()
     assert "# Auth" in page.read_text()
-    assert markdown_to_page(page.read_text()).synced_hash  # merge base stamped
+    assert StateStore(tmp_path).get_page(100).base.hash  # merge base stamped, in the store
     r2 = sync_methodology(tmp_path, fake)
     assert page in r2.unchanged and not r2.pushed
 
@@ -222,7 +223,7 @@ def test_local_book_move_pushes_with_new_book_id(tmp_path: Path) -> None:
     assert not r.drift
     assert moved in r.pushed
     assert fake.pages[100]["book_id"] == 23
-    assert markdown_to_page(moved.read_text()).book_id == 23
+    assert StateStore(tmp_path).get_page(100).book_id == 23
 
 
 def test_remote_book_move_drifts_until_file_follows(tmp_path: Path) -> None:
@@ -239,7 +240,7 @@ def test_remote_book_move_drifts_until_file_follows(tmp_path: Path) -> None:
     page = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
     assert any("moved on BookStack" in why and "web/auth" in why for _p, why in r.drift)
     assert not r.pulled and not r.pushed and not r.repaired
-    assert markdown_to_page(page.read_text()).book_id == 22  # local file untouched
+    assert StateStore(tmp_path).get_page(100).book_id == 22  # store witness untouched
 
     # the user moves the file to match the remote book move
     new_dir = tmp_path / "methodology" / "library" / "web"
@@ -249,7 +250,7 @@ def test_remote_book_move_drifts_until_file_follows(tmp_path: Path) -> None:
     r2 = sync_methodology(tmp_path, fake)
     assert not r2.drift
     assert moved in r2.repaired
-    assert markdown_to_page(moved.read_text()).book_id == 23
+    assert StateStore(tmp_path).get_page(100).book_id == 23
 
     # converged — no ping-pong on the following run
     r3 = sync_methodology(tmp_path, fake)
@@ -417,7 +418,8 @@ def test_chaptered_page_pulls_into_chapter_dir(tmp_path: Path) -> None:
     page = tmp_path / "methodology" / "library" / "mobile" / "ios" / "auth-ios.md"
     assert page in r.pulled and page.exists()
     parsed = markdown_to_page(page.read_text())
-    assert parsed.chapter == "ios" and parsed.chapter_id == 5 and parsed.priority == 3
+    assert parsed.chapter == "ios" and parsed.priority == 3
+    assert StateStore(tmp_path).get_page(100).chapter_id == 5
     assert page in sync_methodology(tmp_path, fake).unchanged  # stable across runs
 
 
@@ -434,7 +436,7 @@ def test_remote_chapter_move_relocates_local_file(tmp_path: Path) -> None:
     new = tmp_path / "methodology" / "library" / "mobile" / "ios" / "auth.md"
     assert (old, new) in r.moved and new in r.pulled
     assert not old.exists() and new.exists()
-    assert markdown_to_page(new.read_text()).chapter_id == 5
+    assert StateStore(tmp_path).get_page(100).chapter_id == 5
     r2 = sync_methodology(tmp_path, fake)  # converged, no ping-pong
     assert new in r2.unchanged and not r2.pushed and not r2.moved
     assert fake.pages[100]["chapter_id"] == 5
@@ -470,7 +472,7 @@ def test_local_chapter_move_pushes(tmp_path: Path) -> None:
     r = sync_methodology(tmp_path, fake)
     assert moved in r.pushed and not r.drift
     assert fake.pages[100]["chapter_id"] == 5
-    assert markdown_to_page(moved.read_text()).chapter_id == 5
+    assert StateStore(tmp_path).get_page(100).chapter_id == 5
     r2 = sync_methodology(tmp_path, fake)
     assert moved in r2.unchanged and not r2.moved
 
@@ -488,7 +490,7 @@ def test_local_move_to_book_root_ejects_deliberately(tmp_path: Path) -> None:
     r = sync_methodology(tmp_path, fake)
     assert moved in r.pushed
     assert fake.pages[100]["chapter_id"] == 0
-    assert markdown_to_page(moved.read_text()).chapter_id == 0
+    assert StateStore(tmp_path).get_page(100).chapter_id == 0
     assert moved in sync_methodology(tmp_path, fake).unchanged
 
 
@@ -503,7 +505,8 @@ def test_create_in_chapter_dir(tmp_path: Path) -> None:
     r = sync_methodology(tmp_path, fake)
     assert newp in r.created
     parsed = markdown_to_page(newp.read_text())
-    assert parsed.page_id is not None and parsed.chapter_id == 5
+    assert parsed.page_id is not None
+    assert StateStore(tmp_path).get_page(parsed.page_id).chapter_id == 5
     assert fake.pages[parsed.page_id]["chapter_id"] == 5
 
 

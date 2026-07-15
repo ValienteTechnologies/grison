@@ -37,7 +37,6 @@ from grison.model import (
     Finding,
     check_finding_type_drift,
     check_severity_drift,
-    parse_cvss,
 )
 from grison.remote.gwmap import (
     content_hash,
@@ -51,6 +50,7 @@ from grison.remote.gwmap import (
 )
 from grison.remote.snapshot import Snapshot
 from grison.sinks.file_sink import slugify
+from grison.state import StateStore, hydrate_finding, persist_finding
 
 if TYPE_CHECKING:
     from grison.remote.ghostwriter import GhostwriterClient
@@ -187,6 +187,7 @@ def _carry_local_only(remote_f: Finding, local_f: Finding, *, forced: bool = Fal
 def _scan_local(root: Path) -> dict[tuple[str, int], tuple[Path, Finding]]:
     """Index existing synced records by (gw table, gw id) — sync matches by id, not name."""
     index: dict[tuple[str, int], tuple[Path, Finding]] = {}
+    store = StateStore(root)
     for sub in ("findings/library", "findings/reports"):
         base = root / sub
         if not base.exists():
@@ -196,10 +197,13 @@ def _scan_local(root: Path) -> dict[tuple[str, int], tuple[Path, Finding]]:
                 continue
             if "narrative" in md.parts:  # report-narrative subtree — owned by reports.py
                 continue
+            target = target_from_location(root, md)
+            tier = _tier(target[0]) if target is not None else None
             try:
-                f = markdown_to_finding(md.read_text(encoding="utf-8"))
+                f = markdown_to_finding(md.read_text(encoding="utf-8"), tier=tier)
             except (DocumentError, ValueError, OSError):
                 continue
+            hydrate_finding(store, f)
             if f.grison.gw.id is not None and f.grison.gw.table is not None:
                 index[(f.grison.gw.table, f.grison.gw.id)] = (md, f)
     return index
@@ -320,9 +324,8 @@ def _reconcile(
     _download_evidence(
         remote, ev_rows, client, target_dir, result, local_hashes=local_hashes, on_event=on_event
     )
-    stamp_synced(remote)
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(finding_to_markdown(remote), encoding="utf-8")
+    _finalize(remote, target_path, root)
     result.written.append(target_path)
     _emit(on_event, f"pull {_rel(root, target_path)}")
 
@@ -480,6 +483,7 @@ def _scan_synced(
     seen: dict[tuple[str, int], Path] = {}
     dups: set[tuple[str, int]] = set()
     claimed: set[tuple[str, int]] = set()
+    store = StateStore(root)
     for sub in ("findings/library", "findings/reports"):
         base = root / sub
         if not base.exists():
@@ -494,6 +498,7 @@ def _scan_synced(
                 result.skipped.append((md, "non-conforming path"))
                 _emit(on_event, f"skip {_rel(root, md)}: non-conforming path")
                 continue
+            loc_table, loc_report = target
             try:
                 text = md.read_text(encoding="utf-8")
             except OSError as e:
@@ -501,7 +506,7 @@ def _scan_synced(
                 _emit(on_event, f"corrupt {_rel(root, md)}: {e}")
                 continue
             try:
-                f = markdown_to_finding(text)
+                f = markdown_to_finding(text, tier=_tier(loc_table))
             except (DocumentError, ValueError) as e:
                 identity = extract_gw_identity(text)
                 if identity is not None:
@@ -509,7 +514,7 @@ def _scan_synced(
                 result.corrupt.append((md, str(e)))
                 _emit(on_event, f"corrupt {_rel(root, md)}: {e}")
                 continue
-            loc_table, loc_report = target
+            hydrate_finding(store, f)
             locals_.append(_Local(md, f, loc_table, loc_report))
             if f.grison.gw.id is not None and _location_agrees(f, loc_table, loc_report):
                 key = (loc_table, f.grison.gw.id)
@@ -855,8 +860,7 @@ def _apply(
     elif action == "repair":
         tense = "would " if dry_run else ""
         if not dry_run:
-            stamp_synced(lr.finding)
-            lr.path.write_text(finding_to_markdown(lr.finding), encoding="utf-8")
+            _finalize(lr.finding, lr.path, root)
         result.repaired.append(lr.path)
         _emit(on_event, f"{tense}repair {_rel(root, lr.path)}")
     elif action == "pull":
@@ -908,9 +912,8 @@ def _apply_pull(
     evidence_down = _download_finding_evidence(
         remote_f, client, path.parent, local_hashes=local_hashes, on_event=on_event
     )
-    stamp_synced(remote_f)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(finding_to_markdown(remote_f), encoding="utf-8")
+    _finalize(remote_f, path, root)
     result.pulled.append(path)  # local write succeeded — now safe to report as pulled
     _emit(on_event, f"pull {_rel(root, path)}")
     result.evidence_down += evidence_down
@@ -918,9 +921,12 @@ def _apply_pull(
     _clear_sidecar(path)  # collision resolved via --force-remote
 
 
-def _finalize(f: Finding, path: Path) -> None:
-    """Stamp the merge base and persist — the record's identity + sync state on disk."""
+def _finalize(f: Finding, path: Path, root: Path) -> None:
+    """Stamp the merge base, persist it to the state store, and write the file. Identity
+    stays in the file; the base (and evidence bookkeeping) now lives in ``.grison/state/``
+    — this is the single place that keeps the two in sync on every stamp/finalize."""
     stamp_synced(f)
+    persist_finding(StateStore(root), f)
     path.write_text(finding_to_markdown(f), encoding="utf-8")
 
 
@@ -1027,24 +1033,7 @@ def _push_tags(
     return True
 
 
-def _reconcile_cvss_score(f: Finding) -> str | None:
-    """Never push a ``cvss.score`` that disagrees with ``parse_cvss(vector).base_score``
-    (F3/cvss-score-unhashed) — the base score is a pure function of the vector, so a
-    stale or hand-edited score riding along a push would land a mathematically
-    inconsistent pair on Ghostwriter. Recomputes ``f.cvss.score`` in place (the caller's
-    subsequent ``_finalize`` persists the correction to the local file too) and returns
-    a warning message when a correction happened, ``None`` when already consistent."""
-    if f.cvss is None:
-        return None
-    correct = parse_cvss(f.cvss.vector).base_score
-    if f.cvss.score == correct:
-        return None
-    stale = f.cvss.score
-    f.cvss.score = correct
-    return f"cvss score {stale} disagreed with vector-derived {correct} — recomputed"
-
-
-def _finalize_canonical(shell: Finding, f: Finding, path: Path) -> None:
+def _finalize_canonical(shell: Finding, f: Finding, path: Path, root: Path) -> None:
     """Persist the canonical, converter-rebuilt ``shell`` (never the pre-mutation local
     ``f``, whose prose is the whole echo bug) — but with evidence always taken from
     ``f``'s live, in-place-mutated list, never from the shell's own rebuild (built with
@@ -1054,7 +1043,7 @@ def _finalize_canonical(shell: Finding, f: Finding, path: Path) -> None:
     even if a future change ever reassigns ``f.evidence`` outright instead of mutating
     entries in place."""
     shell.evidence = f.evidence
-    _finalize(shell, path)
+    _finalize(shell, path, root)
 
 
 def _apply_push(
@@ -1069,9 +1058,6 @@ def _apply_push(
         _emit(on_event, f"would push {_rel(root, lr.path)}")
         return
     f = lr.finding
-    score_warn = _reconcile_cvss_score(f)
-    if score_warn:
-        result.warnings.append(f"{_rel(root, lr.path)}: {score_warn}")
     pre = gw_pre_image(plan.rec, tier=_tier(lr.loc_table))
     snap.before_update(lr.loc_table, f.grison.gw.id, pre)
     fields = finding_to_gw_fields(f)
@@ -1096,7 +1082,7 @@ def _apply_push(
     )
 
     def finalize(path: Path) -> None:
-        _finalize_canonical(shell, f, path)
+        _finalize_canonical(shell, f, path, root)
 
     try:
         shell = gw_record_to_finding(
@@ -1127,10 +1113,8 @@ def _apply_insert(
         result.inserted.append(lr.path)
         _emit(on_event, f"would insert {_rel(root, lr.path)}")
         return
+    old_table, old_id = lr.finding.grison.gw.table, lr.finding.grison.gw.id
     f = _relocate(lr.finding, lr.loc_table, lr.loc_report)
-    score_warn = _reconcile_cvss_score(f)
-    if score_warn:
-        result.warnings.append(f"{_rel(root, lr.path)}: {score_warn}")
     fields = finding_to_gw_fields(f)
     if lr.loc_table == "finding":
         rec_after = client.insert_finding(fields)
@@ -1139,6 +1123,11 @@ def _apply_insert(
     new_id = rec_after["id"]
     snap.after_insert(lr.loc_table, new_id)
     f.grison.gw.id = new_id
+    if old_id is not None:
+        # insert-from-move (tier change or cross-cell relocation): the source identity's
+        # store entry is now orphaned — no local file claims it any more — so drop it
+        # rather than leaving a stale base nothing will ever read again.
+        StateStore(root).delete_finding(old_table, old_id)
     result.inserted.append(lr.path)  # insert succeeded — now safe to report as inserted
     _emit(on_event, f"insert {_rel(root, lr.path)}")
 
@@ -1149,7 +1138,7 @@ def _apply_insert(
     canonical_tags = client.fetch_tags_for(lr.loc_table, new_id) if pushed_tags else []
 
     def finalize(path: Path) -> None:
-        _finalize_canonical(shell, f, path)
+        _finalize_canonical(shell, f, path, root)
 
     try:
         shell = gw_record_to_finding(
@@ -1162,9 +1151,12 @@ def _apply_insert(
         )
         # Persist the new id WITHOUT a base (bypassing stamp_synced) — unlike a push,
         # nothing on disk carried this identity before, so writing nothing at all would
-        # let the next sync re-insert a duplicate. Next sync instead sees a broken link
-        # (id set, no base) and surfaces it loudly rather than silently reintroducing
-        # the echo by stamping a base off pre-canonicalization local content.
+        # let the next sync re-insert a duplicate. persist_finding still runs (base=None
+        # since grison.synced is unset) so any uploaded-evidence ids stay recorded. Next
+        # sync instead sees a broken link (id set, no base) and surfaces it loudly rather
+        # than silently reintroducing the echo by stamping a base off pre-canonicalization
+        # local content.
+        persist_finding(StateStore(root), f)
         lr.path.write_text(finding_to_markdown(f), encoding="utf-8")
         return
 

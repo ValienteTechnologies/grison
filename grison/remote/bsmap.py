@@ -108,23 +108,20 @@ def _norm_tags(raw: list) -> list[dict]:
 
 
 def page_to_markdown(page: MethPage) -> str:
-    """Serialize a MethPage to its local methodology document."""
+    """Serialize a MethPage to its local methodology document — content + identity
+    only (title/book/chapter/priority/tags/body, and ``grison.bs.page_id``). The merge
+    base, BookStack's change markers, and the book/chapter id witnesses are volatile/
+    derived and live in the state store (grison/state.py), never in the tracked file."""
     fm: dict = {
         "grison": {
             "kind": "methodology",
-            "bs": {
-                "page_id": page.page_id,
-                "book_id": page.book_id,
-                "chapter_id": page.chapter_id,
-            },
+            "bs": {"page_id": page.page_id},
         },
         "title": page.title,
         "book": page.book,
     }
     if page.page_id is None:
         fm["grison"]["bs"].pop("page_id")
-    if page.book_id is None:
-        fm["grison"]["bs"].pop("book_id")
     if page.chapter:
         fm["chapter"] = page.chapter
     if page.priority is not None:
@@ -132,22 +129,16 @@ def page_to_markdown(page: MethPage) -> str:
     if page.tags:
         # value-less tags serialize as bare strings — the common case reads cleanly
         fm["tags"] = [t["name"] if not t["value"] else dict(t) for t in page.tags]
-    if page.synced_hash:
-        synced: dict = {"hash": page.synced_hash, "at": page.synced_at}
-        # remote markers are omitted (not written as null) when unset — legacy/never-
-        # populated case — so their absence, not a null, is what forces a detail fetch.
-        if page.remote_updated_at is not None:
-            synced["remote_updated_at"] = page.remote_updated_at
-        if page.remote_revision_count is not None:
-            synced["remote_revision_count"] = page.remote_revision_count
-        fm["grison"]["synced"] = synced
     fm_yaml = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip()
     body = page.body.strip()
     return f"---\n{fm_yaml}\n---\n\n{body}\n" if body else f"---\n{fm_yaml}\n---\n"
 
 
 def markdown_to_page(text: str) -> MethPage:
-    """Parse a local methodology document back into a MethPage."""
+    """Parse a local methodology document back into a MethPage — content + identity
+    only. The merge base, remote change markers, and book/chapter id witnesses are
+    left at their defaults; the caller hydrates them from the state store right after
+    this returns (grison/remote/methodology.py's ``_hydrate_page``)."""
     if not text.startswith("---"):
         raise ValueError("methodology document has no frontmatter")
     lines = text.splitlines()
@@ -160,27 +151,15 @@ def markdown_to_page(text: str) -> MethPage:
         raise ValueError("unterminated frontmatter")
     grison = fm.get("grison", {})
     bs = grison.get("bs", {})
-    synced = grison.get("synced") or {}
-    at = synced.get("at")
-    if isinstance(at, datetime):
-        at = at.isoformat()
-    remote_updated_at = synced.get("remote_updated_at")
-    if isinstance(remote_updated_at, datetime):  # a hand-edited unquoted timestamp
-        remote_updated_at = remote_updated_at.isoformat()
     return MethPage(
         page_id=bs.get("page_id"),
-        book_id=bs.get("book_id"),
+        book_id=None,
         book=fm.get("book", ""),
         title=fm.get("title", ""),
         body=body,
         chapter=fm.get("chapter"),
-        chapter_id=bs.get("chapter_id") or 0,
         priority=fm.get("priority"),
         tags=_norm_tags(fm.get("tags") or []),
-        synced_hash=synced.get("hash"),
-        synced_at=at,
-        remote_updated_at=remote_updated_at,
-        remote_revision_count=synced.get("remote_revision_count"),
     )
 
 

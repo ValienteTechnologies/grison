@@ -13,9 +13,9 @@ import pytest
 
 from grison.remote import snapshot as snapshot_mod
 from grison.remote.bookstack import BookStackClient, BookStackError
-from grison.remote.bsmap import markdown_to_page, page_to_markdown
 from grison.remote.creds import Creds
 from grison.remote.methodology import sync_methodology
+from grison.state import PageState, StateStore
 
 _CREDS = Creds(
     bs_url="https://wiki.example",
@@ -350,6 +350,33 @@ def test_noop_sync_skips_detail_fetch_entirely(tmp_path: Path) -> None:
     assert page in r2.unchanged and not r2.pushed and not r2.pulled
 
 
+def test_page_file_carries_no_volatile_state_store_backs_the_skip_gate(tmp_path: Path) -> None:
+    """SSOT guard: after a pull, the tracked file is content + identity only — no
+    synced/remote-marker/book-chapter-id lines — while the merge base and BookStack's
+    change markers land in the state store. A re-scan+hydrate sourced from that store
+    alone still hits the skip-detail-fetch fast path, proving the store (not the file)
+    backs the gate."""
+    server = _StatefulServer()
+    server.seed(10, "recon", "Recon", "# Recon\n\nnmap etc.")
+    with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
+        sync_methodology(tmp_path, client)
+        page = _page_path(tmp_path)
+        text = page.read_text()
+        for leaked in ("synced", "hash:", "remote_updated_at", "remote_revision_count",
+                       "book_id", "chapter_id"):
+            assert leaked not in text
+
+        store = StateStore(tmp_path)
+        st = store.get_page(10)
+        assert st is not None and st.base.hash
+        assert st.remote_updated_at is not None and st.remote_revision_count is not None
+
+        server.fetch_page_calls = 0
+        r = sync_methodology(tmp_path, client)
+    assert server.fetch_page_calls == 0  # the store alone backs the skip-detail-fetch gate
+    assert page in r.unchanged
+
+
 def test_bumped_revision_count_forces_fetch_and_reconverges_clean(tmp_path: Path) -> None:
     """A marker bump with no actual content change (a no-op remote write) forces one
     detail fetch, classifies clean with no churn, and picks up the fresh markers so the
@@ -359,7 +386,8 @@ def test_bumped_revision_count_forces_fetch_and_reconverges_clean(tmp_path: Path
     with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
         sync_methodology(tmp_path, client)
         page = _page_path(tmp_path)
-        before = markdown_to_page(page.read_text())
+        store = StateStore(tmp_path)
+        before = store.get_page(10)
 
         server.touch(server.pages[10])  # e.g. an empty PUT: markers bump, content doesn't
         server.fetch_page_calls = 0
@@ -367,7 +395,7 @@ def test_bumped_revision_count_forces_fetch_and_reconverges_clean(tmp_path: Path
         assert server.fetch_page_calls == 1  # (2) bumped marker -> must fetch to find out
         assert page in r.unchanged
         assert not r.pushed and not r.pulled and not r.repaired and not r.collisions
-        after = markdown_to_page(page.read_text())
+        after = store.get_page(10)
         assert after.remote_revision_count == before.remote_revision_count + 1
 
         server.fetch_page_calls = 0
@@ -382,7 +410,8 @@ def test_locally_dirty_page_fetches_and_pushes_stamping_fresh_markers(tmp_path: 
     with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
         sync_methodology(tmp_path, client)
         page = _page_path(tmp_path)
-        before = markdown_to_page(page.read_text())
+        store = StateStore(tmp_path)
+        before = store.get_page(10)
         page.write_text(page.read_text().replace("original", "edited body"))
 
         server.fetch_page_calls = 0
@@ -393,28 +422,30 @@ def test_locally_dirty_page_fetches_and_pushes_stamping_fresh_markers(tmp_path: 
     assert server.fetch_page_calls == 2
     assert page in r.pushed
     assert server.pages[10]["markdown"] == "edited body"
-    after = markdown_to_page(page.read_text())
+    after = store.get_page(10)
     # the push response stamped fresh markers, not the ones from before the push
     assert after.remote_revision_count == before.remote_revision_count + 1
     assert after.remote_updated_at != before.remote_updated_at
 
 
-def test_legacy_file_without_markers_still_syncs_and_gains_markers(tmp_path: Path) -> None:
+def test_legacy_state_without_markers_still_syncs_and_gains_markers(tmp_path: Path) -> None:
+    """A store entry recorded before remote markers were tracked (base known, markers
+    never populated) still forces one detail fetch to learn them — same "markers
+    missing" path as a never-synced page — and gains fresh markers afterward."""
     server = _StatefulServer()
     server.seed(10, "recon", "Recon", "steps")
     with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
         sync_methodology(tmp_path, client)
         page = _page_path(tmp_path)
-        legacy = markdown_to_page(page.read_text())
-        legacy.remote_updated_at = None
-        legacy.remote_revision_count = None
-        page.write_text(page_to_markdown(legacy))  # simulate a pre-upgrade file on disk
+        store = StateStore(tmp_path)
+        st = store.get_page(10)
+        store.put_page(10, PageState(base=st.base, book_id=st.book_id, chapter_id=st.chapter_id))
 
         server.fetch_page_calls = 0
         r = sync_methodology(tmp_path, client)
     assert server.fetch_page_calls == 1  # (4) markers missing -> fetches detail
     assert page in r.unchanged
-    after = markdown_to_page(page.read_text())
+    after = store.get_page(10)
     assert after.remote_updated_at is not None and after.remote_revision_count is not None
 
 

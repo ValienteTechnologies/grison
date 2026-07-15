@@ -21,6 +21,7 @@ from grison.remote.gwmap import finding_to_gw_fields, finding_to_gw_tags, stamp_
 from grison.remote.snapshot import Snapshot, Undo
 from grison.remote.sync import sync
 from grison.sinks.file_sink import slugify
+from grison.state import StateStore, hydrate_finding, persist_finding
 
 
 class FakeGW:
@@ -172,6 +173,7 @@ def _seed_synced(
     else:
         path = root / "findings" / "reports" / f"{report_id}-acme" / f"{rid}-{slugify(title)}.md"
     _write(path, f)
+    persist_finding(StateStore(root), f)  # base now lives in the store, not the file
     return path, rid
 
 
@@ -283,8 +285,10 @@ def test_stale_base_from_pre_tag_hash_schema_repairs_not_collides(tmp_path: Path
     fake = FakeGW()
     path, rid = _seed_synced(tmp_path, fake, title="PreUpgrade")
     f = markdown_to_finding(path.read_text())
+    hydrate_finding(StateStore(tmp_path), f)
     f.grison.synced.hash = "sha256:stale-pre-tags-schema"  # simulates an old-schema base
     _write(path, f)
+    persist_finding(StateStore(tmp_path), f)  # stale base lands in the store
     r = sync(tmp_path, fake)
     assert path in r.repaired
     assert not r.collisions and not r.pushed

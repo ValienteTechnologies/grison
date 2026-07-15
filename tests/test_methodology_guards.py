@@ -14,8 +14,9 @@ from pathlib import Path
 import pytest
 
 from grison.remote import snapshot as snapshot_mod
-from grison.remote.bsmap import is_markdown_native, markdown_to_page, page_to_markdown
+from grison.remote.bsmap import is_markdown_native
 from grison.remote.methodology import _BSSnapshot, sync_methodology
+from grison.state import BaseState, StateStore
 from grison.workspace import mirrors_path
 
 
@@ -412,9 +413,11 @@ def test_hash_schema_change_restamps_clean_not_collision(tmp_path: Path) -> None
     fake.seed(100, "auth", "Auth", "body")
     sync_methodology(tmp_path, fake)
     page = tmp_path / "methodology" / "library" / "mobile" / "auth.md"
-    lpage = markdown_to_page(page.read_text())
-    lpage.synced_hash = "sha256:" + "0" * 64  # stale/foreign-schema base; content untouched
-    page.write_text(page_to_markdown(lpage))
+    store = StateStore(tmp_path)
+    st = store.get_page(100)
+    # stale/foreign-schema base written straight to the store; content untouched
+    st.base = BaseState(hash="sha256:" + "0" * 64, at=st.base.at)
+    store.put_page(100, st)
     r = sync_methodology(tmp_path, fake)
     assert page in r.repaired
     assert not r.collisions

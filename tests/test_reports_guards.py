@@ -13,8 +13,10 @@ from typer.testing import CliRunner
 
 from grison.remote import snapshot as snapshot_mod
 from grison.remote.methodology import MethResult
+from grison.remote.repmap import section_hash
 from grison.remote.reports import ReportResult, sync_reports
 from grison.remote.sync import SyncResult
+from grison.state import StateStore
 
 
 class FakeGW:
@@ -200,22 +202,21 @@ def test_removed_remotely_marker_persists_across_two_syncs(tmp_path: Path) -> No
     fake.add_report(6, "Acme", {"executive_summary": "<p>v1</p>", "methodology": "<p>m</p>"})
     sync_reports(tmp_path, fake)
     meth = _sec(tmp_path, 6, "methodology")
-    meta_path = meth.parent.parent / ".report.yml"
-    meta0 = yaml.safe_load(meta_path.read_text())
-    assert "removed_remotely" not in meta0["sections"]["methodology"]
+    state0 = StateStore(tmp_path).get_report(6)
+    assert "methodology" not in state0.removed_remotely
 
     del fake.reports[6]["extraFields"]["methodology"]  # the field disappears remotely
 
     r1 = sync_reports(tmp_path, fake)
     assert any(p == meth and "remote section gone" in note for p, note in r1.skipped)
-    meta1 = yaml.safe_load(meta_path.read_text())
-    assert meta1["sections"]["methodology"]["removed_remotely"] is True
+    state1 = StateStore(tmp_path).get_report(6)
+    assert "methodology" in state1.removed_remotely
 
     r2 = sync_reports(tmp_path, fake)  # second consecutive sync — nothing else changes
     assert any(p == meth and "remote section gone" in note for p, note in r2.skipped)
-    meta2 = yaml.safe_load(meta_path.read_text())
-    assert meta2["sections"]["methodology"]["removed_remotely"] is True
-    assert meta2["sections"]["methodology"]["hash"] == meta1["sections"]["methodology"]["hash"]
+    state2 = StateStore(tmp_path).get_report(6)
+    assert "methodology" in state2.removed_remotely
+    assert state2.sections["methodology"] == state1.sections["methodology"]
 
 
 def test_removed_remotely_marker_clears_once_local_file_is_deleted(tmp_path: Path) -> None:
@@ -223,15 +224,41 @@ def test_removed_remotely_marker_clears_once_local_file_is_deleted(tmp_path: Pat
     fake.add_report(6, "Acme", {"executive_summary": "<p>v1</p>", "methodology": "<p>m</p>"})
     sync_reports(tmp_path, fake)
     meth = _sec(tmp_path, 6, "methodology")
-    meta_path = meth.parent.parent / ".report.yml"
 
     del fake.reports[6]["extraFields"]["methodology"]
     sync_reports(tmp_path, fake)
-    assert "methodology" in yaml.safe_load(meta_path.read_text())["sections"]
+    assert "methodology" in StateStore(tmp_path).get_report(6).sections
 
     meth.unlink()
     sync_reports(tmp_path, fake)
-    assert "methodology" not in yaml.safe_load(meta_path.read_text())["sections"]
+    assert "methodology" not in StateStore(tmp_path).get_report(6).sections
+
+
+# ---------------------------------------------------------------------------
+# SSOT — section merge bases live in the private state store, never in
+# .report.yml, so a git checkout of the mirror can't resurrect a stale base.
+# ---------------------------------------------------------------------------
+
+
+def test_push_base_lands_in_store_not_report_yml_and_reclassifies_clean(tmp_path: Path) -> None:
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>base</p>"})
+    sync_reports(tmp_path, fake)
+    es = _sec(tmp_path, 6, "executive_summary")
+    es.write_text("edited\n")
+
+    r = sync_reports(tmp_path, fake)
+    assert es in r.pushed  # push + pull-after-push canonicalization
+
+    meta = yaml.safe_load((_rdir(tmp_path, 6) / ".report.yml").read_text())
+    assert "sections" not in meta  # pure read-only mirror — no merge state
+
+    state = StateStore(tmp_path).get_report(6)
+    assert state.sections["executive_summary"] == section_hash(es.read_text())
+
+    r2 = sync_reports(tmp_path, fake)  # base in the store reclassifies the section clean
+    assert es in r2.unchanged
+    assert es not in r2.pushed and es not in r2.pulled
 
 
 # ---------------------------------------------------------------------------

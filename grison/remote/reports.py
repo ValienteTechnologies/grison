@@ -4,8 +4,9 @@ Ghostwriter owns report lifecycle (grison never creates or deletes reports), so 
 report's metadata is mirrored **read-only** into ``.report.yml``. The narrative —
 ``report.extraFields`` — is two-way: each instance-defined key is an editable markdown
 file under ``narrative/``, reconciled against GW like a finding field. Direction is
-derived per section from the ``.report.yml`` merge base: only-local-changed → push,
-only-remote → pull, both → collision (``<key>.remote.md`` sidecar, never overwritten).
+derived per section from the merge base held in the private state store
+(``.grison/state/report/<id>.json``): only-local-changed → push, only-remote → pull,
+both → collision (``<key>.remote.md`` sidecar, never overwritten).
 
 A push rewrites the report's whole ``extraFields`` map in one ``update_report`` (GW's
 jsonb ``_set`` replaces the column). Immediately before that write, the report is
@@ -32,7 +33,6 @@ from grison.remote.repmap import (
     html_section_to_md,
     md_section_to_html,
     meta_to_yaml,
-    read_local_meta,
     read_local_section,
     report_from_record,
     section_hash,
@@ -40,6 +40,7 @@ from grison.remote.repmap import (
 )
 from grison.remote.snapshot import Snapshot
 from grison.sinks.file_sink import slugify
+from grison.state import ReportState, StateStore
 
 if TYPE_CHECKING:
     from grison.remote.ghostwriter import GhostwriterClient
@@ -146,7 +147,9 @@ def sync_reports(
                 on_loss=lambda key, msg, losses=losses: losses.setdefault(key, []).append(msg),
             )
             rdir = _report_dir(root, doc.report_id, doc.title)
-            _, bases, _removed = read_local_meta(rdir)
+            state = StateStore(root).get_report(doc.report_id)
+            bases = state.sections if state else {}
+            _removed = set(state.removed_remotely) if state else set()  # unused by planning
             plans = _plan_report(
                 rdir, doc, bases, force_local, force_remote, result, on_event, root, losses
             )
@@ -403,11 +406,17 @@ def _apply_report(
             result.pushed.append(p.path)
             _emit(on_event, f"would push {_rel(root, p.path)}")
 
-    # refresh the read-only metadata mirror + section merge bases (skip in dry-run)
+    # persist section merge bases to the state store + refresh the read-only metadata
+    # mirror (skip both in dry-run)
     if not dry_run:
-        final_hashes, removed_remotely = _final_section_hashes(rdir, doc, plans, uncanonicalized)
+        final_hashes, removed_remotely = _final_section_hashes(root, rdir, doc, plans,
+                                                                 uncanonicalized)
+        StateStore(root).put_report(
+            doc.report_id,
+            ReportState(sections=final_hashes, removed_remotely=sorted(removed_remotely)),
+        )
         meta_path = rdir / REPORT_META
-        text = meta_to_yaml(doc, final_hashes, removed_remotely)
+        text = meta_to_yaml(doc)
         if not meta_path.exists() or meta_path.read_text(encoding="utf-8") != text:
             meta_path.parent.mkdir(parents=True, exist_ok=True)
             meta_path.write_text(text, encoding="utf-8")
@@ -416,7 +425,7 @@ def _apply_report(
 
 
 def _final_section_hashes(
-    rdir: Path, doc: ReportDoc, plans: list[_SectionPlan],
+    root: Path, rdir: Path, doc: ReportDoc, plans: list[_SectionPlan],
     uncanonicalized: set[str] | None = None,
 ) -> tuple[dict[str, str], set[str]]:
     """The merge base to stamp after applying, plus which keys are flagged
@@ -436,7 +445,8 @@ def _final_section_hashes(
     uncanonicalized = uncanonicalized or set()
     action_by_key = {p.key: p.action for p in plans}
     hashes: dict[str, str] = {}
-    _, prior, _prior_removed = read_local_meta(rdir)
+    prior_state = StateStore(root).get_report(doc.report_id)
+    prior = prior_state.sections if prior_state else {}
     for key, section in doc.sections.items():
         if key in uncanonicalized:
             continue

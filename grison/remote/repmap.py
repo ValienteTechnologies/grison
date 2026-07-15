@@ -101,46 +101,30 @@ def report_from_record(
     )
 
 
-def meta_to_yaml(
-    doc: ReportDoc, section_hashes: dict[str, str], removed_remotely: set[str] | None = None
-) -> str:
-    """Serialize ``.report.yml`` — the read-only metadata mirror plus the per-section
-    merge base. The narrative bodies live in their own files, not here.
-
-    A key in ``removed_remotely`` is a section whose base is carried forward from a
-    prior sync even though the fresh fetch no longer has it (the local narrative file
-    is still around) — its entry gets a ``removed_remotely: true`` marker so the
-    "kept locally" state is visible and survives more than one sync cycle.
-    """
-    removed_remotely = removed_remotely or set()
-    sections: dict[str, dict] = {}
-    for k, h in sorted(section_hashes.items()):
-        entry: dict = {"hash": h}
-        if k in removed_remotely:
-            entry["removed_remotely"] = True
-        sections[k] = entry
+def meta_to_yaml(doc: ReportDoc) -> str:
+    """Serialize ``.report.yml`` — the read-only metadata mirror (title/project/status/
+    dates), regenerated every sync. Holds no merge state: narrative bodies live under
+    ``narrative/``, and section merge bases live in the private state store
+    (``.grison/state/report/<id>.json``), keyed by report_id — a git checkout of this
+    file can never resurrect a stale base."""
     fm = {
         "grison": {"kind": "report", "gw": {"report_id": doc.report_id}},
         "title": doc.title,
         **doc.meta,
-        "sections": sections,
     }
     return yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)
 
 
-def read_local_meta(report_dir: Path) -> tuple[int | None, dict[str, str], set[str]]:
-    """Return ``(report_id, {section_key: base_hash}, {removed_remotely keys})`` from a
-    report dir's ``.report.yml`` — the merge base for reconcile. Missing file →
-    ``(None, {}, set())``."""
+def read_local_meta(report_dir: Path) -> int | None:
+    """Return the ``report_id`` recorded in a report dir's ``.report.yml`` mirror, or
+    ``None`` if the file is absent. Cosmetic only — merge bases live in the state
+    store, keyed by the report_id callers already have from the GW record."""
     path = report_dir / REPORT_META
     if not path.exists():
-        return None, {}, set()
+        return None
     fm = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     gw = (fm.get("grison") or {}).get("gw") or {}
-    sections = fm.get("sections") or {}
-    bases = {k: (v or {}).get("hash") for k, v in sections.items()}
-    removed = {k for k, v in sections.items() if (v or {}).get("removed_remotely")}
-    return gw.get("report_id"), bases, removed
+    return gw.get("report_id")
 
 
 def read_local_section(report_dir: Path, key: str) -> str | None:

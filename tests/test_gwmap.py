@@ -54,7 +54,8 @@ def test_library_record_maps() -> None:
     assert f.grison.gw.table == "finding" and f.grison.gw.id == 42
     assert f.title == "Weak TLS ciphers"  # stripped
     assert f.severity is Severity.MEDIUM and f.finding_type is FindingType.WEB
-    assert f.cvss is not None and f.cvss.score == 5.3
+    # score derived from the vector (7.5), not GW's stale stored cvssScore (5.3 in the fixture)
+    assert f.cvss is not None and f.cvss.score == 7.5
     assert f.impact == "- MITM exposure"
     assert f.affected_entities is None and f.evidence == []
 
@@ -73,7 +74,13 @@ def test_instance_record_with_evidence_maps() -> None:
 
 def test_mapped_record_roundtrips_through_document() -> None:
     f = gw_record_to_finding(_INSTANCE, tier="instance", evidence_rows=_EVIDENCE)
-    assert markdown_to_finding(finding_to_markdown(f)) == f
+    back = markdown_to_finding(finding_to_markdown(f))
+    # per-image hash/meta/basename are store-backed, absent from the file — clear them on the
+    # original for the content+identity round-trip compare (evidence gw.id stays as identity).
+    for e in f.evidence:
+        if e.gw is not None:
+            e.gw.hash = e.gw.meta = e.gw.basename = None
+    assert back == f
 
 
 def test_clean_gw_html_headings_to_paragraphs() -> None:

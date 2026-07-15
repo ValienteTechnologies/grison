@@ -142,8 +142,10 @@ def gw_record_to_finding(
     if tier == "instance":
         gw["report_id"] = rec.get("reportId")
 
+    # score is derived from the vector on read (SSOT) — GW's stored cvssScore is ignored, so
+    # a stale/rounded remote score can never ride into the model or the merge comparison.
     vec = (rec.get("cvssVector") or "").strip()
-    cvss = {"vector": vec, "score": rec.get("cvssScore")} if vec else None
+    cvss = {"vector": vec} if vec else None
 
     affected = (
         _field_to_md(rec.get("affectedEntities"), "affected_entities", on_loss)
@@ -182,17 +184,16 @@ def _syncable_view(finding: Finding) -> dict:
     """The fields that actually round-trip to Ghostwriter — the merge-base surface.
 
     Excludes ``evidence`` (reconciled per-image on its own hash) and the ``synced``
-    block. Prose is compared as markdown, which is stable across md→html→md.
+    block. Also excludes ``cvss.score``: it's derived from ``cvss_vector`` on every
+    read rather than stored, so it can never drift from the vector and including it
+    here would be redundant, not protective. Prose is compared as markdown, which is
+    stable across md→html→md.
     """
     return {
         "title": finding.title,
         "severity": finding.severity.value,
         "finding_type": finding.finding_type.value,
         "cvss_vector": finding.cvss.vector if finding.cvss else None,
-        # a stored score that disagrees with the vector is real drift (F3/cvss-score-
-        # unhashed) — a score-only edit must classify push, a vector-only edit that
-        # leaves a now-stale score behind must too (sync.py recomputes+warns on push).
-        "cvss_score": finding.cvss.score if finding.cvss else None,
         # sorted: a pure reorder isn't a content change (GW tags are a set, not a list).
         "cwe": sorted(finding.cwe),
         "tags": sorted(finding.tags),

@@ -34,11 +34,10 @@ def _library() -> Finding:
 def _instance_with_evidence() -> Finding:
     return Finding.model_validate(
         {
-            "grison": {
-                "tier": "instance",
-                "gw": {"id": 183, "report_id": 7},
-                "synced": {"hash": "sha256:abc", "at": "2026-07-14T12:00:00Z"},
-            },
+            # only content + identity round-trip through the file; the merge base and
+            # per-image hash/meta/basename are store-backed (see grison.state), so they are
+            # intentionally absent here.
+            "grison": {"tier": "instance", "gw": {"id": 183, "report_id": 7}},
             "severity": "medium",
             "finding_type": "mobile",
             "cwe": ["CWE-16"],
@@ -48,7 +47,7 @@ def _instance_with_evidence() -> Finding:
                     "file": "evidence/shell.png",
                     "caption": "Reverse shell",
                     "friendly_name": "reverse-shell",
-                    "gw": {"id": 38, "hash": "sha256:def"},
+                    "gw": {"id": 38},
                 }
             ],
             "title": "Weak TLS",
@@ -66,6 +65,16 @@ def test_roundtrip_identity(factory) -> None:  # type: ignore[no-untyped-def]
     f = factory()
     md = finding_to_markdown(f)
     assert markdown_to_finding(md) == f
+
+
+def test_volatile_and_derived_excluded_from_file() -> None:
+    """SSOT guard: the merge base, per-image bookkeeping, and derived values never touch the
+    tracked file — they are store-backed (grison.state) or recomputed on read, so git can't
+    revert what it never sees. Identity (gw block, evidence gw.id) stays."""
+    for f in (_library(), _instance_with_evidence()):
+        md = finding_to_markdown(f)
+        for token in ("synced", "kind:", "tier:", "score:", "hash:", "meta:", "basename:"):
+            assert token not in md, f"{token!r} leaked into the tracked file"
 
 
 def test_markdown_shape() -> None:

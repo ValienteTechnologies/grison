@@ -9,6 +9,7 @@ import yaml
 
 from grison.remote import snapshot as snapshot_mod
 from grison.remote.reports import sync_reports
+from grison.state import StateStore
 
 
 class FakeGW:
@@ -57,7 +58,9 @@ def test_pull_creates_section_files_and_meta(tmp_path: Path) -> None:
     meta = yaml.safe_load((es.parent.parent / ".report.yml").read_text())
     assert meta["grison"]["gw"]["report_id"] == 6
     assert meta["project"]["client"]["name"] == "Acme"  # read-only metadata mirror
-    assert set(meta["sections"]) == {"executive_summary", "methodology"}
+    assert "sections" not in meta  # merge bases live in the state store, not the mirror
+    state = StateStore(tmp_path).get_report(6)
+    assert set(state.sections) == {"executive_summary", "methodology"}
     # idempotent
     r2 = sync_reports(tmp_path, fake)
     assert not r2.pulled and len(r2.unchanged) == 2
@@ -202,8 +205,10 @@ def test_push_of_noncanonical_markdown_stamps_base_from_rebuilt_form(tmp_path: P
     )
     from grison.remote.repmap import section_hash
 
+    state = StateStore(tmp_path).get_report(6)
+    assert state.sections["executive_summary"] == section_hash(es.read_text())
     meta = yaml.safe_load((es.parent.parent / ".report.yml").read_text())
-    assert meta["sections"]["executive_summary"]["hash"] == section_hash(es.read_text())
+    assert "sections" not in meta  # base lives in the store, not the mirror
 
     r2 = sync_reports(tmp_path, fake)  # nothing actually changed since the push
     assert es in r2.unchanged
@@ -242,9 +247,11 @@ def test_push_canonicalization_failure_surfaces_error_and_leaves_base_unstamped(
     )
     assert es.read_text().strip() == "edited"  # rebuild failed — nothing to write back
 
+    state = StateStore(tmp_path).get_report(6)
+    assert "executive_summary" not in state.sections  # base left unstamped
+    assert "methodology" in state.sections  # untouched section unaffected
     meta = yaml.safe_load((es.parent.parent / ".report.yml").read_text())
-    assert "executive_summary" not in meta["sections"]  # base left unstamped
-    assert "methodology" in meta["sections"]  # untouched section unaffected
+    assert "sections" not in meta  # mirror never carried merge state
 
     r2 = sync_reports(tmp_path, fake)  # re-run without the injected failure: reclassifies
     assert es in r2.repaired

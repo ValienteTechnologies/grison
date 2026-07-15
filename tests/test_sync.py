@@ -6,6 +6,7 @@ from pathlib import Path
 
 from grison.markdown import markdown_to_finding
 from grison.remote.sync import pull
+from grison.state import StateStore, hydrate_finding
 
 _LIB = [
     {
@@ -79,7 +80,8 @@ def test_pull_mirrors_and_is_idempotent(tmp_path: Path) -> None:
     assert img.exists() and img.read_bytes() == _IMG
 
     f = markdown_to_finding(libf.read_text())
-    assert f.grison.synced is not None and f.grison.synced.hash  # merge base stamped
+    hydrate_finding(StateStore(tmp_path), f)
+    assert f.grison.synced is not None and f.grison.synced.hash  # merge base stamped (from store)
     assert f.evidence == []
 
     r2 = pull(tmp_path, FakeGW())  # re-pull is a no-op

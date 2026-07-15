@@ -54,6 +54,7 @@ from grison.remote.bsmap import (
     page_to_markdown,
     stamp,
 )
+from grison.state import BaseState, PageState, StateStore
 
 if TYPE_CHECKING:
     from grison.remote.bookstack import BookStackClient
@@ -85,6 +86,44 @@ def _rel(root: Path, path: Path) -> str:
 def _emit(on_event: Callable[[str], None] | None, msg: str) -> None:
     if on_event:
         on_event(msg)
+
+
+def _hydrate_page(store: StateStore, page: MethPage) -> MethPage:
+    """Fill a just-parsed page's volatile fields — merge base, BookStack's own change
+    markers, and cached book/chapter placement witnesses — from the state store, keyed
+    by page_id. A no-op without identity (never synced) or with no stored state, which
+    both read as "no base" — the classifier already handles that (broken link)."""
+    if page.page_id is None:
+        return page
+    st = store.get_page(page.page_id)
+    if st is None:
+        return page
+    page.synced_hash = st.base.hash
+    page.synced_at = st.base.at.isoformat() if st.base.at else None
+    page.remote_updated_at = st.remote_updated_at
+    page.remote_revision_count = st.remote_revision_count
+    page.book_id = st.book_id
+    page.chapter_id = st.chapter_id if st.chapter_id is not None else 0
+    return page
+
+
+def _persist_page(root: Path, page: MethPage) -> None:
+    """Write a page's merge base, remote change markers, and book/chapter placement
+    witnesses to the state store — the volatile counterpart to page_to_markdown's
+    shrunk file projection. Paired with every stamp()+write_text site, and standing
+    alone (no file write) for the marker-only refresh. No-op without identity."""
+    if page.page_id is None:
+        return
+    StateStore(root).put_page(
+        page.page_id,
+        PageState(
+            base=BaseState(hash=page.synced_hash, at=page.synced_at),
+            remote_updated_at=page.remote_updated_at,
+            remote_revision_count=page.remote_revision_count,
+            book_id=page.book_id,
+            chapter_id=page.chapter_id,
+        ),
+    )
 
 
 @dataclass
@@ -217,6 +256,7 @@ def _scan_local(
     seen: dict[int, Path] = {}
     dups: set[int] = set()
     base = root / "methodology" / "library"
+    store = StateStore(root)  # cheap — no I/O in __init__
     if not base.exists():
         return index, dups
     for md in sorted(base.rglob("*.md")):
@@ -238,6 +278,7 @@ def _scan_local(
         pid = page.page_id
         if pid is None:
             continue
+        _hydrate_page(store, page)  # merge base, remote markers, book/chapter witnesses
         if pid in seen:
             dups.add(pid)
             result.skipped.append((md, f"duplicate page_id {pid} (also {seen[pid]})"))
@@ -621,13 +662,15 @@ def sync_methodology(
             # remote write (retag round-trip, empty PUT) that bumped markers without
             # changing content, must still pick up the fresh markers here or every
             # future sync would keep re-fetching this page to learn the same thing.
+            # store-only: content is unchanged, so nothing about the tracked file
+            # differs — persist alone, no write_text, no spurious tracked-tree diff.
             if not dry_run and (
                 lpage.remote_updated_at != rpage.remote_updated_at
                 or lpage.remote_revision_count != rpage.remote_revision_count
             ):
                 lpage.remote_updated_at = rpage.remote_updated_at
                 lpage.remote_revision_count = rpage.remote_revision_count
-                path.write_text(page_to_markdown(lpage), encoding="utf-8")
+                _persist_page(root, lpage)
             result.unchanged.append(path)
         elif lh != base and rh == base:
             plans.append(_MethPlan("push", path, lpage, rpage=rpage))
@@ -747,6 +790,7 @@ def _apply(  # noqa: PLR0913
         stamp(page, now=now, remote_updated_at=page.remote_updated_at,
               remote_revision_count=page.remote_revision_count)
         path.write_text(page_to_markdown(page), encoding="utf-8")
+        _persist_page(root, page)
         result.repaired.append(path)
         _emit(on_event, f"repair {_rel(root, path)}")
     elif action == "collision":
@@ -770,6 +814,7 @@ def _apply(  # noqa: PLR0913
               remote_revision_count=page.remote_revision_count)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(page_to_markdown(page), encoding="utf-8")
+        _persist_page(root, page)
         if plan.old_path is not None:
             plan.old_path.unlink(missing_ok=True)
             result.moved.append((plan.old_path, path))
@@ -846,7 +891,8 @@ def _apply(  # noqa: PLR0913
                                   tags=tags_val) or {}
         result.pushed.append(path)
         _emit(on_event, f"push {_rel(root, path)}")
-        # keep frontmatter truthful — the drift witnesses depend on it
+        # keep the stored placement witnesses truthful — structure-drift detection
+        # (and the next sync's hydration) depends on them
         page.book_id = bid
         if move_chapter is not None:
             page.chapter_id = move_chapter
@@ -857,6 +903,7 @@ def _apply(  # noqa: PLR0913
         stamp(page, now=now, remote_updated_at=resp.get("updated_at"),
               remote_revision_count=resp.get("revision_count"))
         path.write_text(page_to_markdown(page), encoding="utf-8")
+        _persist_page(root, page)
     elif action == "create":
         if _artifact_scan(path, page.body, "", result, root, on_event=on_event):
             note = "refused: corruption artifact in new page body"
@@ -901,6 +948,7 @@ def _apply(  # noqa: PLR0913
         stamp(page, now=now, remote_updated_at=rec.get("updated_at"),
               remote_revision_count=rec.get("revision_count"))
         path.write_text(page_to_markdown(page), encoding="utf-8")
+        _persist_page(root, page)  # page_id is born above — file and store land together
 
 
 def _book_id_for(books: dict[int, str], slug: str) -> int | None:

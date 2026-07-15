@@ -16,6 +16,7 @@ from grison.remote import snapshot as snapshot_mod
 from grison.remote.gwmap import finding_to_gw_fields, stamp_synced
 from grison.remote.sync import sync
 from grison.sinks.file_sink import slugify
+from grison.state import StateStore, persist_finding
 
 
 class FakeGW:
@@ -168,6 +169,7 @@ def _seed_synced(
     else:
         path = root / "findings" / "reports" / f"{report_id}-acme" / f"{rid}-{slugify(title)}.md"
     _write(path, f)
+    persist_finding(StateStore(root), f)  # base now lives in the store, not the file
     return path, rid
 
 
@@ -271,60 +273,54 @@ _VEC_A = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
 _VEC_B = "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"  # AV:N -> AV:L
 
 
-def test_cvss_score_only_edit_pushes_recomputed_score_and_warns(tmp_path: Path) -> None:
+def test_cvss_score_edit_in_file_is_stripped_and_noop(tmp_path: Path) -> None:
+    """cvss.score is derived on read and never stored, so a hand-edited score can't drift,
+    push, or warn — it's dropped on the next write and recomputed from the vector."""
     correct = parse_cvss(_VEC_A).base_score
     fake = FakeGW()
-    path, rid = _seed_synced(
-        tmp_path, fake, title="Score Edit", cvss={"vector": _VEC_A, "score": correct}
-    )
+    path, rid = _seed_synced(tmp_path, fake, title="Score Edit", cvss={"vector": _VEC_A})
     data = markdown_to_finding(path.read_text()).model_dump(mode="json")
-    data["cvss"]["score"] = correct + 1.0  # hand-edited to something inconsistent
+    data["cvss"]["score"] = correct + 1.0  # try to hand-edit an inconsistent score
     _write(path, Finding.model_validate(data))
+    assert "score:" not in path.read_text()  # finding_to_markdown never persists it
 
     r = sync(tmp_path, fake)
 
-    assert path in r.pushed
-    assert fake.findings[rid]["cvssScore"] == correct  # never the mathematically-wrong value
-    assert any("cvss score" in w for w in r.warnings)
+    assert path not in r.pushed and not r.warnings  # no content drift → nothing to push/warn
     f2 = markdown_to_finding(path.read_text())
-    assert f2.cvss.score == correct  # local file corrected too
+    assert f2.cvss.score == correct  # recomputed from the vector
 
 
-def test_remote_cvss_score_only_edit_pulls(tmp_path: Path) -> None:
+def test_remote_cvss_score_only_edit_is_invisible(tmp_path: Path) -> None:
+    """cvss.score is not part of the merge hash (it's derived from the vector), so a GW-side
+    score change with the vector untouched is not a content change — no pull, stays clean."""
     correct = parse_cvss(_VEC_A).base_score
     fake = FakeGW()
-    path, rid = _seed_synced(
-        tmp_path, fake, title="Remote Score Edit", cvss={"vector": _VEC_A, "score": correct}
-    )
-    fake.findings[rid]["cvssScore"] = correct - 1.0  # GW-side correction, vector untouched
+    path, rid = _seed_synced(tmp_path, fake, title="Remote Score Edit", cvss={"vector": _VEC_A})
+    fake.findings[rid]["cvssScore"] = correct - 1.0  # GW-side, vector untouched
 
     r = sync(tmp_path, fake)
 
-    assert path in r.pulled
-    f = markdown_to_finding(path.read_text())
-    assert f.cvss.score == correct - 1.0
+    assert path not in r.pulled and path in r.unchanged
 
 
-def test_cvss_vector_edit_with_stale_score_pushes_recomputed_and_warns(tmp_path: Path) -> None:
+def test_cvss_vector_edit_pushes_recomputed_score(tmp_path: Path) -> None:
     score_a = parse_cvss(_VEC_A).base_score
     score_b = parse_cvss(_VEC_B).base_score
-    assert score_a != score_b  # sanity: the edit actually changes the correct score
+    assert score_a != score_b  # sanity: the edit actually changes the derived score
     fake = FakeGW()
-    path, rid = _seed_synced(
-        tmp_path, fake, title="Vector Edit", cvss={"vector": _VEC_A, "score": score_a}
-    )
+    path, rid = _seed_synced(tmp_path, fake, title="Vector Edit", cvss={"vector": _VEC_A})
     data = markdown_to_finding(path.read_text()).model_dump(mode="json")
-    data["cvss"]["vector"] = _VEC_B  # leave the old score line as-is — now stale
+    data["cvss"]["vector"] = _VEC_B  # editing the vector is a real content change
     _write(path, Finding.model_validate(data))
 
     r = sync(tmp_path, fake)
 
     assert path in r.pushed
     assert fake.findings[rid]["cvssVector"] == _VEC_B
-    assert fake.findings[rid]["cvssScore"] == score_b  # recomputed, not the stale score_a
-    assert any("cvss score" in w for w in r.warnings)
+    assert fake.findings[rid]["cvssScore"] == score_b  # derived from the new vector, never stale
     f2 = markdown_to_finding(path.read_text())
-    assert f2.cvss.score == score_b  # local file rewritten to match
+    assert f2.cvss.score == score_b
 
 
 # --- severity/finding-type drift tripwire ---------------------------------------------

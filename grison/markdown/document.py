@@ -43,9 +43,34 @@ def _prune_empty(obj: object) -> object:
     return obj
 
 
+def _strip_state(dumped: dict) -> None:
+    """Remove volatile sync-state and derived values from the frontmatter dict — they live
+    in ``.grison/state/`` (base + evidence hash/meta/basename) or are recomputed on read
+    (``cvss.score`` from the vector, ``grison.tier`` from ``gw.table``). ``grison.kind`` is a
+    constant nothing branches on. The file keeps only content + identity (``grison.gw`` and
+    each ``evidence[].gw.id``); a git checkout of it can never revert grison's merge base."""
+    grison = dumped.get("grison")
+    if isinstance(grison, dict):
+        for k in ("synced", "kind", "tier"):
+            grison.pop(k, None)
+    cvss = dumped.get("cvss")
+    if isinstance(cvss, dict):
+        cvss.pop("score", None)
+    for ev in dumped.get("evidence") or []:
+        gw = ev.get("gw") if isinstance(ev, dict) else None
+        if isinstance(gw, dict):
+            for k in ("hash", "meta", "basename"):
+                gw.pop(k, None)
+
+
 def finding_to_markdown(f: Finding) -> str:
-    """Render a Finding as its markdown document (frontmatter + title + sections)."""
+    """Render a Finding as its markdown document (frontmatter + title + sections).
+
+    Only content + identity are written; the merge base, per-image bookkeeping, and derived
+    values are excluded (see :func:`_strip_state`) — they belong to the private state store,
+    not the git-tracked file."""
     dumped = f.model_dump(mode="json", exclude_none=True)
+    _strip_state(dumped)
     title = dumped.pop("title")
     bodies = {field: dumped.pop(field, "") or "" for _, field in _SECTIONS}
     frontmatter = _prune_empty(dumped)
@@ -108,8 +133,29 @@ def _parse_body(body: str) -> tuple[str, dict[str, str]]:
     return title, sections
 
 
-def markdown_to_finding(text: str) -> Finding:
-    """Parse a markdown document back into a validated Finding."""
+def _derive_tier(grison: object, tier: str | None) -> str | None:
+    """``grison.tier`` no longer lives in the file — recover it for validation. Prefer an
+    explicit frontmatter value (back-compat with pre-refactor files), then the caller's
+    location-derived hint, then derive from the identity ``gw.table`` (``finding`` → library,
+    ``reportedFinding`` → instance). ``None`` only when a table-less file is parsed with no
+    hint, which surfaces as a normal validation error."""
+    if not isinstance(grison, dict):
+        return tier
+    if grison.get("tier") is not None:
+        return grison["tier"]
+    table = (grison.get("gw") or {}).get("table")
+    if table is not None:
+        return "library" if table == "finding" else "instance"
+    return tier
+
+
+def markdown_to_finding(text: str, *, tier: str | None = None) -> Finding:
+    """Parse a markdown document back into a validated Finding.
+
+    ``tier`` is derived from the in-file ``gw.table`` (it is no longer stored); ``tier=`` lets
+    the sync engine supply the location-derived value for a table-less file it is scanning.
+    The merge base and per-image bookkeeping are absent here — :func:`grison.state.hydrate_finding`
+    fills them from the state store after parse; ``cvss.score`` recomputes from the vector."""
     frontmatter, body = _split_frontmatter(text)
     title, sections = _parse_body(body)
 
@@ -121,6 +167,10 @@ def markdown_to_finding(text: str) -> Finding:
     data["title"] = title
     for header, field in _SECTIONS:
         data[field] = sections.get(header, "")
+    grison = data.get("grison")
+    derived = _derive_tier(grison, tier)
+    if isinstance(grison, dict) and derived is not None:
+        grison["tier"] = derived
     return Finding.model_validate(data)
 
 
