@@ -1,8 +1,9 @@
 """Converter regression tests for the real GW field idioms (synthetic samples).
 
 These pin the constructs found across the live corpus: ``<li><p>…</p></li>`` item
-wrapping, nested lists (flattened), shell pipes inside ``<code>`` (not a table), and
-the references bullet shape with target/rel/class attrs on the link.
+wrapping, one level of nested-list support (2-space ``  - `` sub-bullets, deeper
+nesting degraded to that same sub-level), shell pipes inside ``<code>`` (not a
+table), and the references bullet shape with target/rel/class attrs on the link.
 """
 
 from __future__ import annotations
@@ -15,9 +16,31 @@ def test_li_unwraps_paragraph() -> None:
     assert html_to_md(html) == "- **CWE-16:** config"
 
 
-def test_nested_list_is_flattened() -> None:
+def test_nested_list_renders_as_indented_sub_bullets() -> None:
+    # Was flattened to sibling bullets; now pins the 2-space nested convention (F7).
     html = "<ul><li><p>parent</p><ul><li><p>child a</p></li><li><p>child b</p></li></ul></li></ul>"
-    assert html_to_md(html) == "- parent\n- child a\n- child b"
+    md = html_to_md(html)
+    assert md == "- parent\n  - child a\n  - child b"
+    # md -> html -> md is a fixed point (the merge base relies on this)
+    assert html_to_md(md_to_html(md)) == md
+
+
+def test_three_level_nesting_degrades_to_one_sub_level() -> None:
+    # A <ul> nested inside a nested <li> (3 levels deep) collapses into the SAME
+    # single sub-level rather than growing a third indent — documented, deliberate.
+    html = (
+        "<ul><li><p>a</p><ul><li><p>b</p>"
+        "<ul><li><p>c</p></li></ul>"
+        "</li></ul></li></ul>"
+    )
+    assert html_to_md(html) == "- a\n  - b\n  - c"
+
+
+def test_md_nested_bullets_round_trip_to_html_and_back() -> None:
+    md = "- parent\n  - child a\n  - child b"
+    html = md_to_html(md)
+    assert html == "<ul><li>parent<ul><li>child a</li><li>child b</li></ul></li></ul>"
+    assert html_to_md(html) == md
 
 
 def test_shell_pipe_in_code_is_not_a_table() -> None:

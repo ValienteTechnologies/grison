@@ -16,11 +16,27 @@ Whitelist (both directions):
           ``<br>`` <-> a hard line break inside a paragraph
   ``<span>`` is unwrapped (kept, tag dropped) rather than rejected, since
   TinyMCE wraps highlighted text in it.
+
+Nesting: inline tokens nest arbitrarily inside bold/em/link text in both
+directions (e.g. a link whose visible text contains ``<strong>``). Lists
+support one level of nesting: a ``<ul>`` nested inside an ``<li>`` renders as
+a 2-space-indented ``  - `` sub-bullet; a ``<ul>`` nested inside ONE OF THOSE
+(three or more levels deep in the source) collapses into that same single
+sub-level rather than growing a third indent — markdown here only has one
+nesting convention.
+
+Loss visibility: constructs GW's HTML carries but this vocabulary can't
+represent — TinyMCE ``data-color``/``style`` highlight spans, non-canonical
+link ``rel``/``target`` values — are still dropped/canonicalized exactly as
+before, but ``html_to_md`` accepts an optional ``on_loss`` callback invoked
+with a human-readable message per dropped construct, so callers can surface
+the loss instead of it being silent.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -38,6 +54,11 @@ _ALLOWED_TAGS = _BLOCK_TAGS | _INLINE_TAGS | _UNWRAP_TAGS
 # fields plus headings — the finding converter rejects headings as a corruption
 # tripwire, so heading support is opt-in via ``headings=True`` and never loosens the
 # strict finding path.
+
+
+def _report_loss(on_loss: Callable[[str], None] | None, msg: str) -> None:
+    if on_loss:
+        on_loss(msg)
 
 
 def _esc(text: str) -> str:
@@ -85,8 +106,16 @@ class _TreeBuilder(HTMLParser):
         node_attrs: dict[str, str] = {}
         if tag == "a":
             for name, value in attrs:
-                if name == "href":
-                    node_attrs["href"] = value or ""
+                # href is load-bearing; rel/target are captured only so the render
+                # step can warn when they diverge from the canonical values grison
+                # substitutes on push — not otherwise preserved.
+                if name in ("href", "rel", "target"):
+                    node_attrs[name] = value or ""
+        elif tag == "span":
+            # Captured only for on_loss reporting (F4) — the span is still unwrapped.
+            for name, value in attrs:
+                if name in ("data-color", "style"):
+                    node_attrs[name] = value or ""
         node = _Node(tag, node_attrs)
         self.stack[-1].children.append(node)
         self.stack.append(node)
@@ -104,16 +133,27 @@ class _TreeBuilder(HTMLParser):
         self.stack[-1].children.append(data)
 
 
-def html_to_md(html: str, *, headings: bool = False) -> str:
+def html_to_md(
+    html: str,
+    *,
+    headings: bool = False,
+    on_loss: Callable[[str], None] | None = None,
+) -> str:
     """Convert a GW rich-text HTML fragment to markdown. ``headings=True`` also
-    accepts ``<h1>``–``<h6>`` (for report-narrative fields, not finding fields)."""
+    accepts ``<h1>``–``<h6>`` (for report-narrative fields, not finding fields).
+
+    ``on_loss``, if given, is called once per dropped/canonicalized construct
+    (styling spans, non-canonical link rel/target) with a human-readable message.
+    It never changes the output — the drop still happens — it only makes the drop
+    visible to the caller instead of silent.
+    """
     builder = _TreeBuilder(headings=headings)
     builder.feed(html)
     builder.close()
     if len(builder.stack) != 1:
         raise ConverterError(f"unclosed HTML tag: <{builder.stack[-1].tag}>")
     blocks = _group_top_level(builder.root.children)
-    return "\n\n".join(_render_block(block) for block in blocks)
+    return "\n\n".join(_render_block(block, on_loss) for block in blocks)
 
 
 def _group_top_level(children: list[_Node | str]) -> list[_Node]:
@@ -139,11 +179,11 @@ def _group_top_level(children: list[_Node | str]) -> list[_Node]:
     return blocks
 
 
-def _render_block(node: _Node) -> str:
+def _render_block(node: _Node, on_loss: Callable[[str], None] | None = None) -> str:
     if node.tag == "p":
-        return _render_inline(node.children)
+        return _render_inline(node.children, on_loss)
     if node.tag in _HEADING_TAGS:
-        return "#" * int(node.tag[1]) + " " + _render_inline(node.children)
+        return "#" * int(node.tag[1]) + " " + _render_inline(node.children, on_loss)
     if node.tag == "ul":
         lines = []
         for li in node.children:
@@ -153,44 +193,83 @@ def _render_block(node: _Node) -> str:
                 raise ConverterError("stray text directly inside <ul> (expected <li>)")
             if li.tag != "li":
                 raise ConverterError(f"unsupported <ul> child: <{li.tag}>")
-            lines.append("- " + _render_li(li))
+            head, nested = _render_li(li, on_loss)
+            lines.append("- " + head)
+            lines.extend("  - " + n for n in nested)
         return "\n".join(lines)
     raise ConverterError(f"unsupported block-level tag: <{node.tag}>")
 
 
-def _render_li(li: _Node) -> str:
-    """Render a list item, unwrapping the ``<p>`` GW wraps item content in and
-    flattening any nested ``<ul>`` into sibling items.
+def _render_li(
+    li: _Node, on_loss: Callable[[str], None] | None = None
+) -> tuple[str, list[str]]:
+    """Render one ``<li>``'s content, unwrapping the ``<p>`` GW wraps item content in.
 
-    The corpus impact/mitigation/references fields are ``<ul><li><p>…</p></li></ul>``;
-    a bare ``<li>`` of inline content is rendered directly (preserving inline spacing).
-    Nested lists (``<li>…<ul>…</ul></li>``) are flattened — markdown here is
-    intentionally single-level, and flattening round-trips stably.
+    Returns ``(head, nested)``: ``head`` is the item's own text; ``nested`` is a flat
+    list of single-level ``  - `` sub-bullet texts for any ``<ul>`` nested directly
+    inside this ``<li>``. A ``<ul>`` nested inside one of THOSE (three or more levels
+    deep in the source) collapses into that same sub-level rather than a deeper
+    indent, since markdown here supports only one nesting convention.
+
+    The corpus impact/mitigation/references fields are ``<ul><li><p>…</p></li></ul>``
+    (possibly multiple ``<p>`` siblings, joined with a space); a bare ``<li>`` of
+    inline content — including what THIS converter itself emits for a ``<li>`` that
+    has a nested ``<ul>``, since it doesn't add a ``<p>`` wrapper — is rendered as one
+    contiguous inline run instead, so whitespace round-trips exactly rather than
+    being paragraph-joined/stripped.
     """
-    if not any(isinstance(c, _Node) and c.tag in ("p", "ul") for c in li.children):
-        return _render_inline(li.children)
-    inline_parts: list[str] = []
+    has_p = any(isinstance(c, _Node) and c.tag == "p" for c in li.children)
+    has_ul = any(isinstance(c, _Node) and c.tag == "ul" for c in li.children)
+    if not has_p and not has_ul:
+        return _render_inline(li.children, on_loss), []
     nested: list[str] = []
+    if not has_p:
+        inline_children = [c for c in li.children if not (isinstance(c, _Node) and c.tag == "ul")]
+        head = _render_inline(inline_children, on_loss)
+        for child in li.children:
+            if isinstance(child, _Node) and child.tag == "ul":
+                nested.extend(_flatten_nested_ul(child, on_loss))
+        return head, nested
+    inline_parts: list[str] = []
     for child in li.children:
         if isinstance(child, _Node) and child.tag == "ul":
-            nested.extend(_render_block(child).split("\n"))  # already "- …" lines
+            nested.extend(_flatten_nested_ul(child, on_loss))
         elif isinstance(child, _Node) and child.tag == "p":
-            rendered = _render_inline(child.children)
+            rendered = _render_inline(child.children, on_loss)
             if rendered:
                 inline_parts.append(rendered)
         elif isinstance(child, str):
             if child.strip():
                 inline_parts.append(child.strip())
         else:
-            rendered = _render_inline([child])
+            rendered = _render_inline([child], on_loss)
             if rendered:
                 inline_parts.append(rendered)
     head = " ".join(inline_parts)
-    lines = ([head] if head else []) + nested
-    return "\n".join(lines)
+    return head, nested
 
 
-def _render_inline(nodes: list[_Node | str]) -> str:
+def _flatten_nested_ul(ul: _Node, on_loss: Callable[[str], None] | None) -> list[str]:
+    """Flatten a ``<ul>`` nested inside an ``<li>`` — and anything nested inside IT —
+    into a flat list of sub-bullet texts, all at the one supported nesting level."""
+    lines: list[str] = []
+    for li in ul.children:
+        if isinstance(li, str):
+            if li.strip() == "":
+                continue
+            raise ConverterError("stray text directly inside <ul> (expected <li>)")
+        if li.tag != "li":
+            raise ConverterError(f"unsupported <ul> child: <{li.tag}>")
+        head, deeper = _render_li(li, on_loss)
+        if head:
+            lines.append(head)
+        lines.extend(deeper)  # collapse a 3rd+ level into this same sub-level
+    return lines
+
+
+def _render_inline(
+    nodes: list[_Node | str], on_loss: Callable[[str], None] | None = None
+) -> str:
     parts = []
     for n in nodes:
         if isinstance(n, str):
@@ -198,16 +277,28 @@ def _render_inline(nodes: list[_Node | str]) -> str:
         elif n.tag == "br":
             parts.append("\n")
         elif n.tag == "strong":
-            parts.append(f"**{_render_inline(n.children)}**")
+            parts.append(f"**{_render_inline(n.children, on_loss)}**")
         elif n.tag == "em":
-            parts.append(f"*{_render_inline(n.children)}*")
+            parts.append(f"*{_render_inline(n.children, on_loss)}*")
         elif n.tag == "code":
             parts.append(f"`{_render_code_text(n.children)}`")
         elif n.tag == "a":
             href = n.attrs.get("href", "")
-            parts.append(f"[{_render_inline(n.children)}]({href})")
+            rel = n.attrs.get("rel")
+            if rel is not None and rel.strip() != "noopener":
+                _report_loss(on_loss, f'link rel={rel!r} canonicalized to "noopener" on push')
+            target = n.attrs.get("target")
+            if target is not None and target.strip() != "_blank":
+                _report_loss(
+                    on_loss, f'link target={target!r} canonicalized to "_blank" on push'
+                )
+            parts.append(f"[{_render_inline(n.children, on_loss)}]({href})")
         elif n.tag == "span":
-            parts.append(_render_inline(n.children))
+            attrs = {k: v for k, v in n.attrs.items() if v}
+            if attrs:
+                shown = ", ".join(f"{k}={v!r}" for k, v in attrs.items())
+                _report_loss(on_loss, f"styling span dropped ({shown})")
+            parts.append(_render_inline(n.children, on_loss))
         else:
             raise ConverterError(f"unsupported tag in inline content: <{n.tag}>")
     return "".join(parts)
@@ -242,7 +333,10 @@ _TOKEN_RE = re.compile(
     r"|\*\*(?P<strong>.+?)\*\*"
     r"|\[(?P<link_text>[^\]]*)\]\((?P<link_url>[^)]*)\)"
     r"|\*(?P<em1>.+?)\*"
-    r"|_(?P<em2>.+?)_"
+    # CommonMark's intraword rule for `_em_`: unlike `*em*`, underscore emphasis
+    # doesn't fire mid-word — required so snake_case text and underscored URLs
+    # (very common as a link's own visible text, see F2) aren't misread as markup.
+    r"|(?<!\w)_(?P<em2>.+?)_(?!\w)"
 )
 
 
@@ -278,15 +372,52 @@ def _render_md_block(block: str, *, headings: bool = False) -> str:
         if para:
             out.append(f"<p>{'<br>'.join(_inline_to_html(p) for p in para)}</p>")
         return "\n\n".join(out)
-    if lines and all(_is_list_line(line) for line in lines):
-        items = "".join(f"<li>{_inline_to_html(line[2:])}</li>" for line in lines)
-        return f"<ul>{items}</ul>"
+    if lines and _list_line_kind(lines[0]) == "top" and all(_list_line_kind(x) for x in lines):
+        return _render_list_block(lines)
     rendered = [_inline_to_html(line) for line in lines]
     return f"<p>{'<br>'.join(rendered)}</p>"
 
 
-def _is_list_line(line: str) -> bool:
-    return line.startswith("- ") or line.startswith("* ")
+def _list_line_kind(line: str) -> str | None:
+    """``"top"`` for an unindented ``- ``/``* `` bullet, ``"nested"`` for one indented
+    by 2+ spaces (any deeper indent still collapses to the single supported
+    sub-level — see module docstring), ``None`` otherwise."""
+    if line.startswith("- ") or line.startswith("* "):
+        return "top"
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) >= 2 and (stripped.startswith("- ") or stripped.startswith("* ")):
+        return "nested"
+    return None
+
+
+def _render_list_block(lines: list[str]) -> str:
+    """Render a block of ``- ``/``  - `` lines into ``<ul>``, nesting a single ``<ul>``
+    inside an ``<li>`` for that item's contiguous run of indented sub-bullets."""
+    items: list[str] = []
+    head: str | None = None
+    nested: list[str] = []
+
+    def flush() -> None:
+        nonlocal head
+        if head is None:
+            return
+        if nested:
+            nested_html = "".join(f"<li>{n}</li>" for n in nested)
+            items.append(f"<li>{head}<ul>{nested_html}</ul></li>")
+        else:
+            items.append(f"<li>{head}</li>")
+        head = None
+        nested.clear()
+
+    for line in lines:
+        if _list_line_kind(line) == "top":
+            flush()
+            head = _inline_to_html(line[2:])
+        else:  # "nested" — any indent depth collapses to this one sub-level
+            content = line.lstrip(" ")[2:]
+            nested.append(_inline_to_html(content))
+    flush()
+    return f"<ul>{''.join(items)}</ul>"
 
 
 def _check_line_whitelist(line: str, *, headings: bool = False) -> None:
@@ -312,6 +443,11 @@ def _check_line_whitelist(line: str, *, headings: bool = False) -> None:
 
 
 def _inline_to_html(text: str) -> str:
+    """Render inline markdown to HTML. bold/em/link text is recursively re-parsed
+    (mirroring ``_render_inline`` on the html->md side) so nested inline tokens —
+    a link whose visible text contains ``**bold**``, bold containing `` `code` ``,
+    etc. — round-trip instead of the inner markers coming out as literal escaped
+    text. ``<code>`` content is never re-parsed (code is verbatim, not markdown)."""
     out = []
     pos = 0
     for m in _TOKEN_RE.finditer(text):
@@ -320,15 +456,15 @@ def _inline_to_html(text: str) -> str:
         if m.group("code") is not None:
             out.append(f"<code>{_esc(m.group('code'))}</code>")
         elif m.group("strong") is not None:
-            out.append(f"<strong>{_esc(m.group('strong'))}</strong>")
+            out.append(f"<strong>{_inline_to_html(m.group('strong'))}</strong>")
         elif m.group("link_text") is not None:
             href = _esc(m.group("link_url"))
-            link_text = _esc(m.group("link_text"))
+            link_text = _inline_to_html(m.group("link_text"))
             out.append(f'<a href="{href}" target="_blank" rel="noopener">{link_text}</a>')
         elif m.group("em1") is not None:
-            out.append(f"<em>{_esc(m.group('em1'))}</em>")
+            out.append(f"<em>{_inline_to_html(m.group('em1'))}</em>")
         else:
-            out.append(f"<em>{_esc(m.group('em2'))}</em>")
+            out.append(f"<em>{_inline_to_html(m.group('em2'))}</em>")
         pos = m.end()
     out.append(_esc(text[pos:]))
     return "".join(out)

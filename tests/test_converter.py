@@ -16,6 +16,10 @@ MD_SAMPLES = [
     "- Item one\n- Item two",
     "First paragraph.\n\nSecond paragraph.",
     "Line one\nLine two",
+    # F2: nested inline markup inside a link's visible text.
+    "A [**bold link** plain](https://x/) end.",
+    # F7: one level of nested list.
+    "- parent\n  - child a\n  - child b",
 ]
 
 
@@ -64,6 +68,17 @@ HTML_SAMPLES = [
     '<a href="https://example.com/x" target="_blank" rel="noopener">link</a>.</p>',
     "<ul><li>Item one</li><li>Item two</li></ul>",
     "<p>Line one<br>Line two</p>",
+    # F2: nested inline markup inside a link's visible text — the real CWE-reference
+    # idiom present in 11 live GW records (bold label followed by the plain URL).
+    '<p>See <a href="https://cwe.mitre.org/data/definitions/122.html" target="_blank" '
+    'rel="noopener"><strong>CWE-122: Heap-based Buffer Overflow: </strong>'
+    "https://cwe.mitre.org/data/definitions/122.html</a></p>",
+    # F2: bold-inside-link, em-inside-link, code-inside-bold — the general nesting case.
+    '<p><a href="https://example.com/" target="_blank" rel="noopener">'
+    "<em>italic</em> then <strong>bold</strong> link text</a></p>",
+    "<p><strong>Bold with <code>inline code</code> and <em>em</em> inside</strong></p>",
+    # F7: one level of nested list, single sub-level.
+    "<ul><li>parent<ul><li>child a</li><li>child b</li></ul></li></ul>",
 ]
 
 
@@ -75,6 +90,45 @@ def test_html_round_trips_through_md(html: str) -> None:
 def test_span_wrapper_survives_as_inner_text_only() -> None:
     wrapped = '<p>a <span data-color="tomato">wrapped</span> c</p>'
     assert _norm(md_to_html(html_to_md(wrapped))) == _norm("<p>a wrapped c</p>")
+
+
+# --- on_loss: loud canonicalization warnings (F4, F6) -------------------------
+
+
+def test_on_loss_reports_dropped_styling_span() -> None:
+    events: list[str] = []
+    html = '<p>a <span data-color="#ff0000" style="color: #ff0000;">critical</span> b</p>'
+    md = html_to_md(html, on_loss=events.append)
+    assert md == "a critical b"  # output unchanged — the drop is only made visible
+    assert len(events) == 1
+    assert "data-color" in events[0] and "style" in events[0]
+
+
+def test_on_loss_silent_without_callback() -> None:
+    # Default behavior is unchanged: no callback given, no exception, span unwrapped.
+    assert html_to_md('<p>a <span data-color="red">b</span> c</p>') == "a b c"
+
+
+def test_on_loss_reports_noncanonical_link_rel_and_target() -> None:
+    events: list[str] = []
+    html = '<p><a href="https://x/" rel="noopener noreferrer nofollow" target="_self">x</a></p>'
+    md = html_to_md(html, on_loss=events.append)
+    assert md == "[x](https://x/)"  # output unchanged
+    assert any("rel" in e for e in events)
+    assert any("target" in e for e in events)
+
+
+def test_on_loss_silent_for_canonical_link_rel_and_target() -> None:
+    events: list[str] = []
+    html = '<p><a href="https://x/" rel="noopener" target="_blank">x</a></p>'
+    html_to_md(html, on_loss=events.append)
+    assert events == []
+
+
+def test_on_loss_silent_for_link_with_no_rel_or_target() -> None:
+    events: list[str] = []
+    html_to_md('<p><a href="https://x/">x</a></p>', on_loss=events.append)
+    assert events == []
 
 
 # --- fail loud ---------------------------------------------------------------
