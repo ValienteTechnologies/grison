@@ -10,6 +10,7 @@ from grison.model import FindingType, Severity
 from grison.remote.gwmap import (
     clean_gw_html,
     content_hash,
+    finding_to_gw_tags,
     gw_record_to_finding,
     stamp_synced,
 )
@@ -92,3 +93,47 @@ def test_content_hash_changes_with_content() -> None:
     a = gw_record_to_finding(_LIBRARY, tier="library")
     b = gw_record_to_finding({**_LIBRARY, "title": "Different"}, tier="library")
     assert content_hash(a) != content_hash(b)
+
+
+# --- tags/CWE (Track 1a) ---------------------------------------------------------------
+
+
+def test_gw_record_to_finding_splits_known_cwe_tags_from_the_rest() -> None:
+    f = gw_record_to_finding(
+        _LIBRARY, tier="library",
+        tags=["CWE:79", "ATT&CK:T1190", "CWE:", "CWE:319 ATT&CK:TA0006 ATT&CK:T1040"],
+    )
+    assert f.cwe == ["CWE-79"]  # known CWE, normalized
+    # junk/unparseable "CWE:"-shaped names never invented into cwe — stay verbatim, in order
+    assert f.tags == ["ATT&CK:T1190", "CWE:", "CWE:319 ATT&CK:TA0006 ATT&CK:T1040"]
+
+
+def test_gw_record_to_finding_normalizes_colon_dash_and_space_cwe_variants() -> None:
+    f = gw_record_to_finding(_LIBRARY, tier="library", tags=["CWE-79", "cwe: 79", "CWE:  79"])
+    assert f.cwe == ["CWE-79", "CWE-79", "CWE-79"]
+    assert f.tags == []
+
+
+def test_gw_record_to_finding_unknown_cwe_id_stays_a_verbatim_tag() -> None:
+    # a CWE-shaped name whose number isn't in the embedded index must not be invented
+    f = gw_record_to_finding(_LIBRARY, tier="library", tags=["CWE:999999999"])
+    assert f.cwe == []
+    assert f.tags == ["CWE:999999999"]
+
+
+def test_finding_to_gw_tags_projects_cwe_before_tags() -> None:
+    f = gw_record_to_finding(_LIBRARY, tier="library", tags=["CWE:79", "recon"])
+    assert finding_to_gw_tags(f) == ["CWE:79", "recon"]
+
+
+def test_content_hash_sensitive_to_cwe_and_tags() -> None:
+    a = gw_record_to_finding(_LIBRARY, tier="library")
+    b = gw_record_to_finding(_LIBRARY, tier="library", tags=["CWE:79"])
+    c = gw_record_to_finding(_LIBRARY, tier="library", tags=["recon"])
+    assert content_hash(a) != content_hash(b) != content_hash(c)
+
+
+def test_content_hash_ignores_cwe_tags_reorder() -> None:
+    a = gw_record_to_finding(_LIBRARY, tier="library", tags=["CWE:79", "alpha", "beta"])
+    b = gw_record_to_finding(_LIBRARY, tier="library", tags=["beta", "alpha", "CWE:79"])
+    assert content_hash(a) == content_hash(b)

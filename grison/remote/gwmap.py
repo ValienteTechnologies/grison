@@ -2,9 +2,11 @@
 content hash that serves as the 3-way merge base.
 
 GW field names are mostly camelCase but ``replication_steps`` is snake_case (live
-schema quirk). GW has **no** structured CWE field (CWE lives in references prose)
-and tags live in a separate table, so pulled findings carry ``cwe: []`` / ``tags:
-[]`` — a documented mirror gap, not data loss in the round-tripped fields.
+schema quirk). GW has no structured CWE field, but CWE ids round-trip through its
+tag mechanism using the live convention ``CWE:<n>`` (see :func:`finding_to_gw_tags`
+/ :func:`gw_record_to_finding`'s ``tags`` param) — the tag map itself is fetched
+separately (``GhostwriterClient.fetch_tag_map``) and passed in by the caller, since
+tags join on ``(content_type, object_id)`` rather than living on the finding row.
 """
 
 from __future__ import annotations
@@ -17,9 +19,12 @@ from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
 from grison.markdown import html_to_md, md_to_html
-from grison.model import Finding, FindingType, Severity, SyncState
+from grison.model import Finding, FindingType, Severity, SyncState, is_known_cwe
 
 _HEADING_RE = re.compile(r"<(/?)h[1-6](\s[^>]*)?>", re.IGNORECASE)
+# GW's live tag convention for CWE ids: "CWE:<n>" (colon) is canonical on push; pull
+# accepts colon or dash plus optional whitespace before the digits, case-insensitive.
+_CWE_TAG_RE = re.compile(r"^CWE[-:]\s*(\d+)$", re.IGNORECASE)
 
 
 def clean_gw_html(html: str) -> str:
@@ -44,6 +49,18 @@ def evidence_basename(ev: dict) -> str:
     return PurePosixPath(ev.get("document") or f"evidence-{ev['id']}").name
 
 
+def evidence_meta_hash(caption: str, friendly_name: str, description: str) -> str:
+    """Hash of an evidence image's caption/friendly_name/description — the per-image
+    3-way merge base (Track 1b). These fields sit outside :func:`content_hash` (GW's
+    evidence API predates a bulk record-level update), so each image tracks its own
+    tiny base in ``EvidenceGwRef.meta`` instead of riding the record's hash."""
+    payload = json.dumps(
+        {"caption": caption, "friendly_name": friendly_name, "description": description},
+        sort_keys=True, ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def _evidence_entries(
     evidence_rows: list[dict], sibling_names: Counter | None = None
 ) -> list[dict]:
@@ -57,15 +74,42 @@ def _evidence_entries(
     entries = []
     for ev, name in zip(evidence_rows, names, strict=True):
         local = f"evidence/{ev['id']}-{name}" if dup[name] > 1 else f"evidence/{name}"
+        caption = ev.get("caption") or ""
+        friendly_name = ev.get("friendlyName") or ""
+        description = ev.get("description") or ""
         entries.append(
             {
                 "file": local,
-                "caption": ev.get("caption") or "",
-                "friendly_name": ev.get("friendlyName") or "",
-                "gw": {"id": ev["id"], "hash": None},  # image hash stamped after download
+                "caption": caption,
+                "friendly_name": friendly_name,
+                "description": description,
+                "gw": {
+                    "id": ev["id"],
+                    "hash": None,  # image hash stamped after download
+                    "meta": evidence_meta_hash(caption, friendly_name, description),
+                    "basename": PurePosixPath(local).name,  # rename-guard ground truth
+                },
             }
         )
     return entries
+
+
+def _split_remote_tags(tag_names: list[str]) -> tuple[list[str], list[str]]:
+    """Split a record's remote GW tag names into ``(cwe, tags)``. A name shaped like
+    ``CWE-79`` / ``CWE:79`` normalizes into ``cwe`` only when it resolves in the
+    embedded CWE index; everything else — including CWE-shaped junk that isn't a
+    known id — stays verbatim in ``tags`` so nothing GW-authored is invented or
+    dropped. Order is preserved (remote order, cwe-matches included in place)."""
+    cwe: list[str] = []
+    tags: list[str] = []
+    for name in tag_names:
+        m = _CWE_TAG_RE.match(name.strip())
+        norm = f"CWE-{int(m.group(1))}" if m else None
+        if norm is not None and is_known_cwe(norm):
+            cwe.append(norm)
+        else:
+            tags.append(name)
+    return cwe, tags
 
 
 def gw_record_to_finding(
@@ -74,8 +118,13 @@ def gw_record_to_finding(
     tier: str,
     evidence_rows: list[dict] | None = None,
     evidence_names: Counter | None = None,
+    tags: list[str] | None = None,
 ) -> Finding:
-    """Build a (not-yet-synced) house Finding from a GW ``finding``/``reportedFinding`` row."""
+    """Build a (not-yet-synced) house Finding from a GW ``finding``/``reportedFinding`` row.
+
+    ``tags`` is this record's raw GW tag-name list (from
+    ``GhostwriterClient.fetch_tag_map()``, keyed by ``(table, id)`` by the caller) —
+    split into ``cwe``/``tags`` here (see :func:`_split_remote_tags`)."""
     gw: dict = {
         "table": "finding" if tier == "library" else "reportedFinding",
         "id": rec["id"],
@@ -92,12 +141,15 @@ def gw_record_to_finding(
         if (tier == "instance" and evidence_rows)
         else []
     )
+    cwe, other_tags = _split_remote_tags(tags or [])
 
     data = {
         "grison": {"tier": tier, "gw": gw},
         "severity": Severity.from_gw_id(rec["severityId"]),
         "finding_type": FindingType.from_gw_id(rec["findingTypeId"]),
         "cvss": cvss,
+        "cwe": cwe,
+        "tags": other_tags,
         "affected_entities": affected or None,
         "evidence": ev_entries,
         "title": (rec.get("title") or "").strip() or "Untitled finding",
@@ -113,15 +165,17 @@ def gw_record_to_finding(
 def _syncable_view(finding: Finding) -> dict:
     """The fields that actually round-trip to Ghostwriter — the merge-base surface.
 
-    Excludes ``cwe``/``tags`` (GW has no column for them), ``evidence`` (reconciled
-    per-image on its own hash), and the ``synced`` block. Prose is compared as
-    markdown, which is stable across md→html→md.
+    Excludes ``evidence`` (reconciled per-image on its own hash) and the ``synced``
+    block. Prose is compared as markdown, which is stable across md→html→md.
     """
     return {
         "title": finding.title,
         "severity": finding.severity.value,
         "finding_type": finding.finding_type.value,
         "cvss_vector": finding.cvss.vector if finding.cvss else None,
+        # sorted: a pure reorder isn't a content change (GW tags are a set, not a list).
+        "cwe": sorted(finding.cwe),
+        "tags": sorted(finding.tags),
         "affected_entities": finding.affected_entities,
         "description": finding.description,
         "impact": finding.impact,
@@ -129,10 +183,10 @@ def _syncable_view(finding: Finding) -> dict:
         "replication_steps": finding.replication_steps,
         "references": finding.references,
         # only the evidence *file set* — so adding/removing an image triggers a push, but
-        # editing a caption/friendly_name (which GW's upload API can't update in place)
-        # does NOT falsely mark the finding dirty and then get reverted by the next pull.
-        # Byte changes under an unchanged filename are invisible to this hash by design —
-        # sync.py reconciles those separately, per-image, against the stamped ``gw.hash``.
+        # editing a caption/friendly_name/description does NOT falsely mark the finding
+        # dirty here. That's not lossy: sync.py reconciles caption/friendly_name/
+        # description separately, per image, 3-way against EvidenceGwRef.meta (Track 1b) —
+        # same as byte changes under an unchanged filename, reconciled against ``gw.hash``.
         "evidence": sorted(e.file for e in finding.evidence),
     }
 
@@ -178,6 +232,13 @@ def finding_to_gw_fields(finding: Finding) -> dict:
         fields["reportId"] = finding.grison.gw.report_id
         fields["affectedEntities"] = html(finding.affected_entities or "")
     return fields
+
+
+def finding_to_gw_tags(finding: Finding) -> list[str]:
+    """The deterministic tag-string projection pushed via ``setTags``: CWE ids first
+    (as ``CWE:<n>``, GW's live convention), then free-form tags verbatim in local
+    order — sent as one REPLACE-ALL call, never merged/diffed against remote."""
+    return [f"CWE:{c.removeprefix('CWE-')}" for c in finding.cwe] + list(finding.tags)
 
 
 def stamp_synced(finding: Finding) -> Finding:

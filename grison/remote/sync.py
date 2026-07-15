@@ -26,7 +26,9 @@ from grison.model import EvidenceGwRef, EvidenceItem, Finding
 from grison.remote.gwmap import (
     content_hash,
     evidence_basename,
+    evidence_meta_hash,
     finding_to_gw_fields,
+    finding_to_gw_tags,
     gw_pre_image,
     gw_record_to_finding,
     stamp_synced,
@@ -78,20 +80,81 @@ def _stem(f: Finding, slug_counts: Counter | None = None) -> str:
     return slug
 
 
-def _carry_local_only(remote_f: Finding, local_f: Finding) -> None:
-    """Copy the fields grison owns locally onto a freshly-built remote finding before
-    it overwrites the local file. GW has no column for ``cwe``/``tags`` and no
-    update-in-place for evidence captions/friendly names, so the remote record can
-    never carry them — rebuilding the file without this wipes local curation on
-    every routine pull. (Consequence: a caption edited in the GW web UI after upload
-    loses to a local value; grison treats un-pushable fields as locally owned.)"""
-    remote_f.cwe = list(local_f.cwe)
-    remote_f.tags = list(local_f.tags)
+def _entry_meta(e: EvidenceItem) -> str:
+    return evidence_meta_hash(e.caption, e.friendly_name, e.description)
+
+
+def _row_meta(row: dict) -> str:
+    return evidence_meta_hash(
+        row.get("caption") or "", row.get("friendlyName") or "", row.get("description") or ""
+    )
+
+
+def _classify_evidence_meta(base: str | None, local: str, remote: str) -> str:
+    """Per-image 3-way classification for caption/friendly_name/description — mirrors
+    the record-level base/local/remote logic in :func:`_classify`. Callers check
+    ``local == remote`` (converged, regardless of base) before calling this."""
+    if remote == base:
+        return "local_ahead"
+    if local == base:
+        return "remote_ahead"
+    return "collision"
+
+
+def _evidence_meta_collision_msg(rel_path: str, evfile: str) -> str:
+    """Shared wording for a per-image caption/friendly_name/description collision —
+    used on both the pull side (:func:`_reconcile`, :func:`_apply_pull`) and the push
+    side (:func:`_reconcile_evidence_meta`), since it's the same 3-way outcome
+    surfacing through two different code paths."""
+    return (
+        f"{rel_path}: evidence metadata collision on {evfile} — local "
+        "and remote both changed caption/friendly_name/description; resolve manually"
+    )
+
+
+def _carry_local_only(remote_f: Finding, local_f: Finding, *, forced: bool = False) -> list[str]:
+    """Reconcile per-image evidence metadata (caption/friendly_name/description) onto a
+    freshly-built remote finding before it overwrites the local file — 3-way per image,
+    keyed on ``EvidenceGwRef.meta`` (Track 1b), the same base/local/remote shape
+    :func:`_classify` uses for the whole record. These fields sit outside
+    ``content_hash`` (GW's evidence API predates a bulk record-level update), so each
+    image tracks its own tiny merge base instead. ``cwe``/``tags`` are NOT carried here
+    (Track 1a made them sync two-way via GW's tag mechanism).
+
+    Returns the evidence files where local and remote changed AND disagree with each
+    other — a genuine collision the caller surfaces (never a silent winner). When
+    ``forced`` (this pull was a ``--force-remote`` resolution), remote unconditionally
+    wins for every entry, matching the force semantics used at the whole-record level.
+    """
     local_ev = {e.gw.id: e for e in local_f.evidence if e.gw is not None and e.gw.id is not None}
+    collided: list[str] = []
     for entry in remote_f.evidence:
-        if entry.gw is not None and entry.gw.id in local_ev:
-            entry.caption = local_ev[entry.gw.id].caption
-            entry.friendly_name = local_ev[entry.gw.id].friendly_name
+        if entry.gw is None or entry.gw.id not in local_ev:
+            continue
+        local_e = local_ev[entry.gw.id]
+        base = local_e.gw.meta if local_e.gw is not None else None
+        remote_meta = entry.gw.meta if entry.gw.meta is not None else _entry_meta(entry)
+        local_meta = _entry_meta(local_e)
+        if local_meta == remote_meta:
+            entry.gw.meta = remote_meta  # converged (regardless of base) — restamp, no drift left
+            continue
+        outcome = (
+            "remote_ahead" if forced else _classify_evidence_meta(base, local_meta, remote_meta)
+        )
+        if outcome == "remote_ahead":
+            entry.gw.meta = remote_meta  # entry already carries remote's fresh values
+            continue
+        # local_ahead or collision: preserve local's values; leave the base at its old
+        # (stale) value so a later sync still recognizes the divergence — local_ahead
+        # eventually gets pushed, collision keeps surfacing — instead of silently
+        # discarding either side.
+        entry.caption = local_e.caption
+        entry.friendly_name = local_e.friendly_name
+        entry.description = local_e.description
+        entry.gw.meta = base
+        if outcome == "collision":
+            collided.append(entry.file)
+    return collided
 
 
 def _scan_local(root: Path) -> dict[tuple[str, int], tuple[Path, Finding]]:
@@ -155,6 +218,7 @@ def pull(
     ev_by: dict[int, list[dict]] = {}
     for e in client.fetch_evidence():
         ev_by.setdefault(e["findingId"], []).append(e)
+    tag_map = client.fetch_tag_map()
     findings = client.fetch_findings()
     reported = client.fetch_reported_findings()
     n_lib, n_rep, n_reports = len(findings), len(reported), len(reports)
@@ -163,7 +227,7 @@ def pull(
     lib_slugs = _library_slug_counts(findings)
 
     for rec in findings:
-        f = gw_record_to_finding(rec, tier="library")
+        f = gw_record_to_finding(rec, tier="library", tags=tag_map.get(("finding", rec["id"])))
         _reconcile(
             result, f, local, root / "findings" / "library", None, client, root,
             slug_counts=lib_slugs, dry_run=dry_run, on_event=on_event,
@@ -173,7 +237,8 @@ def pull(
     for rec in reported:
         evs = ev_by.get(rec["id"], [])
         f = gw_record_to_finding(rec, tier="instance", evidence_rows=evs,
-                                 evidence_names=ev_names.get(rec["reportId"]))
+                                 evidence_names=ev_names.get(rec["reportId"]),
+                                 tags=tag_map.get(("reportedFinding", rec["id"])))
         rdir = _report_dir(root, rec["reportId"], reports)
         _reconcile(result, f, local, rdir, evs, client, root, dry_run=dry_run, on_event=on_event)
 
@@ -211,7 +276,11 @@ def _reconcile(
             result.unchanged.append(path)  # clean, no-op
             return
         target_path = path  # local clean, remote moved → fast-forward pull
-        _carry_local_only(remote, local_f)
+        collided = _carry_local_only(remote, local_f)
+        for evfile in collided:
+            msg = _evidence_meta_collision_msg(_rel(root, target_path), evfile)
+            result.errors.append(msg)
+            _emit(on_event, msg)
     else:
         target_path = target_dir / f"{_stem(remote, slug_counts)}.md"
 
@@ -319,6 +388,8 @@ class _Plan:
     remote_f: Finding | None = None
     new_path: Path | None = None
     note: str = ""
+    # --force-local/--force-remote: evidence 3-way picks a side, not a collision
+    forced: bool = False
 
 
 def _scan_synced(
@@ -384,6 +455,7 @@ def _classify(
     remote_index: dict[tuple[str, int], dict],
     ev_by_finding: dict[int, list[dict]],
     ev_names_by_report: dict[int, Counter],
+    tag_map: dict[tuple[str, int], list[str]],
     force_local: set[Path],
     force_remote: set[Path],
     dups: set[tuple[str, int]],
@@ -399,18 +471,38 @@ def _classify(
     if lr.path in force_remote:
         rec = remote_index.get(key) if key else None
         if rec:
-            return _Plan("pull", lr, key, rec)
+            return _Plan("pull", lr, key, rec, forced=True)
         return _Plan("skip", lr, note="--force-remote: no remote record")
     if lr.path in force_local:
         rec = remote_index.get(key) if key else None
-        return _Plan("push", lr, key, rec) if rec else _Plan("insert", lr)
+        return _Plan("push", lr, key, rec, forced=True) if rec else _Plan("insert", lr)
 
     if gw.id is None:
         return _Plan("insert", lr)  # new by birth
     if not agrees:
+        if lr.loc_table == "finding" and (f.evidence or f.affected_entities):
+            # library findings can't carry instance-only fields — refuse the move instead
+            # of _relocate silently nulling them and orphaning the remote evidence rows
+            # (F3-tier-relocate-wipes-evidence). The untouched remote record is unaffected
+            # and re-pulls at its rightful location on this same sync.
+            return _Plan(
+                "skip", lr,
+                note="library findings can't carry evidence/affected_entities — remove them first",
+            )
         return _Plan("insert", lr)  # moved between cells → new record at the location target
     if f.grison.synced is None or f.grison.synced.hash is None:
         return _Plan("invalid", lr, key)  # id set, agrees, no base → broken link
+    renamed = _renamed_evidence_files(f)
+    if renamed:
+        # F6: evidence filenames mirror GW's server-managed storage path — a local rename
+        # can't itself be pushed. Caught here, at classify time, before any push/pull.
+        return _Plan(
+            "skip", lr, key,
+            note=(
+                "evidence renamed locally (" + ", ".join(renamed) + ") — evidence filenames "
+                "mirror Ghostwriter storage; delete and re-add the image instead of renaming"
+            ),
+        )
     rec = remote_index.get(key)
     if rec is None:
         return _Plan("skip", lr, note="remote record gone (orphan)")
@@ -430,14 +522,14 @@ def _classify(
     ev_rows = ev_by_finding.get(rec["id"]) if lr.loc_table == "reportedFinding" else None
     ev_names = ev_names_by_report.get(rec.get("reportId")) if ev_rows else None
     remote_f = gw_record_to_finding(rec, tier=_tier(lr.loc_table), evidence_rows=ev_rows,
-                                    evidence_names=ev_names)
+                                    evidence_names=ev_names, tags=tag_map.get(key))
     remote_hash = content_hash(remote_f)
     if local_hash == base and remote_hash == base:
-        # clean prose, but a prior upload may have failed mid-batch, or an image's bytes
-        # changed under the same filename (invisible to content_hash) → finish/reconcile it
-        if lr.loc_table == "reportedFinding" and (
-            _has_pending_evidence(f) or _has_stale_evidence(f, lr.path)
-        ):
+        # clean prose, but a prior upload may have failed mid-batch, an image's bytes
+        # changed under the same filename, one vanished from disk, or its caption/
+        # friendly_name/description drifted (none of these move content_hash) → push to
+        # finish/reconcile the evidence side
+        if lr.loc_table == "reportedFinding" and _evidence_needs_push(f, lr.path, ev_rows):
             return _Plan("push", lr, key, rec)
         return _Plan("clean", lr, key, rec)
     if local_hash != base and remote_hash == base:
@@ -445,7 +537,11 @@ def _classify(
     if local_hash == base and remote_hash != base:
         return _Plan("pull", lr, key, rec, remote_f=remote_f)
     if local_hash == remote_hash:
-        return _Plan("repair", lr, key, rec)  # both moved but converged / stale base
+        # both moved but converged / stale base — still check evidence-only drift, same as
+        # the clean branch above, since it's invisible to content_hash either way
+        if lr.loc_table == "reportedFinding" and _evidence_needs_push(f, lr.path, ev_rows):
+            return _Plan("push", lr, key, rec)
+        return _Plan("repair", lr, key, rec)
     return _Plan("collision", lr, key, rec, remote_f=remote_f)
 
 
@@ -478,6 +574,7 @@ def sync(
     for e in client.fetch_evidence():
         ev_by_finding.setdefault(e["findingId"], []).append(e)
     ev_names_by_report = _evidence_name_counters(reported, ev_by_finding)
+    tag_map = client.fetch_tag_map()
     n_lib, n_rep, n_reports = len(findings), len(reported), len(reports)
     _emit(on_event, f"remote: {n_lib} library findings, {n_rep} reported, {n_reports} reports")
 
@@ -488,7 +585,7 @@ def sync(
     matched: set[tuple[str, int]] = set()
     for lr in locals_:
         try:
-            plan = _classify(lr, remote_index, ev_by_finding, ev_names_by_report,
+            plan = _classify(lr, remote_index, ev_by_finding, ev_names_by_report, tag_map,
                              force_local, force_remote, dups)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
             result.errors.append(f"{lr.path}: {e}")
@@ -515,6 +612,7 @@ def sync(
                 evidence_names=(
                     ev_names_by_report.get(rec.get("reportId")) if tier == "instance" else None
                 ),
+                tags=tag_map.get(key),
             )
             new_path = _remote_target_path(root, remote_f, rec, reports, lib_slugs)
         except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
@@ -559,8 +657,8 @@ def sync(
     try:
         for plan in plans:
             try:
-                _apply(plan, client, snap, result, ev_by_finding, ev_names_by_report, root,
-                       dry_run=dry_run, on_event=on_event)
+                _apply(plan, client, snap, result, ev_by_finding, ev_names_by_report, tag_map,
+                       root, dry_run=dry_run, on_event=on_event)
             except Exception as e:  # noqa: BLE001 — isolate one record, keep batch + snapshot
                 where = plan.local.path if plan.local else plan.new_path
                 result.errors.append(f"{where}: {e}")
@@ -588,6 +686,7 @@ def _apply(
     result: SyncResult,
     ev_by_finding: dict[int, list[dict]],
     ev_names_by_report: dict[int, Counter],
+    tag_map: dict[tuple[str, int], list[str]],
     root: Path,
     *,
     dry_run: bool,
@@ -619,10 +718,10 @@ def _apply(
         result.repaired.append(lr.path)
         _emit(on_event, f"{tense}repair {_rel(root, lr.path)}")
     elif action == "pull":
-        _apply_pull(plan, client, result, ev_by_finding, ev_names_by_report, root,
+        _apply_pull(plan, client, result, ev_by_finding, ev_names_by_report, tag_map, root,
                     dry_run=dry_run, on_event=on_event)
     elif action == "push":
-        _apply_push(plan, client, snap, result, ev_by_finding, root, dry_run=dry_run,
+        _apply_push(plan, client, snap, result, ev_by_finding, tag_map, root, dry_run=dry_run,
                      on_event=on_event)
     elif action == "insert":
         _apply_insert(plan, client, snap, result, root, dry_run=dry_run, on_event=on_event)
@@ -631,6 +730,7 @@ def _apply(
 def _apply_pull(
     plan: _Plan, client: GhostwriterClient, result: SyncResult,
     ev_by_finding: dict[int, list[dict]], ev_names_by_report: dict[int, Counter],
+    tag_map: dict[tuple[str, int], list[str]],
     root: Path, *, dry_run: bool,
     on_event: Callable[[str], None] | None = None,
 ) -> None:
@@ -648,9 +748,17 @@ def _apply_pull(
             evidence_names=(
                 ev_names_by_report.get(plan.rec.get("reportId")) if tier == "instance" else None
             ),
+            tags=tag_map.get(plan.key),
         )
     if plan.local is not None:
-        _carry_local_only(remote_f, plan.local.finding)
+        # --force-remote (plan.forced) picks remote unconditionally for every image,
+        # matching the record-level force semantics; otherwise a genuine per-image
+        # 3-way — see _carry_local_only.
+        collided = _carry_local_only(remote_f, plan.local.finding, forced=plan.forced)
+        for evfile in collided:
+            msg = _evidence_meta_collision_msg(_rel(root, path), evfile)
+            result.errors.append(msg)
+            _emit(on_event, msg)
     evidence_down = _download_finding_evidence(remote_f, client, path.parent, on_event=on_event)
     stamp_synced(remote_f)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -692,9 +800,83 @@ def _has_stale_evidence(f: Finding, path: Path) -> bool:
     return any(_is_stale_evidence(e, path.parent) for e in f.evidence)
 
 
+def _is_missing_evidence(entry: EvidenceItem, base_dir: Path) -> bool:
+    """True if an already-uploaded image's local file is gone entirely — deleted, moved
+    out from under grison, whatever. content_hash's file-set-only view can't see this
+    (the filename is still in the frontmatter), so without this check the record
+    classifies 'clean' forever and the deletion is never noticed (F2)."""
+    if entry.gw is None or entry.gw.id is None:
+        return False
+    return not (base_dir / entry.file).exists()
+
+
+def _has_missing_evidence(f: Finding, path: Path) -> bool:
+    return any(_is_missing_evidence(e, path.parent) for e in f.evidence)
+
+
+def _has_evidence_meta_drift(f: Finding, ev_rows: list[dict] | None) -> bool:
+    """True if any already-uploaded image's caption/friendly_name/description differs
+    from Ghostwriter's current row — invisible to content_hash, so a record can be
+    otherwise byte-for-byte clean while still owing a metadata push/pull (gw-push-2)."""
+    if not ev_rows:
+        return False
+    remote_by_id = {r["id"]: r for r in ev_rows}
+    for e in f.evidence:
+        if e.gw is None or e.gw.id is None:
+            continue
+        rec = remote_by_id.get(e.gw.id)
+        if rec is not None and _entry_meta(e) != _row_meta(rec):
+            return True
+    return False
+
+
+def _evidence_needs_push(f: Finding, path: Path, ev_rows: list[dict] | None) -> bool:
+    """Any per-image reason a 'clean'/'repair' record still needs a push pass: an upload
+    never completed, bytes changed or vanished under an unchanged filename, or metadata
+    drifted — all invisible to content_hash by design."""
+    return (
+        _has_pending_evidence(f)
+        or _has_stale_evidence(f, path)
+        or _has_missing_evidence(f, path)
+        or _has_evidence_meta_drift(f, ev_rows)
+    )
+
+
+def _renamed_evidence_files(f: Finding) -> list[str]:
+    """Evidence entries whose local ``file`` basename no longer matches the basename
+    grison stamped at upload/pull time (F6) — a local rename GW's server-managed
+    storage path can't reflect. Purely local: no remote fetch needed."""
+    return [
+        e.file
+        for e in f.evidence
+        if e.gw is not None
+        and e.gw.id is not None
+        and e.gw.basename is not None
+        and Path(e.file).name != e.gw.basename
+    ]
+
+
+def _push_tags(
+    f: Finding,
+    table: str,
+    client: GhostwriterClient,
+    snap: Snapshot,
+    remote_tags: list[str],
+) -> None:
+    """Push the cwe+tags projection via ``setTags``, skipping the call when the remote
+    side already carries exactly this set (order-insensitive — GW tags are a set, and
+    a same-content call would be a no-op mutation)."""
+    desired = finding_to_gw_tags(f)
+    if sorted(desired) == sorted(remote_tags):
+        return
+    snap.before_set_tags(table, f.grison.gw.id, remote_tags)
+    client.set_tags(f.grison.gw.id, table, desired)
+
+
 def _apply_push(
     plan: _Plan, client: GhostwriterClient, snap: Snapshot, result: SyncResult,
-    ev_by_finding: dict[int, list[dict]], root: Path, *, dry_run: bool,
+    ev_by_finding: dict[int, list[dict]], tag_map: dict[tuple[str, int], list[str]],
+    root: Path, *, dry_run: bool,
     on_event: Callable[[str], None] | None = None,
 ) -> None:
     lr = plan.local
@@ -712,10 +894,11 @@ def _apply_push(
         client.update_reported_finding(f.grison.gw.id, fields)
     result.pushed.append(lr.path)  # remote write succeeded — now safe to report as pushed
     _emit(on_event, f"push {_rel(root, lr.path)}")
+    _push_tags(f, lr.loc_table, client, snap, tag_map.get((lr.loc_table, f.grison.gw.id), []))
     _finalize(f, lr.path)  # persist the record as synced before touching evidence
     tier_is_instance = lr.loc_table == "reportedFinding"
     remote_rows = ev_by_finding.get(f.grison.gw.id) if tier_is_instance else None
-    _push_evidence(f, lr.path, client, snap, result, remote_rows, on_event=on_event)
+    _push_evidence(f, lr.path, client, snap, result, remote_rows, root, on_event=on_event)
     _clear_sidecar(lr.path)  # collision resolved via --force-local
 
 
@@ -738,10 +921,11 @@ def _apply_insert(
     f.grison.gw.id = new_id
     result.inserted.append(lr.path)  # insert succeeded — now safe to report as inserted
     _emit(on_event, f"insert {_rel(root, lr.path)}")
+    _push_tags(f, lr.loc_table, client, snap, [])  # brand-new record — no remote tags yet
     # Persist the new id + base BEFORE evidence: if an upload then fails, the next sync
     # sees the id (no duplicate re-insert) and retries only the pending evidence.
     _finalize(f, lr.path)
-    _push_evidence(f, lr.path, client, snap, result, None, on_event=on_event)
+    _push_evidence(f, lr.path, client, snap, result, None, root, on_event=on_event)
 
 
 def _download_finding_evidence(
@@ -762,6 +946,70 @@ def _download_finding_evidence(
     return count
 
 
+def _reconcile_evidence_meta(
+    f: Finding,
+    entry: EvidenceItem,
+    row: dict,
+    path: Path,
+    client: GhostwriterClient,
+    snap: Snapshot,
+    result: SyncResult,
+    root: Path,
+    *,
+    on_event: Callable[[str], None] | None = None,
+) -> None:
+    """Per-image 3-way reconcile for caption/friendly_name/description when an entry's
+    bytes are unchanged (gw-push-2) — this is the push-side counterpart of
+    :func:`_carry_local_only`. local-only changed → push via ``update_evidence``,
+    sending only the fields that actually differ (never resend an untouched
+    ``friendly_name`` — that field alone fires GW's ``{{.Name}}``-ref-rewrite trigger);
+    remote-only changed → adopt into local; both → collision, surfaced exactly like a
+    body collision (never a silent winner — local's file is left untouched so nothing
+    on disk is lost, but the stale base keeps flagging it every sync until resolved)."""
+    assert entry.gw is not None and entry.gw.id is not None
+    base = entry.gw.meta
+    local_meta = _entry_meta(entry)
+    remote_meta = _row_meta(row)
+    if local_meta == remote_meta:
+        if entry.gw.meta != remote_meta:  # e.g. base predates Track 1b — restamp, no drift
+            entry.gw.meta = remote_meta
+            _finalize(f, path)
+        return
+    outcome = _classify_evidence_meta(base, local_meta, remote_meta)
+    if outcome == "local_ahead":
+        fields: dict = {}
+        if entry.caption != (row.get("caption") or ""):
+            fields["caption"] = entry.caption
+        if entry.friendly_name != (row.get("friendlyName") or ""):
+            fields["friendlyName"] = entry.friendly_name
+        if entry.description != (row.get("description") or ""):
+            fields["description"] = entry.description
+        if fields:
+            snap.before_update_evidence(
+                entry.gw.id,
+                {
+                    "caption": row.get("caption") or "",
+                    "friendlyName": row.get("friendlyName") or "",
+                    "description": row.get("description") or "",
+                },
+            )
+            client.update_evidence(entry.gw.id, fields)
+            _emit(on_event, f"evidence meta ↑ {Path(entry.file).name}")
+        entry.gw.meta = local_meta
+        _finalize(f, path)
+    elif outcome == "remote_ahead":
+        entry.caption = row.get("caption") or ""
+        entry.friendly_name = row.get("friendlyName") or ""
+        entry.description = row.get("description") or ""
+        entry.gw.meta = remote_meta
+        _finalize(f, path)
+        _emit(on_event, f"evidence meta ↓ {Path(entry.file).name}")
+    else:  # collision — preserve local's on-disk values, leave the base stale
+        msg = _evidence_meta_collision_msg(_rel(root, path), entry.file)
+        result.errors.append(msg)
+        _emit(on_event, msg)
+
+
 def _push_evidence(
     f: Finding,
     path: Path,
@@ -769,20 +1017,50 @@ def _push_evidence(
     snap: Snapshot,
     result: SyncResult,
     remote_rows: list[dict] | None,
+    root: Path,
     *,
     on_event: Callable[[str], None] | None = None,
 ) -> None:
-    """Upload pending/stale local evidence, then delete any remote row an image no longer
-    claims (removed-from-frontmatter or superseded-by-a-reupload) — both directions are
-    snapshot-backed so a bad batch is fully reversible."""
+    """Upload pending/stale local evidence, re-download an already-uploaded image whose
+    local file vanished (F2 — never silently stays 'clean'), reconcile per-image
+    caption/friendly_name/description drift (gw-push-2), then delete any remote row an
+    image no longer claims (removed-from-frontmatter or superseded-by-a-reupload) — all
+    four are snapshot-backed so a bad batch is fully reversible."""
     if f.grison.tier != "instance":
         return
+    remote_by_id = {r["id"]: r for r in remote_rows or []}
     for entry in f.evidence:
         stale = _is_stale_evidence(entry, path.parent)
-        if entry.gw is not None and entry.gw.id is not None and not stale:
-            continue  # already uploaded, bytes unchanged
+        missing = _is_missing_evidence(entry, path.parent)
+        if entry.gw is not None and entry.gw.id is not None and not stale and not missing:
+            # already uploaded, bytes on disk unchanged — but caption/friendly_name/
+            # description may still have drifted on either side.
+            row = remote_by_id.get(entry.gw.id)
+            if row is not None:
+                _reconcile_evidence_meta(
+                    f, entry, row, path, client, snap, result, root, on_event=on_event
+                )
+            continue
+        if entry.gw is not None and entry.gw.id is not None and missing:
+            # already uploaded, but the local file is gone (deleted, moved out from
+            # under grison) — re-download instead of erroring on a file that never
+            # needed (re-)uploading, or silently leaving the record 'clean' forever (F2).
+            row = remote_by_id.get(entry.gw.id)
+            _name, data = client.download_evidence(entry.gw.id)
+            img = path.parent / entry.file
+            img.parent.mkdir(parents=True, exist_ok=True)
+            img.write_bytes(data)
+            entry.gw.hash = _image_hash(data)
+            if row is not None:
+                entry.gw.meta = _row_meta(row)
+            result.evidence_down += 1
+            _emit(on_event, f"evidence ↓ {Path(entry.file).name} (restored — missing locally)")
+            _finalize(f, path)
+            continue
         img = path.parent / entry.file
         if not img.exists():
+            # never uploaded (no gw.id) and the file is gone too — nothing to recover
+            # from; unlike the missing-with-gw.id case above, this must surface loudly.
             result.errors.append(f"evidence image missing: {entry.file}")
             _emit(on_event, f"error: evidence image missing: {entry.file}")
             continue
@@ -793,10 +1071,13 @@ def _push_evidence(
             filename=filename,
             caption=entry.caption,
             friendly_name=entry.friendly_name or filename,
+            description=entry.description,
             file_base64=base64.b64encode(data).decode(),
         )
         snap.after_upload_evidence(new_id)
-        entry.gw = EvidenceGwRef(id=new_id, hash=_image_hash(data))  # old row (if any) reaped below
+        entry.gw = EvidenceGwRef(
+            id=new_id, hash=_image_hash(data), meta=_entry_meta(entry), basename=filename,
+        )  # old row (if any) reaped below
         result.evidence_up += 1
         _emit(on_event, f"evidence ↑ {filename}")
         _finalize(f, path)  # persist this upload's id before attempting the next
@@ -812,6 +1093,7 @@ def _push_evidence(
             filename,
             row.get("caption") or "",
             row.get("friendlyName") or filename,
+            row.get("description") or "",
             base64.b64encode(data).decode(),
         )
         client.delete_evidence(row["id"])

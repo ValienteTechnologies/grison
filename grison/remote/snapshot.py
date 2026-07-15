@@ -21,8 +21,9 @@ SNAPSHOT_ROOT = Path.home() / ".local" / "share" / "grison" / "snapshots"
 
 @dataclass
 class Undo:
-    # op ∈ {update_finding, update_reportedFinding, update_report, delete_finding,
-    #       delete_reportedFinding, delete_evidence, upload_evidence}
+    # op ∈ {update_finding, update_reportedFinding, update_report, update_evidence,
+    #       delete_finding, delete_reportedFinding, delete_evidence, upload_evidence,
+    #       set_tags}
     op: str
     id: int
     fields: dict | None = None
@@ -47,6 +48,16 @@ class Snapshot:
         PUTs the whole map back, restoring every section at once."""
         self.undos.append(Undo("update_report", report_id, {"extraFields": pre_extra_fields}))
 
+    def before_set_tags(self, table: str, record_id: int, pre_tags: list[str]) -> None:
+        """Pre-image of a record's remote tag list before ``setTags`` replaces it
+        (``setTags`` is REPLACE-ALL — rollback needs the full old list, not a diff)."""
+        self.undos.append(Undo("set_tags", record_id, {"table": table, "tags": pre_tags}))
+
+    def before_update_evidence(self, evidence_id: int, pre_image: dict) -> None:
+        """Pre-image of an evidence row's caption/friendlyName/description before
+        ``update_evidence`` patches it in place (Track 1b)."""
+        self.undos.append(Undo("update_evidence", evidence_id, pre_image))
+
     def after_upload_evidence(self, evidence_id: int) -> None:
         self.undos.append(Undo("delete_evidence", evidence_id))
 
@@ -57,6 +68,7 @@ class Snapshot:
         filename: str,
         caption: str,
         friendly_name: str,
+        description: str,
         file_base64: str,
     ) -> None:
         """The pre-image of an evidence row about to be deleted. Ghostwriter's evidence
@@ -72,6 +84,7 @@ class Snapshot:
                     "filename": filename,
                     "caption": caption,
                     "friendly_name": friendly_name,
+                    "description": description,
                     "file_base64": file_base64,
                 },
             )
@@ -90,6 +103,8 @@ class Snapshot:
                 client.update_reported_finding(u.id, u.fields or {})
             elif u.op == "update_report":
                 client.update_report(u.id, u.fields or {})
+            elif u.op == "update_evidence":
+                client.update_evidence(u.id, u.fields or {})
             elif u.op == "delete_finding":
                 client.delete_finding(u.id)
             elif u.op == "delete_reportedFinding":
@@ -98,6 +113,9 @@ class Snapshot:
                 client.delete_evidence(u.id)
             elif u.op == "upload_evidence":
                 client.upload_evidence(**(u.fields or {}))
+            elif u.op == "set_tags":
+                fields = u.fields or {}
+                client.set_tags(u.id, fields.get("table"), fields.get("tags") or [])
 
     def persist(self, when: str) -> Path:
         """Write ``undo.json`` + a runnable ``rollback.py`` under a per-batch dir."""

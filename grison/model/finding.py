@@ -92,10 +92,21 @@ class Cvss(_Base):
 
 
 class EvidenceGwRef(_Base):
-    """The Ghostwriter ``evidence`` record id + content hash at last sync."""
+    """The Ghostwriter ``evidence`` record id + content hash at last sync.
+
+    ``meta`` is the per-image merge base for caption/friendly_name/description (Track
+    1b) — these fields sit outside :func:`~grison.remote.gwmap.content_hash` (GW's
+    evidence API predates a bulk record-level update), so each image tracks its own
+    tiny 3-way base instead. ``basename`` is the filename grison stamped at
+    upload/pull time — used to detect a local rename (evidence filenames mirror GW's
+    server-managed storage path, so a rename can't itself be pushed; see the rename
+    guard in :mod:`grison.remote.sync`).
+    """
 
     id: int
     hash: str | None = None
+    meta: str | None = None
+    basename: str | None = None
 
 
 class EvidenceItem(_Base):
@@ -104,6 +115,7 @@ class EvidenceItem(_Base):
     file: str
     caption: str = ""
     friendly_name: str = ""
+    description: str = ""
     gw: EvidenceGwRef | None = None
 
 

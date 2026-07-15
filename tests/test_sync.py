@@ -61,6 +61,9 @@ class FakeGW:
     def fetch_reports(self):
         return _REPORTS
 
+    def fetch_tag_map(self):
+        return {}
+
     def download_evidence(self, evidence_id: int):
         return ("shot.png", _IMG)
 
@@ -164,17 +167,18 @@ def test_evidence_basename_collision_across_findings_disambiguates(tmp_path: Pat
         assert f.evidence[0].file.startswith("evidence/") and "-shell.png" in f.evidence[0].file
 
 
-def test_pull_preserves_locally_owned_fields(tmp_path: Path) -> None:
-    """cwe/tags (no GW column) and evidence caption/friendly_name (no GW update
-    path) are locally owned — a routine pull triggered by an unrelated remote edit
-    must carry them forward, not rebuild the file without them."""
+def test_pull_preserves_locally_owned_evidence_metadata(tmp_path: Path) -> None:
+    """Evidence caption/friendly_name (no GW update-in-place path until Track 1b) are
+    locally owned — a routine pull triggered by an unrelated remote edit must carry
+    them forward, not rebuild the file without them. cwe/tags are NOT locally-owned
+    anymore (they sync two-way via GW's tag mechanism — see test_sync_tags.py); an
+    edit to either now makes local diverge from the merge base like any other
+    content field, so it is intentionally excluded from this fixture."""
     from grison.markdown import finding_to_markdown
 
     pull(tmp_path, FakeGW())
     rf_file = next((tmp_path / "findings" / "reports").rglob("*.md"))
     f = markdown_to_finding(rf_file.read_text())
-    f.cwe = ["CWE-79"]
-    f.tags = ["ATT&CK:T1557"]
     f.evidence[0].caption = "EDITED CAPTION"
     f.evidence[0].friendly_name = "edited-name"
     rf_file.write_text(finding_to_markdown(f))
@@ -187,7 +191,6 @@ def test_pull_preserves_locally_owned_fields(tmp_path: Path) -> None:
     assert rf_file in r.written
     f2 = markdown_to_finding(rf_file.read_text())
     assert "CHANGED" in f2.description  # the remote edit arrived
-    assert f2.cwe == ["CWE-79"] and f2.tags == ["ATT&CK:T1557"]  # curation survived
     assert f2.evidence[0].caption == "EDITED CAPTION"
     assert f2.evidence[0].friendly_name == "edited-name"
 

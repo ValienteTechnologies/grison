@@ -24,6 +24,7 @@ class FakeGW:
         self.reported: dict[int, dict] = {}
         self.evidence: dict[int, dict] = {}
         self.images: dict[int, bytes] = {}
+        self.tags: dict[tuple[str, int], list[str]] = {}
         self.reports = {2: {"id": 2, "title": "Acme"}}
         self._next = 1000
 
@@ -42,6 +43,12 @@ class FakeGW:
 
     def fetch_reports(self):
         return list(self.reports.values())
+
+    def fetch_tag_map(self):
+        return dict(self.tags)
+
+    def set_tags(self, record_id: int, table: str, tags: list[str]) -> None:
+        self.tags[(table, record_id)] = list(tags)
 
     def download_evidence(self, evidence_id: int):
         return (f"{evidence_id}.png", self.images[evidence_id])
@@ -62,14 +69,20 @@ class FakeGW:
     def update_reported_finding(self, rid: int, fields: dict) -> None:
         self.reported[rid] = {"id": rid, **fields}
 
-    def upload_evidence(self, *, finding_id, filename, caption, friendly_name, file_base64) -> int:
+    def upload_evidence(
+        self, *, finding_id, filename, caption, friendly_name, file_base64, description=""
+    ) -> int:
         i = self._id()
         self.images[i] = base64.b64decode(file_base64)
         self.evidence[i] = {
             "id": i, "findingId": finding_id, "reportId": None,
             "document": f"evidence/{filename}", "caption": caption, "friendlyName": friendly_name,
+            "description": description,
         }
         return i
+
+    def update_evidence(self, evidence_id: int, fields: dict) -> None:
+        self.evidence[evidence_id].update(fields)
 
     def delete_evidence(self, evidence_id: int) -> None:
         self.evidence.pop(evidence_id, None)
@@ -276,7 +289,11 @@ def test_snapshot_persisted_when_a_record_fails_midbatch(tmp_path: Path) -> None
     assert r.snapshot_dir is not None and (r.snapshot_dir / "undo.json").exists()
 
 
-def test_caption_edit_does_not_thrash(tmp_path: Path) -> None:
+def test_caption_edit_pushes_update_evidence_once_then_settles_clean(tmp_path: Path) -> None:
+    """A caption-only edit on an already-uploaded image is invisible to content_hash
+    (by design — see gwmap._syncable_view), but must not be stranded locally forever
+    (gw-push-2): it pushes via update_evidence (not a re-upload) exactly once, then the
+    record settles clean — no push/pull thrash on repeated syncs."""
     fake = FakeGW()
     path, rid = _seed_synced(tmp_path, fake, tier="instance", report_id=2, title="Cap")
     # attach + upload an image so it has a gw id
@@ -287,12 +304,21 @@ def test_caption_edit_does_not_thrash(tmp_path: Path) -> None:
     _write(path, Finding.model_validate(data))
     sync(tmp_path, fake)  # uploads, settles clean
     assert sync(tmp_path, fake).unchanged == [path]
-    # editing only the caption of an already-uploaded image must NOT create a push/pull loop
+    ev_id = next(iter(fake.evidence))
+
+    # editing only the caption of an already-uploaded image must reach Ghostwriter...
     data = markdown_to_finding(path.read_text()).model_dump(mode="json")
     data["evidence"][0]["caption"] = "new caption"
     _write(path, Finding.model_validate(data))
     r = sync(tmp_path, fake)
-    assert r.pushed == [] and r.pulled == [] and r.collisions == []
+    assert r.pulled == [] and r.collisions == []
+    assert path in r.pushed
+    assert fake.evidence[ev_id]["caption"] == "new caption"  # actually reached GW...
+    assert len(fake.evidence) == 1  # ...via update-in-place, not a re-upload
+
+    # ...and then must NOT create a push/pull loop
+    r2 = sync(tmp_path, fake)
+    assert r2.unchanged == [path] and r2.pushed == [] and r2.pulled == []
 
 
 def test_snapshot_rollback_restores(tmp_path: Path) -> None:

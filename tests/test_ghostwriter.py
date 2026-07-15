@@ -260,6 +260,7 @@ def test_upload_evidence_sends_mutation_and_returns_id() -> None:
             "filename": "shell.jpeg",
             "caption": "Reverse shell",
             "friendly_name": "reverse-shell",
+            "description": "",  # default when the caller doesn't pass one (Track 1b)
         },
         response_data={"uploadEvidence": {"id": 38}},
     )
@@ -272,6 +273,49 @@ def test_upload_evidence_sends_mutation_and_returns_id() -> None:
             file_base64="ZmZk",
         )
     assert evidence_id == 38
+    assert len(captured) == 1
+
+
+def test_upload_evidence_sends_description_when_given() -> None:
+    transport, captured = _single_mutation_transport(
+        expected_query_marker="uploadEvidence",
+        expected_variables={
+            "finding": 183,
+            "file_base64": "ZmZk",
+            "filename": "shell.jpeg",
+            "caption": "Reverse shell",
+            "friendly_name": "reverse-shell",
+            "description": "Shell obtained via CVE-2024-xxxx",
+        },
+        response_data={"uploadEvidence": {"id": 38}},
+    )
+    with GhostwriterClient(_CREDS, transport=transport) as client:
+        client.upload_evidence(
+            finding_id=183,
+            filename="shell.jpeg",
+            caption="Reverse shell",
+            friendly_name="reverse-shell",
+            file_base64="ZmZk",
+            description="Shell obtained via CVE-2024-xxxx",
+        )
+    assert len(captured) == 1
+
+
+def test_update_evidence_sends_camelcase_friendly_name() -> None:
+    """update_evidence's ``_set`` uses the wire's camelCase ``friendlyName`` — the
+    Hasura auto-generated ``evidence_set_input`` type, not the snake_case argument
+    name ``uploadEvidence`` (a hand-written custom mutation) happens to use."""
+    transport, captured = _single_mutation_transport(
+        expected_query_marker="update_evidence_by_pk",
+        expected_variables={
+            "id": 38,
+            "set": {"caption": "new caption", "friendlyName": "new-name"},
+        },
+        response_data={"update_evidence_by_pk": {"id": 38}},
+    )
+    with GhostwriterClient(_CREDS, transport=transport) as client:
+        result = client.update_evidence(38, {"caption": "new caption", "friendlyName": "new-name"})
+    assert result is None
     assert len(captured) == 1
 
 
@@ -295,3 +339,80 @@ def test_mutation_graphql_errors_raise_ghostwriter_error() -> None:
     with GhostwriterClient(_CREDS, transport=transport) as client:
         with pytest.raises(GhostwriterError, match="constraint violation"):
             client.insert_finding({"title": "x"})
+
+
+# --- tags/CWE (Track 1a): djangoContentType / taggedItem / setTags -------------------------
+
+_CONTENT_TYPE_ROWS = [
+    {"id": 67, "model": "finding"},
+    {"id": 66, "model": "reportfindinglink"},
+]
+
+_TAGGED_ITEM_ROWS = [
+    {"content_type_id": 67, "object_id": 42, "tag": {"name": "CWE:79"}},
+    {"content_type_id": 67, "object_id": 42, "tag": {"name": "recon"}},
+    {"content_type_id": 66, "object_id": 183, "tag": {"name": "CWE:89"}},
+]
+
+
+def _make_tag_transport(
+    captured_requests: list[httpx.Request] | None = None,
+) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if captured_requests is not None:
+            captured_requests.append(request)
+        body = json.loads(request.content)
+        query = body["query"]
+        if "setTags" in query:
+            return _gql_response({"setTags": None})
+        if "djangoContentType" in query:
+            return _gql_response({"djangoContentType": _CONTENT_TYPE_ROWS})
+        if "taggedItem" in query:
+            ids = set(body.get("variables", {}).get("content_type_ids", []))
+            rows = [r for r in _TAGGED_ITEM_ROWS if r["content_type_id"] in ids]
+            return _gql_response({"taggedItem": rows})
+        raise AssertionError(f"unexpected query: {query}")
+
+    return httpx.MockTransport(handler)
+
+
+def test_fetch_tag_map_resolves_content_types_and_splits_by_table() -> None:
+    with GhostwriterClient(_CREDS, transport=_make_tag_transport()) as client:
+        tag_map = client.fetch_tag_map()
+    assert tag_map[("finding", 42)] == ["CWE:79", "recon"]
+    assert tag_map[("reportedFinding", 183)] == ["CWE:89"]
+
+
+def test_fetch_tag_map_caches_content_type_resolution() -> None:
+    captured: list[httpx.Request] = []
+    with GhostwriterClient(_CREDS, transport=_make_tag_transport(captured)) as client:
+        client.fetch_tag_map()
+        client.fetch_tag_map()
+    ct_queries = [r for r in captured if "djangoContentType" in json.loads(r.content)["query"]]
+    assert len(ct_queries) == 1  # resolved once per client, then cached
+
+
+def test_set_tags_sends_finding_model_string_for_library_table() -> None:
+    transport, captured = _single_mutation_transport(
+        expected_query_marker="setTags",
+        expected_variables={"id": 42, "model": "finding", "tags": ["CWE:79", "recon"]},
+        response_data={"setTags": None},
+    )
+    with GhostwriterClient(_CREDS, transport=transport) as client:
+        result = client.set_tags(42, "finding", ["CWE:79", "recon"])
+    assert result is None
+    assert len(captured) == 1
+
+
+def test_set_tags_sends_report_finding_link_model_string_for_instance_table() -> None:
+    """model strings are Django keys used by the setTags action handler ('finding' /
+    'report_finding_link'), distinct from djangoContentType.model ('reportfindinglink',
+    no underscore) — the two must not be conflated."""
+    transport, captured = _single_mutation_transport(
+        expected_query_marker="setTags",
+        expected_variables={"id": 183, "model": "report_finding_link", "tags": ["CWE:89"]},
+        response_data={"setTags": None},
+    )
+    with GhostwriterClient(_CREDS, transport=transport) as client:
+        client.set_tags(183, "reportedFinding", ["CWE:89"])
+    assert len(captured) == 1
