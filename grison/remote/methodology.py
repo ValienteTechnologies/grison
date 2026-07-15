@@ -286,12 +286,27 @@ def _materialize_structure(
     chapter with no pages still gets its directory and mirror file. Mirror files are
     pull-only (grison never pushes book/chapter entities)."""
     base = root / "methodology" / "library"
+    # A shelf spans books, so it can't nest under one book dir: shelves get their own
+    # mirror under library/.shelves/<slug>.yml, carrying the shelf's name/description
+    # and its books IN ORDER (BookStack's books array is the authoritative shelf order —
+    # sorting it, as the first cut did, discards that ordering). Each book still records
+    # which shelves it belongs to, in shelf-fetch order (never alphabetized).
     shelf_map: dict[int, list[str]] = {}
     try:
         for shelf in client.fetch_shelves():
             detail = client.fetch_shelf(shelf["id"])
+            ordered_books = [b.get("slug") or str(b["id"]) for b in detail.get("books") or []]
             for b in detail.get("books") or []:
                 shelf_map.setdefault(b["id"], []).append(shelf["slug"])
+            shelf_meta = {
+                "grison": {"kind": "shelf", "bs": {"shelf_id": shelf["id"]}},
+                "name": detail.get("name") or shelf.get("name", ""),
+                "slug": shelf["slug"],
+                "description": detail.get("description") or "",
+                "books": ordered_books,
+            }
+            _write_mirror(base / ".shelves" / f"{shelf['slug']}.yml", shelf_meta, result, root,
+                          dry_run=dry_run, on_event=on_event)
     except BookStackError as e:
         _emit(on_event, f"shelves unavailable ({e}) — book mirrors written without shelves")
     for b in books_list:
@@ -302,7 +317,7 @@ def _materialize_structure(
             "description": b.get("description") or "",
         }
         if shelf_map.get(b["id"]):
-            meta["shelves"] = sorted(shelf_map[b["id"]])
+            meta["shelves"] = shelf_map[b["id"]]
         _write_mirror(base / b["slug"] / ".book.yml", meta, result, root,
                       dry_run=dry_run, on_event=on_event)
     for c in chapters_list:
@@ -624,7 +639,8 @@ def _apply(  # noqa: PLR0913
                 _emit(on_event, f"error {_rel(root, path)}: unknown chapter '{page.chapter}'")
                 return
         rec = client.create_page(name=page.title, markdown=page.body,
-                                 book_id=book_id, chapter_id=chapter_id, tags=page.tags)
+                                 book_id=book_id, chapter_id=chapter_id, tags=page.tags,
+                                 priority=page.priority)
         result.created.append(path)
         _emit(on_event, f"create {_rel(root, path)}")
         snap.after_create(rec["id"])

@@ -118,6 +118,7 @@ class BookStackClient:
         book_id: int | None = None,
         chapter_id: int | None = None,
         tags: list[dict] | None = None,
+        priority: int | None = None,
     ) -> dict:
         body: dict = {"name": name, "markdown": markdown}
         if chapter_id is not None:
@@ -126,6 +127,8 @@ class BookStackClient:
             body["book_id"] = book_id
         if tags is not None:
             body["tags"] = tags
+        if priority is not None:
+            body["priority"] = priority
         return self._request("POST", "/api/pages", json=body)
 
     def delete_page(self, page_id: int) -> None:

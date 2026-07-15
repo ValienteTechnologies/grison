@@ -64,7 +64,8 @@ class FakeBS:
         if tags is not None:
             p["tags"] = tags
 
-    def create_page(self, *, name, markdown, book_id=None, chapter_id=None, tags=None) -> dict:  # type: ignore[no-untyped-def]
+    def create_page(self, *, name, markdown, book_id=None, chapter_id=None,  # type: ignore[no-untyped-def]
+                    tags=None, priority=None) -> dict:
         i = self._next
         self._next += 1
         if chapter_id is not None:
@@ -73,6 +74,8 @@ class FakeBS:
                "name": name, "slug": name.lower().replace(" ", "-"), "markdown": markdown}
         if tags is not None:
             rec["tags"] = tags
+        if priority is not None:
+            rec["priority"] = priority
         self.pages[i] = rec
         return dict(rec)
 
@@ -627,3 +630,41 @@ def test_dry_run_emits_would_prefixed_events(tmp_path: Path) -> None:
     assert page in r.pushed
     assert any(e.startswith("would push ") for e in events)
     assert fake.pages[100]["markdown"] == "original"  # dry-run wrote nothing remotely
+
+
+def test_priority_sent_on_create(tmp_path: Path) -> None:
+    """A hand-authored new page carrying priority: must not lose it at creation."""
+    fake = FakeBS()
+    newp = tmp_path / "methodology" / "library" / "mobile" / "new.md"
+    newp.parent.mkdir(parents=True)
+    newp.write_text(
+        "---\ngrison:\n  kind: methodology\ntitle: Brand New\nbook: mobile\n"
+        "priority: 7\n---\n\nbody"
+    )
+    r = sync_methodology(tmp_path, fake)
+    assert newp in r.created
+    pid = markdown_to_page(newp.read_text()).page_id
+    assert fake.pages[pid]["priority"] == 7
+    assert newp in sync_methodology(tmp_path, fake).unchanged  # stable, no re-push
+
+
+def test_shelf_mirror_preserves_order_and_description(tmp_path: Path) -> None:
+    """The shelf's own name/description and its book ORDER are mirrored to
+    .shelves/<slug>.yml — book order comes from BookStack's array, not sorted."""
+    fake = FakeBS()
+    fake.books.append({"id": 23, "slug": "web", "name": "Web", "description": ""})
+    fake.shelves.append({
+        "id": 7, "slug": "pentest-ops", "name": "Pentest Ops",
+        "description": "engagement playbooks",
+        "books": [{"id": 23, "slug": "web"}, {"id": 22, "slug": "mobile"}],  # web first
+    })
+    r = sync_methodology(tmp_path, fake)
+    shelf_mirror = tmp_path / "methodology" / "library" / ".shelves" / "pentest-ops.yml"
+    assert shelf_mirror in r.materialized and shelf_mirror.exists()
+    meta = yaml.safe_load(shelf_mirror.read_text())
+    assert meta["grison"]["bs"] == {"shelf_id": 7}
+    assert meta["description"] == "engagement playbooks"
+    assert meta["books"] == ["web", "mobile"]  # order preserved, NOT alphabetized
+    # membership recorded on each book too
+    book_mirror = tmp_path / "methodology" / "library" / "mobile" / ".book.yml"
+    assert yaml.safe_load(book_mirror.read_text())["shelves"] == ["pentest-ops"]
