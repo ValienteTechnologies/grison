@@ -76,21 +76,26 @@ class FakeGW:
     def download_evidence(self, evidence_id: int):
         return (f"{evidence_id}.png", self.images[evidence_id])
 
-    def insert_finding(self, fields: dict) -> int:
+    def insert_finding(self, fields: dict) -> dict:
         i = self._id()
         self.findings[i] = {"id": i, **fields}
-        return i
+        return dict(self.findings[i])
 
-    def update_finding(self, finding_id: int, fields: dict) -> None:
+    def update_finding(self, finding_id: int, fields: dict) -> dict:
         self.findings[finding_id] = {"id": finding_id, **fields}
+        return dict(self.findings[finding_id])
 
-    def insert_reported_finding(self, fields: dict) -> int:
+    def insert_reported_finding(self, fields: dict) -> dict:
         i = self._id()
         self.reported[i] = {"id": i, **fields}
-        return i
+        return dict(self.reported[i])
 
-    def update_reported_finding(self, rid: int, fields: dict) -> None:
+    def update_reported_finding(self, rid: int, fields: dict) -> dict:
         self.reported[rid] = {"id": rid, **fields}
+        return dict(self.reported[rid])
+
+    def fetch_tags_for(self, table: str, object_id: int):
+        return list(self.tags.get((table, object_id), []))
 
     def upload_evidence(
         self, *, finding_id, filename, caption, friendly_name, file_base64, description=""
@@ -104,8 +109,23 @@ class FakeGW:
         }
         return i
 
-    def update_evidence(self, evidence_id: int, fields: dict) -> None:
+    def fetch_evidence_by_ids(self, ids: list[int]):
+        return [
+            {
+                "id": row["id"], "document": row.get("document"),
+                "caption": row.get("caption"), "friendlyName": row.get("friendlyName"),
+                "description": row.get("description"),
+            }
+            for eid, row in self.evidence.items() if eid in ids
+        ]
+
+    def update_evidence(self, evidence_id: int, fields: dict) -> dict:
         self.evidence[evidence_id].update(fields)
+        row = self.evidence[evidence_id]
+        return {
+            "id": row["id"], "caption": row.get("caption"),
+            "friendlyName": row.get("friendlyName"), "description": row.get("description"),
+        }
 
     def delete_evidence(self, evidence_id: int) -> None:
         self.evidence.pop(evidence_id, None)
@@ -141,7 +161,8 @@ def _seed_synced(
 ):
     """Insert a remote record + write a matching, in-sync local file."""
     fields = finding_to_gw_fields(_finding(tier=tier, report_id=report_id, title=title, desc=desc))
-    rid = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    row = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    rid = row["id"]
     f = _finding(tier=tier, gw_id=rid, report_id=report_id, title=title, desc=desc)
     stamp_synced(f)
     if tier == "library":
@@ -387,3 +408,50 @@ def test_library_move_with_evidence_errors(tmp_path: Path) -> None:
     assert not fake.findings  # no new library record created
     assert rid in fake.reported and ev_id in fake.evidence  # original untouched
     assert path.exists()  # the original instance file is unaffected
+
+
+# --- friendly_name change trigger warning (gw-push-2, {{.Name}} rewrite) --------------------
+
+
+def test_friendly_name_change_warns_about_async_rewrite(tmp_path: Path) -> None:
+    """A friendly_name update fires Ghostwriter's async {{.Name}} reference-rewrite
+    event trigger — grison must send it (no fighting upstream behavior client-side)
+    but warn that a later sync may pull rewritten prose for this report."""
+    fake = FakeGW()
+    path, rid, ev_id = _seed_with_evidence(tmp_path, fake, title="Name Warn")
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["evidence"][0]["friendly_name"] = "new-name"
+    _write(path, Finding.model_validate(data))
+
+    r = sync(tmp_path, fake)
+    assert path in r.pushed
+    assert any("friendly_name" in w and "async" in w.lower() for w in r.warnings)
+    assert fake.evidence[ev_id]["friendlyName"] == "new-name"
+
+
+# --- evidence download skip (bytes immutable per id via the API) ---------------------------
+
+
+def test_sync_pull_skips_unchanged_evidence_download(tmp_path: Path) -> None:
+    """A fast-forward pull (_apply_pull / _download_finding_evidence) triggered by an
+    unrelated remote-only body edit must not re-download evidence whose bytes are
+    provably unchanged; a missing local file still re-downloads."""
+    calls: list[int] = []
+    fake = FakeGW()
+    path, rid, ev_id = _seed_with_evidence(tmp_path, fake, title="Skip DL")
+    orig_download = fake.download_evidence
+    fake.download_evidence = lambda eid: (calls.append(eid), orig_download(eid))[1]
+
+    fake.reported[rid]["description"] = "<p>remote body change</p>"  # forces a fast-forward pull
+    r = sync(tmp_path, fake)
+    assert path in r.pulled
+    assert calls == []  # bytes unchanged — no re-download
+    assert r.evidence_down == 0
+
+    (path.parent / "evidence" / "shot.png").unlink()
+    fake.reported[rid]["description"] = "<p>remote body change again</p>"  # another fast-forward
+    r2 = sync(tmp_path, fake)
+    assert path in r2.pulled
+    assert calls == [ev_id]  # missing local file — re-downloaded
+    assert r2.evidence_down == 1
+    assert (path.parent / "evidence" / "shot.png").exists()

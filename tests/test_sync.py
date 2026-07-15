@@ -205,3 +205,45 @@ def test_duplicate_library_titles_get_distinct_files(tmp_path: Path) -> None:
     assert (lib_dir / "2-lib-a.md").exists()
     r2 = pull(tmp_path, FakeGW(findings=libs))  # stable across re-pulls
     assert r2.written == [] and len(r2.unchanged) == 3
+
+
+def test_evidence_download_skipped_when_bytes_unchanged(tmp_path: Path) -> None:
+    """A fast-forward pull triggered by an unrelated remote field change must not
+    re-download evidence whose bytes are provably unchanged (evidence bytes are
+    immutable per id via the GW API) — only a changed/missing local file re-downloads."""
+    calls: list[int] = []
+
+    class CountingGW(FakeGW):
+        def download_evidence(self, evidence_id: int):
+            calls.append(evidence_id)
+            return super().download_evidence(evidence_id)
+
+    pull(tmp_path, CountingGW())
+    assert calls == [99]
+    rf_file = next((tmp_path / "findings" / "reports").rglob("*.md"))
+    img = rf_file.parent / "evidence" / "shot.png"
+    assert img.exists()
+
+    changed = [{**_RF[0], "description": "<p>beta CHANGED</p>"}]
+
+    class Changed(CountingGW):
+        def fetch_reported_findings(self):
+            return changed
+
+    r = pull(tmp_path, Changed())
+    assert rf_file in r.written
+    assert "CHANGED" in rf_file.read_text()
+    assert calls == [99]  # no second download — bytes on disk are unchanged
+    assert r.evidence_written == 0  # a skip doesn't count as a download
+
+    img.unlink()
+    changed2 = [{**_RF[0], "description": "<p>beta CHANGED AGAIN</p>"}]
+
+    class Changed2(CountingGW):
+        def fetch_reported_findings(self):
+            return changed2
+
+    r2 = pull(tmp_path, Changed2())
+    assert calls == [99, 99]  # missing local file — re-downloaded
+    assert r2.evidence_written == 1
+    assert img.exists()

@@ -235,8 +235,8 @@ def test_insert_finding_sends_mutation_and_returns_id() -> None:
         response_data={"insert_finding_one": {"id": 42}},
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
-        finding_id = client.insert_finding(fields)
-    assert finding_id == 42
+        row = client.insert_finding(fields)
+    assert row["id"] == 42
     assert len(captured) == 1
 
 
@@ -249,7 +249,7 @@ def test_update_finding_sends_mutation() -> None:
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
         result = client.update_finding(1, fields)
-    assert result is None
+    assert result == {"id": 1}
     assert len(captured) == 1
 
 
@@ -261,8 +261,8 @@ def test_insert_reported_finding_sends_mutation_and_returns_id() -> None:
         response_data={"insert_reportedFinding_one": {"id": 183}},
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
-        reported_finding_id = client.insert_reported_finding(fields)
-    assert reported_finding_id == 183
+        row = client.insert_reported_finding(fields)
+    assert row["id"] == 183
     assert len(captured) == 1
 
 
@@ -275,7 +275,7 @@ def test_update_reported_finding_sends_mutation() -> None:
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
         result = client.update_reported_finding(183, fields)
-    assert result is None
+    assert result == {"id": 183}
     assert len(captured) == 1
 
 
@@ -343,7 +343,7 @@ def test_update_evidence_sends_camelcase_friendly_name() -> None:
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
         result = client.update_evidence(38, {"caption": "new caption", "friendlyName": "new-name"})
-    assert result is None
+    assert result == {"id": 38}
     assert len(captured) == 1
 
 

@@ -80,21 +80,26 @@ class FakeGW:
     def download_evidence(self, evidence_id: int):
         return (f"{evidence_id}.png", self.images[evidence_id])
 
-    def insert_finding(self, fields: dict) -> int:
+    def fetch_tags_for(self, table: str, object_id: int):
+        return list(self.tags.get((table, object_id), []))
+
+    def insert_finding(self, fields: dict) -> dict:
         i = self._id()
         self.findings[i] = {"id": i, **fields}
-        return i
+        return dict(self.findings[i])
 
-    def update_finding(self, finding_id: int, fields: dict) -> None:
+    def update_finding(self, finding_id: int, fields: dict) -> dict:
         self.findings[finding_id] = {"id": finding_id, **fields}
+        return dict(self.findings[finding_id])
 
-    def insert_reported_finding(self, fields: dict) -> int:
+    def insert_reported_finding(self, fields: dict) -> dict:
         i = self._id()
         self.reported[i] = {"id": i, **fields}
-        return i
+        return dict(self.reported[i])
 
-    def update_reported_finding(self, rid: int, fields: dict) -> None:
+    def update_reported_finding(self, rid: int, fields: dict) -> dict:
         self.reported[rid] = {"id": rid, **fields}
+        return dict(self.reported[rid])
 
     def upload_evidence(self, *, finding_id, filename, caption, friendly_name, file_base64) -> int:
         i = self._id()
@@ -104,6 +109,16 @@ class FakeGW:
             "document": f"evidence/{filename}", "caption": caption, "friendlyName": friendly_name,
         }
         return i
+
+    def fetch_evidence_by_ids(self, ids: list[int]):
+        return [
+            {
+                "id": row["id"], "document": row.get("document"),
+                "caption": row.get("caption"), "friendlyName": row.get("friendlyName"),
+                "description": row.get("description"),
+            }
+            for eid, row in self.evidence.items() if eid in ids
+        ]
 
     def delete_evidence(self, evidence_id: int) -> None:
         self.evidence.pop(evidence_id, None)
@@ -143,7 +158,8 @@ def _seed_synced(
     """Insert a remote record (+ its tags, if any) and write a matching, in-sync local file."""
     finding = _finding(tier=tier, report_id=report_id, title=title, desc=desc, cwe=cwe, tags=tags)
     fields = finding_to_gw_fields(finding)
-    rid = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    row = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    rid = row["id"]
     table = "finding" if tier == "library" else "reportedFinding"
     remote_tags = finding_to_gw_tags(finding)
     if remote_tags:
@@ -307,3 +323,54 @@ def test_undo_restores_pre_image_tags(tmp_path: Path) -> None:
     snap = Snapshot(undos=[Undo(**u) for u in raw])
     snap.rollback(fake)
     assert fake.tags[("finding", rid)] == ["old-tag"]
+
+
+# --- canonical tag re-fetch after push (echo fix, tag side) ---------------------------------
+
+
+def test_push_adopts_case_folded_tag_from_server(tmp_path: Path) -> None:
+    """django-taggit is case-insensitive and reuses an existing case-variant tag row
+    as-is — the sent list must never be trusted as the new canonical state. Here the
+    fake server always case-folds on set_tags; after push, the local file/stamp must
+    adopt what fetch_tags_for reports, not the "IDOR" that was actually sent."""
+
+    class CaseFoldGW(FakeGW):
+        def set_tags(self, record_id: int, table: str, tags: list[str]) -> None:
+            self.set_tags_calls.append((record_id, table, list(tags)))
+            self.tags[(table, record_id)] = [t.lower() for t in tags]  # server-side fold
+
+    fake = CaseFoldGW()
+    path, rid = _seed_synced(tmp_path, fake, title="CaseFold")
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["tags"] = ["IDOR"]
+    _write(path, Finding.model_validate(data))
+
+    r = sync(tmp_path, fake)
+    assert path in r.pushed
+    f2 = markdown_to_finding(path.read_text())
+    assert f2.tags == ["idor"]  # adopted the server's folded form, not the sent "IDOR"
+    assert fake.tags[("finding", rid)] == ["idor"]
+
+    r2 = sync(tmp_path, fake)
+    assert r2.unchanged == [path]  # settles clean — no thrash from a stale sent-list stamp
+
+
+def test_cwe_shaped_free_form_tag_migrates_to_cwe_after_push(tmp_path: Path) -> None:
+    """A locally-authored free-form tag shaped like a known CWE (typed into tags:
+    instead of cwe:) is sent to GW as one flat tag-string projection —
+    finding_to_gw_tags doesn't distinguish cwe/tags on the wire. After push, the
+    canonical rebuild (_split_remote_tags) re-homes it into cwe:, required for hash
+    symmetry so the record classifies clean afterward instead of re-pushing forever."""
+    fake = FakeGW()
+    path, rid = _seed_synced(tmp_path, fake, title="Migrate")
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["tags"] = ["CWE-79"]  # authored as a free-form tag, not cwe:
+    _write(path, Finding.model_validate(data))
+
+    r = sync(tmp_path, fake)
+    assert path in r.pushed
+    f2 = markdown_to_finding(path.read_text())
+    assert f2.cwe == ["CWE-79"] and f2.tags == []
+
+    r2 = sync(tmp_path, fake)
+    assert r2.unchanged == [path]

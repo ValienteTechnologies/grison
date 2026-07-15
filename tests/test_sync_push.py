@@ -50,6 +50,9 @@ class FakeGW:
     def set_tags(self, record_id: int, table: str, tags: list[str]) -> None:
         self.tags[(table, record_id)] = list(tags)
 
+    def fetch_tags_for(self, table: str, object_id: int):
+        return list(self.tags.get((table, object_id), []))
+
     def fetch_finding_severities(self):
         return [
             {"id": 1, "severity": "Informational", "weight": 1},
@@ -73,21 +76,23 @@ class FakeGW:
     def download_evidence(self, evidence_id: int):
         return (f"{evidence_id}.png", self.images[evidence_id])
 
-    def insert_finding(self, fields: dict) -> int:
+    def insert_finding(self, fields: dict) -> dict:
         i = self._id()
         self.findings[i] = {"id": i, **fields}
-        return i
+        return dict(self.findings[i])
 
-    def update_finding(self, finding_id: int, fields: dict) -> None:
+    def update_finding(self, finding_id: int, fields: dict) -> dict:
         self.findings[finding_id] = {"id": finding_id, **fields}
+        return dict(self.findings[finding_id])
 
-    def insert_reported_finding(self, fields: dict) -> int:
+    def insert_reported_finding(self, fields: dict) -> dict:
         i = self._id()
         self.reported[i] = {"id": i, **fields}
-        return i
+        return dict(self.reported[i])
 
-    def update_reported_finding(self, rid: int, fields: dict) -> None:
+    def update_reported_finding(self, rid: int, fields: dict) -> dict:
         self.reported[rid] = {"id": rid, **fields}
+        return dict(self.reported[rid])
 
     def upload_evidence(
         self, *, finding_id, filename, caption, friendly_name, file_base64, description=""
@@ -101,8 +106,23 @@ class FakeGW:
         }
         return i
 
-    def update_evidence(self, evidence_id: int, fields: dict) -> None:
+    def fetch_evidence_by_ids(self, ids: list[int]):
+        return [
+            {
+                "id": row["id"], "document": row.get("document"),
+                "caption": row.get("caption"), "friendlyName": row.get("friendlyName"),
+                "description": row.get("description"),
+            }
+            for eid, row in self.evidence.items() if eid in ids
+        ]
+
+    def update_evidence(self, evidence_id: int, fields: dict) -> dict:
         self.evidence[evidence_id].update(fields)
+        row = self.evidence[evidence_id]
+        return {
+            "id": row["id"], "caption": row.get("caption"),
+            "friendlyName": row.get("friendlyName"), "description": row.get("description"),
+        }
 
     def delete_evidence(self, evidence_id: int) -> None:
         self.evidence.pop(evidence_id, None)
@@ -138,7 +158,8 @@ def _seed_synced(
 ):
     """Insert a remote record + write a matching, in-sync local file."""
     fields = finding_to_gw_fields(_finding(tier=tier, report_id=report_id, title=title, desc=desc))
-    rid = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    row = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    rid = row["id"]
     f = _finding(tier=tier, gw_id=rid, report_id=report_id, title=title, desc=desc)
     stamp_synced(f)
     if tier == "library":
@@ -420,7 +441,7 @@ def test_malformed_remote_only_record_isolated(tmp_path: Path) -> None:
     pulling down."""
     fake = FakeGW()
     fake.insert_finding(finding_to_gw_fields(_finding(title="Remote Good")))
-    bad_id = fake.insert_finding(finding_to_gw_fields(_finding(title="Remote Bad")))
+    bad_id = fake.insert_finding(finding_to_gw_fields(_finding(title="Remote Bad")))["id"]
     fake.findings[bad_id]["severityId"] = 999
     r = sync(tmp_path, fake)
     good_path = tmp_path / "findings" / "library" / "remote-good.md"
@@ -585,3 +606,130 @@ def test_dry_run_emits_would_prefixed_events(tmp_path: Path) -> None:
     assert path in r.pushed
     assert any(e.startswith("would push ") for e in events)
     assert "edited" not in fake.findings[rid]["description"]  # dry-run wrote nothing remotely
+
+
+# --- push→pull echo fix: pull-after-push canonicalization ----------------------------------
+
+
+def test_push_then_reclassify_clean_no_echo(tmp_path: Path) -> None:
+    """The core echo-fix regression: a locally-edited finding whose GW-stored HTML
+    round-trips differently than the local markdown (mixed '-'/'* ' bullets always
+    canonicalize to '-') must classify 'clean' against the post-push remote state on
+    the very next sync, and the local file on disk must already equal the canonical
+    form right after the push — not merely echo what was sent."""
+    fake = FakeGW()
+    path, rid = _seed_synced(tmp_path, fake, tier="instance", report_id=2, title="Echo")
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["description"] = "- item one\n* item two"  # non-canonical bullet marker
+    _write(path, Finding.model_validate(data))
+
+    r = sync(tmp_path, fake)
+    assert path in r.pushed and r.errors == []
+
+    f_after = markdown_to_finding(path.read_text())
+    assert f_after.description == "- item one\n- item two"  # already canonical, not the echo
+
+    r2 = sync(tmp_path, fake)
+    assert r2.unchanged == [path] and r2.pushed == [] and r2.pulled == []
+
+
+def test_push_preserves_pending_evidence_entry_on_disk(tmp_path: Path) -> None:
+    """The canonical shell is built with evidence_rows=None (which would otherwise
+    silently drop evidence) — shell.evidence must be swapped back to the live local
+    list so a still-pending (never uploaded, image missing) entry survives the push
+    untouched instead of vanishing from the frontmatter."""
+    fake = FakeGW()
+    path, rid = _seed_synced(tmp_path, fake, tier="instance", report_id=2, title="Pending Ev")
+    (path.parent / "evidence").mkdir(parents=True, exist_ok=True)
+    (path.parent / "evidence" / "shot.png").write_bytes(b"\x89PNG\r\n\x1a\nDATA")
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["evidence"] = [
+        {"file": "evidence/shot.png", "caption": "cap", "friendly_name": "shot"},
+        {"file": "evidence/never-added.png", "caption": "x", "friendly_name": "x"},
+    ]
+    _write(path, Finding.model_validate(data))
+
+    r = sync(tmp_path, fake)
+    assert path in r.pushed
+    assert any("evidence image missing" in e for e in r.errors)
+    assert r.evidence_up == 1 and len(fake.evidence) == 1
+
+    f2 = markdown_to_finding(path.read_text())
+    assert len(f2.evidence) == 2
+    uploaded = next(e for e in f2.evidence if e.file == "evidence/shot.png")
+    assert uploaded.gw is not None and uploaded.gw.id is not None
+    pending = next(e for e in f2.evidence if e.file == "evidence/never-added.png")
+    assert pending.gw is None  # still pending — not dropped by the shell rebuild
+
+
+def test_sidecar_cleared_even_if_canonical_rebuild_raises(tmp_path: Path) -> None:
+    """If the mutation's returned row can't be re-canonicalized (a malformed response
+    here simulated by a corrupted severityId), the remote write already landed —
+    'pushed' + sidecar clearing must not be undone, but the local restamp must NOT
+    fall back to stamping from local content (that would silently reintroduce the
+    echo). A distinct error is surfaced instead."""
+
+    class BadReturnGW(FakeGW):
+        def update_finding(self, finding_id: int, fields: dict) -> dict:
+            self.findings[finding_id] = {"id": finding_id, **fields}
+            row = dict(self.findings[finding_id])
+            row["severityId"] = 999  # malformed — Severity.from_gw_id raises
+            return row
+
+    fake = BadReturnGW()
+    path, rid = _seed_synced(tmp_path, fake, title="Break On Push")
+    path.write_text(path.read_text().replace("body", "LOCAL change"))
+    fake.findings[rid]["description"] = "<p>REMOTE change</p>"
+    sync(tmp_path, fake)  # first sync: collision, sidecar written
+    sidecar = path.with_suffix(".remote.md")
+    assert sidecar.exists()
+
+    r = sync(tmp_path, fake, force_local={path})  # resolve via push — hits the bad-return path
+    assert path in r.pushed  # remote write landed and was reported
+    assert not sidecar.exists()  # cleared — keyed on the write landing, not restamp success
+    assert any("could not be re-canonicalized" in e for e in r.errors)
+    assert "LOCAL change" in path.read_text()  # local untouched beyond the original edit
+    assert "REMOTE change" not in path.read_text()
+
+
+def test_server_renamed_evidence_upload_renames_local_file(tmp_path: Path) -> None:
+    """Django's storage appends ``_<rand7>`` to the stored filename on a collision
+    (F6) — after an upload batch, grison must adopt whatever name actually landed:
+    rename the local file, update entry.file/gw.basename, and warn."""
+
+    class RenameOnUploadGW(FakeGW):
+        def upload_evidence(
+            self, *, finding_id, filename, caption, friendly_name, file_base64, description=""
+        ) -> int:
+            stored_name = f"renamed_ab12345_{filename}"
+            i = self._id()
+            self.images[i] = base64.b64decode(file_base64)
+            self.evidence[i] = {
+                "id": i, "findingId": finding_id, "reportId": None,
+                "document": f"evidence/{stored_name}", "caption": caption,
+                "friendlyName": friendly_name, "description": description,
+            }
+            return i
+
+    fake = RenameOnUploadGW()
+    path, rid = _seed_synced(tmp_path, fake, tier="instance", report_id=2, title="Renamed Upload")
+    (path.parent / "evidence").mkdir(parents=True, exist_ok=True)
+    (path.parent / "evidence" / "shot.png").write_bytes(b"\x89PNG\r\n\x1a\nDATA")
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["evidence"] = [{"file": "evidence/shot.png", "caption": "cap", "friendly_name": "shot"}]
+    _write(path, Finding.model_validate(data))
+
+    r = sync(tmp_path, fake)
+    assert r.evidence_up == 1
+    assert any("renamed" in w.lower() for w in r.warnings)
+    assert not (path.parent / "evidence" / "shot.png").exists()
+    renamed_path = path.parent / "evidence" / "renamed_ab12345_shot.png"
+    assert renamed_path.exists() and renamed_path.read_bytes() == b"\x89PNG\r\n\x1a\nDATA"
+
+    f2 = markdown_to_finding(path.read_text())
+    assert f2.evidence[0].file == "evidence/renamed_ab12345_shot.png"
+    assert f2.evidence[0].gw is not None
+    assert f2.evidence[0].gw.basename == "renamed_ab12345_shot.png"
+
+    r2 = sync(tmp_path, fake)  # settles clean — no thrash from the renamed basename
+    assert r2.unchanged == [path]

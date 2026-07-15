@@ -50,6 +50,9 @@ class FakeGW:
     def set_tags(self, record_id: int, table: str, tags: list[str]) -> None:
         self.tags[(table, record_id)] = list(tags)
 
+    def fetch_tags_for(self, table: str, object_id: int):
+        return list(self.tags.get((table, object_id), []))
+
     def fetch_finding_severities(self):
         return [
             {"id": 1, "severity": "Informational", "weight": 1},
@@ -73,21 +76,23 @@ class FakeGW:
     def download_evidence(self, evidence_id: int):
         return (f"{evidence_id}.png", self.images[evidence_id])
 
-    def insert_finding(self, fields: dict) -> int:
+    def insert_finding(self, fields: dict) -> dict:
         i = self._id()
         self.findings[i] = {"id": i, **fields}
-        return i
+        return dict(self.findings[i])
 
-    def update_finding(self, finding_id: int, fields: dict) -> None:
+    def update_finding(self, finding_id: int, fields: dict) -> dict:
         self.findings[finding_id] = {"id": finding_id, **fields}
+        return dict(self.findings[finding_id])
 
-    def insert_reported_finding(self, fields: dict) -> int:
+    def insert_reported_finding(self, fields: dict) -> dict:
         i = self._id()
         self.reported[i] = {"id": i, **fields}
-        return i
+        return dict(self.reported[i])
 
-    def update_reported_finding(self, rid: int, fields: dict) -> None:
+    def update_reported_finding(self, rid: int, fields: dict) -> dict:
         self.reported[rid] = {"id": rid, **fields}
+        return dict(self.reported[rid])
 
     def upload_evidence(
         self, *, finding_id, filename, caption, friendly_name, file_base64, description=""
@@ -101,8 +106,23 @@ class FakeGW:
         }
         return i
 
-    def update_evidence(self, evidence_id: int, fields: dict) -> None:
+    def fetch_evidence_by_ids(self, ids: list[int]):
+        return [
+            {
+                "id": row["id"], "document": row.get("document"),
+                "caption": row.get("caption"), "friendlyName": row.get("friendlyName"),
+                "description": row.get("description"),
+            }
+            for eid, row in self.evidence.items() if eid in ids
+        ]
+
+    def update_evidence(self, evidence_id: int, fields: dict) -> dict:
         self.evidence[evidence_id].update(fields)
+        row = self.evidence[evidence_id]
+        return {
+            "id": row["id"], "caption": row.get("caption"),
+            "friendlyName": row.get("friendlyName"), "description": row.get("description"),
+        }
 
     def delete_evidence(self, evidence_id: int) -> None:
         self.evidence.pop(evidence_id, None)
@@ -139,7 +159,8 @@ def _seed_synced(
     """Insert a remote record + write a matching, in-sync local file."""
     finding = _finding(tier=tier, report_id=report_id, title=title, desc=desc, **extra)
     fields = finding_to_gw_fields(finding)
-    rid = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    row = fake.insert_finding(fields) if tier == "library" else fake.insert_reported_finding(fields)
+    rid = row["id"]
     f = _finding(tier=tier, gw_id=rid, report_id=report_id, title=title, desc=desc, **extra)
     stamp_synced(f)
     if tier == "library":
@@ -374,3 +395,39 @@ def test_pull_surfaces_dropped_styling_span_as_warning_once(tmp_path: Path) -> N
 
     r2 = sync(tmp_path, fake)  # nothing changed — must not re-warn every routine sync
     assert r2.warnings == [] and libf in r2.unchanged
+
+
+# --- mass-change guard widening: overwrite-pulls count, new-file pulls don't ----------------
+
+
+def test_mass_change_guard_withholds_overwrite_pulls(tmp_path: Path) -> None:
+    """Pull-after-push makes the whole synced corpus's bases converter-derived, so any
+    future converter behavior change would otherwise mass-pull-overwrite unguarded —
+    overwrite-pulls (an existing local file about to be replaced) must trip the same
+    tripwire push/insert already do, and be withheld the same way."""
+    fake = FakeGW()
+    paths = []
+    for i in range(8):
+        path, rid = _seed_synced(tmp_path, fake, title=f"Guard{i}")
+        fake.findings[rid]["description"] = f"<p>remote changed {i}</p>"  # would fast-forward pull
+        paths.append(path)
+
+    r = sync(tmp_path, fake)
+    assert r.mass_change_blocked
+    assert r.pulled == []
+    skipped_paths = {p for p, _note in r.skipped}
+    assert all(p in skipped_paths for p in paths)
+    for p in paths:
+        assert "remote changed" not in p.read_text()  # withheld — nothing clobbered
+
+
+def test_mass_change_guard_ignores_new_file_pulls(tmp_path: Path) -> None:
+    """New-file pulls (no local claimant) are non-destructive creations and must never
+    count toward the mass-change tripwire, unlike overwrite-pulls."""
+    fake = FakeGW()
+    for i in range(8):
+        fake.insert_finding(finding_to_gw_fields(_finding(title=f"NewLib{i}")))
+
+    r = sync(tmp_path, fake)
+    assert not r.mass_change_blocked
+    assert len(r.pulled) == 8

@@ -316,12 +316,37 @@ def _reconcile(
         _emit(on_event, f"would pull {_rel(root, target_path)}")
         return
 
-    _download_evidence(remote, ev_rows, client, target_dir, result, on_event=on_event)
+    local_hashes = _stamped_hashes(local_f) if existing is not None else None
+    _download_evidence(
+        remote, ev_rows, client, target_dir, result, local_hashes=local_hashes, on_event=on_event
+    )
     stamp_synced(remote)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(finding_to_markdown(remote), encoding="utf-8")
     result.written.append(target_path)
     _emit(on_event, f"pull {_rel(root, target_path)}")
+
+
+def _stamped_hashes(f: Finding) -> dict[int, str]:
+    """``{gw.id: gw.hash}`` for entries already carrying a stamped image hash — the
+    prior local state a re-pull can compare against to skip a redundant download
+    (evidence bytes are immutable per id via the GW API — a same-id download can never
+    return different bytes, verified fact)."""
+    return {
+        e.gw.id: e.gw.hash
+        for e in f.evidence
+        if e.gw is not None and e.gw.id is not None and e.gw.hash is not None
+    }
+
+
+def _evidence_unchanged(base_dir: Path, entry: EvidenceItem, local_hashes: dict[int, str]) -> bool:
+    if entry.gw is None or entry.gw.id is None:
+        return False
+    prior = local_hashes.get(entry.gw.id)
+    if prior is None:
+        return False
+    img = base_dir / entry.file
+    return img.exists() and _image_hash(img.read_bytes()) == prior
 
 
 def _download_evidence(
@@ -331,12 +356,17 @@ def _download_evidence(
     target_dir: Path,
     result: PullResult,
     *,
+    local_hashes: dict[int, str] | None = None,
     on_event: Callable[[str], None] | None = None,
 ) -> None:
     if not ev_rows:
         return
+    local_hashes = local_hashes or {}
     for entry in remote.evidence:
         if entry.gw is None:
+            continue
+        if _evidence_unchanged(target_dir, entry, local_hashes):
+            entry.gw.hash = local_hashes[entry.gw.id]  # unchanged — keep the stamped hash
             continue
         _filename, data = client.download_evidence(entry.gw.id)
         img_path = target_dir / entry.file
@@ -733,22 +763,34 @@ def sync(
                 p.action = "skip"
                 p.note = f"duplicate move (id {k[2]} → {k[0]}) — remove the extra copy first"
 
-    # mass-change trip-wire: block a surprising number of remote writes
-    remote_writes = [p for p in plans if p.action in ("push", "insert")]
+    # mass-change trip-wire: block a surprising number of remote writes, and — since
+    # pull-after-push makes the whole synced corpus's bases converter-derived, so any
+    # future converter behavior change would otherwise mass-pull-overwrite unguarded —
+    # overwrite-pulls (an existing local file about to be replaced) too. A new-file pull
+    # (plan.local is None) is a non-destructive creation and never counts or gets held.
+    guarded = [
+        p for p in plans
+        if p.action in ("push", "insert") or (p.action == "pull" and p.local is not None)
+    ]
     total = max(len(remote_index), 1)
-    if not dry_run and len(remote_writes) > 5 and len(remote_writes) > mass_change_ratio * total:
+    if not dry_run and len(guarded) > 5 and len(guarded) > mass_change_ratio * total:
         result.mass_change_blocked = True
         _emit(
             on_event,
-            f"mass-change guard tripped: withholding {len(remote_writes)} remote writes",
+            f"mass-change guard tripped: withholding {len(guarded)} remote writes/overwrite-pulls",
         )
-        for p in remote_writes:
-            result.skipped.append((p.local.path, "mass-change guard — remote write withheld"))
-            _emit(
-                on_event,
-                f"skip {_rel(root, p.local.path)}: mass-change guard — remote write withheld",
+        for p in guarded:
+            note = (
+                "mass-change guard — overwrite pull withheld"
+                if p.action == "pull"
+                else "mass-change guard — remote write withheld"
             )
-        plans = [p for p in plans if p.action not in ("push", "insert")]
+            result.skipped.append((p.local.path, note))
+            _emit(on_event, f"skip {_rel(root, p.local.path)}: {note}")
+        plans = [
+            p for p in plans
+            if not (p.action in ("push", "insert") or (p.action == "pull" and p.local is not None))
+        ]
 
     # Persist the snapshot even if a record fails mid-batch (one bad record must not lose
     # the undo journal for writes already applied), and isolate per-record failures.
@@ -852,6 +894,7 @@ def _apply_pull(
             ),
             tags=tag_map.get(plan.key), on_loss=losses.append,
         )
+    local_hashes = None
     if plan.local is not None:
         # --force-remote (plan.forced) picks remote unconditionally for every image,
         # matching the record-level force semantics; otherwise a genuine per-image
@@ -861,7 +904,10 @@ def _apply_pull(
             msg = _evidence_meta_collision_msg(_rel(root, path), evfile)
             result.errors.append(msg)
             _emit(on_event, msg)
-    evidence_down = _download_finding_evidence(remote_f, client, path.parent, on_event=on_event)
+        local_hashes = _stamped_hashes(plan.local.finding)
+    evidence_down = _download_finding_evidence(
+        remote_f, client, path.parent, local_hashes=local_hashes, on_event=on_event
+    )
     stamp_synced(remote_f)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(finding_to_markdown(remote_f), encoding="utf-8")
@@ -965,15 +1011,20 @@ def _push_tags(
     client: GhostwriterClient,
     snap: Snapshot,
     remote_tags: list[str],
-) -> None:
+) -> bool:
     """Push the cwe+tags projection via ``setTags``, skipping the call when the remote
     side already carries exactly this set (order-insensitive — GW tags are a set, and
-    a same-content call would be a no-op mutation)."""
+    a same-content call would be a no-op mutation). Returns whether ``setTags`` was
+    actually called — the caller uses this to decide whether the canonical tag state
+    needs a re-fetch (taggit case-folds/reuses an existing tag row, so the just-sent
+    list is never trustworthy) or whether the batch-start, already-remote-derived
+    ``remote_tags`` is still accurate."""
     desired = finding_to_gw_tags(f)
     if sorted(desired) == sorted(remote_tags):
-        return
+        return False
     snap.before_set_tags(table, f.grison.gw.id, remote_tags)
     client.set_tags(f.grison.gw.id, table, desired)
+    return True
 
 
 def _reconcile_cvss_score(f: Finding) -> str | None:
@@ -991,6 +1042,19 @@ def _reconcile_cvss_score(f: Finding) -> str | None:
     stale = f.cvss.score
     f.cvss.score = correct
     return f"cvss score {stale} disagreed with vector-derived {correct} — recomputed"
+
+
+def _finalize_canonical(shell: Finding, f: Finding, path: Path) -> None:
+    """Persist the canonical, converter-rebuilt ``shell`` (never the pre-mutation local
+    ``f``, whose prose is the whole echo bug) — but with evidence always taken from
+    ``f``'s live, in-place-mutated list, never from the shell's own rebuild (built with
+    ``evidence_rows=None``). Rebuilding evidence from the shell would silently drop
+    pending, not-yet-uploaded entries from the file — a data loss invisible to
+    ``content_hash``. Re-assigning on every call (rather than once) keeps this correct
+    even if a future change ever reassigns ``f.evidence`` outright instead of mutating
+    entries in place."""
+    shell.evidence = f.evidence
+    _finalize(shell, path)
 
 
 def _apply_push(
@@ -1012,17 +1076,46 @@ def _apply_push(
     snap.before_update(lr.loc_table, f.grison.gw.id, pre)
     fields = finding_to_gw_fields(f)
     if lr.loc_table == "finding":
-        client.update_finding(f.grison.gw.id, fields)
+        rec_after = client.update_finding(f.grison.gw.id, fields)
     else:
-        client.update_reported_finding(f.grison.gw.id, fields)
-    result.pushed.append(lr.path)  # remote write succeeded — now safe to report as pushed
+        rec_after = client.update_reported_finding(f.grison.gw.id, fields)
+    # The remote write landed — report + clear the sidecar right now. Everything past
+    # this point (tag re-fetch, canonical rebuild, evidence) can fail independently
+    # without undoing a write Ghostwriter already committed.
+    result.pushed.append(lr.path)
     _emit(on_event, f"push {_rel(root, lr.path)}")
-    _push_tags(f, lr.loc_table, client, snap, tag_map.get((lr.loc_table, f.grison.gw.id), []))
-    _finalize(f, lr.path)  # persist the record as synced before touching evidence
+    _clear_sidecar(lr.path)  # collision resolved via --force-local, or just a routine push
+
+    remote_tags = tag_map.get((lr.loc_table, f.grison.gw.id), [])
+    pushed_tags = _push_tags(f, lr.loc_table, client, snap, remote_tags)
+    # taggit is case-insensitive and reuses an existing case-variant tag row as-is —
+    # never trust the list just sent; re-fetch what actually landed. If nothing was
+    # pushed, remote_tags (this batch's fetch_tag_map entry) is already remote-derived.
+    canonical_tags = (
+        client.fetch_tags_for(lr.loc_table, f.grison.gw.id) if pushed_tags else remote_tags
+    )
+
+    def finalize(path: Path) -> None:
+        _finalize_canonical(shell, f, path)
+
+    try:
+        shell = gw_record_to_finding(
+            rec_after, tier=_tier(lr.loc_table), tags=canonical_tags, evidence_rows=None,
+        )
+    except (ValueError, KeyError, TypeError) as e:
+        result.errors.append(
+            f"{_rel(root, lr.path)}: pushed to ghostwriter but the returned record could "
+            f"not be re-canonicalized — re-run sync to reclassify ({e})"
+        )
+        return  # local restamp skipped — falling back to the local finding would silently
+        # reintroduce the echo; next sync self-heals as a repair or collision.
+
+    finalize(lr.path)  # persist the record as synced before touching evidence
     tier_is_instance = lr.loc_table == "reportedFinding"
     remote_rows = ev_by_finding.get(f.grison.gw.id) if tier_is_instance else None
-    _push_evidence(f, lr.path, client, snap, result, remote_rows, root, on_event=on_event)
-    _clear_sidecar(lr.path)  # collision resolved via --force-local
+    _push_evidence(
+        f, lr.path, client, snap, result, remote_rows, root, finalize=finalize, on_event=on_event
+    )
 
 
 def _apply_insert(
@@ -1040,27 +1133,61 @@ def _apply_insert(
         result.warnings.append(f"{_rel(root, lr.path)}: {score_warn}")
     fields = finding_to_gw_fields(f)
     if lr.loc_table == "finding":
-        new_id = client.insert_finding(fields)
+        rec_after = client.insert_finding(fields)
     else:
-        new_id = client.insert_reported_finding(fields)
+        rec_after = client.insert_reported_finding(fields)
+    new_id = rec_after["id"]
     snap.after_insert(lr.loc_table, new_id)
     f.grison.gw.id = new_id
     result.inserted.append(lr.path)  # insert succeeded — now safe to report as inserted
     _emit(on_event, f"insert {_rel(root, lr.path)}")
-    _push_tags(f, lr.loc_table, client, snap, [])  # brand-new record — no remote tags yet
+
+    # brand-new record — no remote tags yet, so a push always means canonical tags need
+    # the re-fetch (case-fold/reuse, same as _apply_push); no push (no local tags/cwe
+    # authored) means the canonical set is just the empty list.
+    pushed_tags = _push_tags(f, lr.loc_table, client, snap, [])
+    canonical_tags = client.fetch_tags_for(lr.loc_table, new_id) if pushed_tags else []
+
+    def finalize(path: Path) -> None:
+        _finalize_canonical(shell, f, path)
+
+    try:
+        shell = gw_record_to_finding(
+            rec_after, tier=_tier(lr.loc_table), tags=canonical_tags, evidence_rows=None,
+        )
+    except (ValueError, KeyError, TypeError) as e:
+        result.errors.append(
+            f"{_rel(root, lr.path)}: inserted into ghostwriter (id {new_id}) but the "
+            f"returned record could not be re-canonicalized — re-run sync to reclassify ({e})"
+        )
+        # Persist the new id WITHOUT a base (bypassing stamp_synced) — unlike a push,
+        # nothing on disk carried this identity before, so writing nothing at all would
+        # let the next sync re-insert a duplicate. Next sync instead sees a broken link
+        # (id set, no base) and surfaces it loudly rather than silently reintroducing
+        # the echo by stamping a base off pre-canonicalization local content.
+        lr.path.write_text(finding_to_markdown(f), encoding="utf-8")
+        return
+
     # Persist the new id + base BEFORE evidence: if an upload then fails, the next sync
     # sees the id (no duplicate re-insert) and retries only the pending evidence.
-    _finalize(f, lr.path)
-    _push_evidence(f, lr.path, client, snap, result, None, root, on_event=on_event)
+    finalize(lr.path)
+    _push_evidence(
+        f, lr.path, client, snap, result, None, root, finalize=finalize, on_event=on_event
+    )
 
 
 def _download_finding_evidence(
     remote_f: Finding, client: GhostwriterClient, target_dir: Path,
-    *, on_event: Callable[[str], None] | None = None,
+    *, local_hashes: dict[int, str] | None = None,
+    on_event: Callable[[str], None] | None = None,
 ) -> int:
     count = 0
+    local_hashes = local_hashes or {}
     for entry in remote_f.evidence:
         if entry.gw is None:
+            continue
+        if _evidence_unchanged(target_dir, entry, local_hashes):
+            entry.gw.hash = local_hashes[entry.gw.id]
             continue
         _name, data = client.download_evidence(entry.gw.id)
         img = target_dir / entry.file
@@ -1082,6 +1209,7 @@ def _reconcile_evidence_meta(
     result: SyncResult,
     root: Path,
     *,
+    finalize: Callable[[Path], None],
     on_event: Callable[[str], None] | None = None,
 ) -> None:
     """Per-image 3-way reconcile for caption/friendly_name/description when an entry's
@@ -1091,7 +1219,9 @@ def _reconcile_evidence_meta(
     ``friendly_name`` — that field alone fires GW's ``{{.Name}}``-ref-rewrite trigger);
     remote-only changed → adopt into local; both → collision, surfaced exactly like a
     body collision (never a silent winner — local's file is left untouched so nothing
-    on disk is lost, but the stale base keeps flagging it every sync until resolved)."""
+    on disk is lost, but the stale base keeps flagging it every sync until resolved).
+    ``finalize`` is the push-side canonical persist (see :func:`_finalize_canonical`),
+    passed down so the on-disk file stays the converter-canonical shell throughout."""
     assert entry.gw is not None and entry.gw.id is not None
     base = entry.gw.meta
     local_meta = _entry_meta(entry)
@@ -1099,7 +1229,7 @@ def _reconcile_evidence_meta(
     if local_meta == remote_meta:
         if entry.gw.meta != remote_meta:  # e.g. base predates Track 1b — restamp, no drift
             entry.gw.meta = remote_meta
-            _finalize(f, path)
+            finalize(path)
         return
     outcome = _classify_evidence_meta(base, local_meta, remote_meta)
     if outcome == "local_ahead":
@@ -1119,21 +1249,71 @@ def _reconcile_evidence_meta(
                     "description": row.get("description") or "",
                 },
             )
-            client.update_evidence(entry.gw.id, fields)
+            returned = client.update_evidence(entry.gw.id, fields)
             _emit(on_event, f"evidence meta ↑ {Path(entry.file).name}")
-        entry.gw.meta = local_meta
-        _finalize(f, path)
+            if "friendlyName" in fields:
+                result.warnings.append(
+                    f"{_rel(root, path)}: {Path(entry.file).name} friendly_name changed — "
+                    "Ghostwriter may asynchronously rewrite {{.Name}} references across this "
+                    "report's findings; the next sync may pull updated prose"
+                )
+            # adopt the server's stored values, not the local strings just sent — same
+            # rationale as the tag re-fetch (never assume a verbatim echo).
+            entry.caption = returned.get("caption") or ""
+            entry.friendly_name = returned.get("friendlyName") or ""
+            entry.description = returned.get("description") or ""
+            entry.gw.meta = _row_meta(returned)
+        else:
+            entry.gw.meta = local_meta
+        finalize(path)
     elif outcome == "remote_ahead":
         entry.caption = row.get("caption") or ""
         entry.friendly_name = row.get("friendlyName") or ""
         entry.description = row.get("description") or ""
         entry.gw.meta = remote_meta
-        _finalize(f, path)
+        finalize(path)
         _emit(on_event, f"evidence meta ↓ {Path(entry.file).name}")
     else:  # collision — preserve local's on-disk values, leave the base stale
         msg = _evidence_meta_collision_msg(_rel(root, path), entry.file)
         result.errors.append(msg)
         _emit(on_event, msg)
+
+
+def _adopt_server_evidence_names(
+    f: Finding,
+    path: Path,
+    client: GhostwriterClient,
+    uploaded_ids: list[int],
+    result: SyncResult,
+    root: Path,
+    finalize: Callable[[Path], None],
+    *,
+    on_event: Callable[[str], None] | None = None,
+) -> None:
+    """After a batch of uploads: Django's storage appends ``_<rand7>`` to the stored
+    filename on a collision (F6) — adopt whatever Ghostwriter actually stored onto the
+    local file/frontmatter so ``entry.file``/``gw.basename`` keep mirroring GW's
+    storage path exactly (the local rename guard at classify time depends on this)."""
+    rows_by_id = {r["id"]: r for r in client.fetch_evidence_by_ids(uploaded_ids)}
+    for entry in f.evidence:
+        if entry.gw is None or entry.gw.id not in rows_by_id:
+            continue
+        stored = evidence_basename(rows_by_id[entry.gw.id])
+        sent = Path(entry.file).name
+        if stored == sent:
+            continue
+        old_img = path.parent / entry.file
+        new_rel = str(Path(entry.file).with_name(stored))
+        new_img = path.parent / new_rel
+        old_img.rename(new_img)
+        entry.file = new_rel
+        entry.gw.basename = stored
+        result.warnings.append(
+            f"{_rel(root, path)}: Ghostwriter renamed uploaded evidence {sent!r} to "
+            f"{stored!r} (filename collision) — local file renamed to match"
+        )
+        _emit(on_event, f"evidence renamed ↺ {sent} → {stored}")
+        finalize(path)
 
 
 def _push_evidence(
@@ -1145,16 +1325,21 @@ def _push_evidence(
     remote_rows: list[dict] | None,
     root: Path,
     *,
+    finalize: Callable[[Path], None],
     on_event: Callable[[str], None] | None = None,
 ) -> None:
     """Upload pending/stale local evidence, re-download an already-uploaded image whose
     local file vanished (F2 — never silently stays 'clean'), reconcile per-image
-    caption/friendly_name/description drift (gw-push-2), then delete any remote row an
-    image no longer claims (removed-from-frontmatter or superseded-by-a-reupload) — all
-    four are snapshot-backed so a bad batch is fully reversible."""
+    caption/friendly_name/description drift (gw-push-2), adopt any server-renamed
+    upload basename, then delete any remote row an image no longer claims (removed-
+    from-frontmatter or superseded-by-a-reupload) — all snapshot-backed so a bad batch
+    is fully reversible. ``finalize`` persists the push-side canonical shell (see
+    :func:`_finalize_canonical`), not ``f`` itself, after every mutating step, so a
+    crash mid-batch still leaves each id/basename durable on disk."""
     if f.grison.tier != "instance":
         return
     remote_by_id = {r["id"]: r for r in remote_rows or []}
+    uploaded_ids: list[int] = []
     for entry in f.evidence:
         stale = _is_stale_evidence(entry, path.parent)
         missing = _is_missing_evidence(entry, path.parent)
@@ -1164,7 +1349,8 @@ def _push_evidence(
             row = remote_by_id.get(entry.gw.id)
             if row is not None:
                 _reconcile_evidence_meta(
-                    f, entry, row, path, client, snap, result, root, on_event=on_event
+                    f, entry, row, path, client, snap, result, root,
+                    finalize=finalize, on_event=on_event,
                 )
             continue
         if entry.gw is not None and entry.gw.id is not None and missing:
@@ -1181,7 +1367,7 @@ def _push_evidence(
                 entry.gw.meta = _row_meta(row)
             result.evidence_down += 1
             _emit(on_event, f"evidence ↓ {Path(entry.file).name} (restored — missing locally)")
-            _finalize(f, path)
+            finalize(path)
             continue
         img = path.parent / entry.file
         if not img.exists():
@@ -1205,8 +1391,14 @@ def _push_evidence(
             id=new_id, hash=_image_hash(data), meta=_entry_meta(entry), basename=filename,
         )  # old row (if any) reaped below
         result.evidence_up += 1
+        uploaded_ids.append(new_id)
         _emit(on_event, f"evidence ↑ {filename}")
-        _finalize(f, path)  # persist this upload's id before attempting the next
+        finalize(path)  # persist this upload's id before attempting the next
+
+    if uploaded_ids:
+        _adopt_server_evidence_names(
+            f, path, client, uploaded_ids, result, root, finalize, on_event=on_event
+        )
 
     local_ids = {e.gw.id for e in f.evidence if e.gw is not None and e.gw.id is not None}
     for row in remote_rows or []:

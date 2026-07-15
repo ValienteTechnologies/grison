@@ -107,6 +107,19 @@ query($content_type_ids: [Int!]) {
 }
 """
 
+_TAGGED_ITEM_FOR_QUERY = """
+query($content_type_id: Int!, $object_id: Int!) {
+  taggedItem(
+    where: {content_type_id: {_eq: $content_type_id}, object_id: {_eq: $object_id}}
+    order_by: {id: asc}
+  ) {
+    tag {
+      name
+    }
+  }
+}
+"""
+
 _SET_TAGS_MUTATION = """
 mutation($id: bigint!, $model: String!, $tags: [String!]!) {
   setTags(id: $id, model: $model, tags: $tags) {
@@ -157,10 +170,24 @@ query($id: Int!) {
 }
 """
 
+# The insert/update mutations below return the exact field set _FINDING_QUERY /
+# _REPORTED_FINDING_QUERY select (the sync engine rebuilds the canonical local finding
+# from this ``returning`` row instead of the pre-push local object — the "returning" set
+# governed by the manager role's SELECT permission, verified to cover every field here).
 _INSERT_FINDING_MUTATION = """
 mutation($obj: finding_insert_input!) {
   insert_finding_one(object: $obj) {
     id
+    title
+    severityId
+    findingTypeId
+    cvssScore
+    cvssVector
+    description
+    impact
+    mitigation
+    references
+    replication_steps
   }
 }
 """
@@ -169,6 +196,16 @@ _UPDATE_FINDING_MUTATION = """
 mutation($id: bigint!, $set: finding_set_input!) {
   update_finding_by_pk(pk_columns: {id: $id}, _set: $set) {
     id
+    title
+    severityId
+    findingTypeId
+    cvssScore
+    cvssVector
+    description
+    impact
+    mitigation
+    references
+    replication_steps
   }
 }
 """
@@ -177,6 +214,18 @@ _INSERT_REPORTED_FINDING_MUTATION = """
 mutation($obj: reportedFinding_insert_input!) {
   insert_reportedFinding_one(object: $obj) {
     id
+    reportId
+    title
+    severityId
+    findingTypeId
+    cvssScore
+    cvssVector
+    description
+    impact
+    mitigation
+    references
+    replication_steps
+    affectedEntities
   }
 }
 """
@@ -185,6 +234,18 @@ _UPDATE_REPORTED_FINDING_MUTATION = """
 mutation($id: bigint!, $set: reportedFinding_set_input!) {
   update_reportedFinding_by_pk(pk_columns: {id: $id}, _set: $set) {
     id
+    reportId
+    title
+    severityId
+    findingTypeId
+    cvssScore
+    cvssVector
+    description
+    impact
+    mitigation
+    references
+    replication_steps
+    affectedEntities
   }
 }
 """
@@ -215,6 +276,18 @@ _UPDATE_EVIDENCE_MUTATION = """
 mutation($id: bigint!, $set: evidence_set_input!) {
   update_evidence_by_pk(pk_columns: {id: $id}, _set: $set) {
     id
+    caption
+    friendlyName
+    description
+  }
+}
+"""
+
+_EVIDENCE_BY_IDS_QUERY = """
+query($ids: [bigint!]) {
+  evidence(where: {id: {_in: $ids}}) {
+    id
+    document
     caption
     friendlyName
     description
@@ -345,6 +418,21 @@ class GhostwriterClient:
         model = "finding" if table == "finding" else "report_finding_link"
         self._post(_SET_TAGS_MUTATION, {"id": record_id, "model": model, "tags": tags})
 
+    def fetch_tags_for(self, table: str, object_id: int) -> list[str]:
+        """Tag names on exactly one ``finding``/``reportedFinding`` row — used to
+        re-derive canonical tag state right after a push. django-taggit is
+        case-insensitive and reuses an existing case-variant tag row as-is, so the
+        list just sent to ``setTags`` is never trustworthy; this is the only way to
+        know what actually landed."""
+        content_types = self._resolve_content_types()
+        ct_id = content_types.get(table)
+        if ct_id is None:
+            return []
+        rows = self._post(
+            _TAGGED_ITEM_FOR_QUERY, {"content_type_id": ct_id, "object_id": object_id}
+        )["taggedItem"]
+        return [row["tag"]["name"] for row in rows]
+
     def update_report(self, report_id: int, fields: dict) -> None:
         """Patch a report's ``_set`` columns (grison only ever sends ``extraFields``)."""
         self._post(_UPDATE_REPORT_MUTATION, {"id": report_id, "set": fields})
@@ -354,22 +442,31 @@ class GhostwriterClient:
         raw = base64.b64decode(data["fileBase64"])
         return data["filename"], raw
 
-    def insert_finding(self, fields: dict) -> int:
+    def insert_finding(self, fields: dict) -> dict:
+        """Returns the full post-insert row (see ``_INSERT_FINDING_MUTATION``) —
+        callers read ``["id"]`` for the new pk and pass the whole row straight into
+        :func:`~grison.remote.gwmap.gw_record_to_finding` to build the canonical
+        local finding without a second round trip."""
         data = self._post(_INSERT_FINDING_MUTATION, {"obj": fields})
-        return data["insert_finding_one"]["id"]
+        return data["insert_finding_one"]
 
-    def update_finding(self, finding_id: int, fields: dict) -> None:
-        self._post(_UPDATE_FINDING_MUTATION, {"id": finding_id, "set": fields})
+    def update_finding(self, finding_id: int, fields: dict) -> dict:
+        """Returns the full post-write row (see ``_UPDATE_FINDING_MUTATION``) — the
+        value the next fetch would rebuild, so the caller can re-canonicalize from it
+        instead of stamping the merge base from the pre-write local object."""
+        data = self._post(_UPDATE_FINDING_MUTATION, {"id": finding_id, "set": fields})
+        return data["update_finding_by_pk"]
 
-    def insert_reported_finding(self, fields: dict) -> int:
+    def insert_reported_finding(self, fields: dict) -> dict:
         data = self._post(_INSERT_REPORTED_FINDING_MUTATION, {"obj": fields})
-        return data["insert_reportedFinding_one"]["id"]
+        return data["insert_reportedFinding_one"]
 
-    def update_reported_finding(self, reported_finding_id: int, fields: dict) -> None:
-        self._post(
+    def update_reported_finding(self, reported_finding_id: int, fields: dict) -> dict:
+        data = self._post(
             _UPDATE_REPORTED_FINDING_MUTATION,
             {"id": reported_finding_id, "set": fields},
         )
+        return data["update_reportedFinding_by_pk"]
 
     def upload_evidence(
         self,
@@ -394,16 +491,28 @@ class GhostwriterClient:
         )
         return data["uploadEvidence"]["id"]
 
-    def update_evidence(self, evidence_id: int, fields: dict) -> None:
+    def update_evidence(self, evidence_id: int, fields: dict) -> dict:
         """Patch an evidence row's ``caption``/``friendlyName``/``description`` in place
         (Track 1b) — the update-permission columns confirmed live on ``evidence``.
+        Returns the post-write row so the caller stamps its per-image merge base from
+        what Ghostwriter actually stored, not the local strings that were sent.
 
         CAUTION (upstream, do not fight client-side): a ``friendlyName`` update fires a
         Ghostwriter-side event trigger that rewrites ``{{.Name}}``/``{{ref .Name}}``
         template references across every finding in the report. That's intended
         upstream behavior — grison just sends the new value and lets it happen.
         """
-        self._post(_UPDATE_EVIDENCE_MUTATION, {"id": evidence_id, "set": fields})
+        data = self._post(_UPDATE_EVIDENCE_MUTATION, {"id": evidence_id, "set": fields})
+        return data["update_evidence_by_pk"]
+
+    def fetch_evidence_by_ids(self, ids: list[int]) -> list[dict]:
+        """``id/document/caption/friendlyName/description`` rows for a set of evidence
+        ids — used right after an upload batch to adopt Ghostwriter's stored basename
+        (Django's storage appends ``_<rand7>`` on a filename collision, so the sent
+        name isn't guaranteed to be what actually landed)."""
+        if not ids:
+            return []
+        return self._post(_EVIDENCE_BY_IDS_QUERY, {"ids": ids})["evidence"]
 
     def delete_evidence(self, evidence_id: int) -> None:
         self._post(_DELETE_EVIDENCE_MUTATION, {"id": evidence_id})
