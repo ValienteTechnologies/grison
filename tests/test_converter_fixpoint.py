@@ -80,6 +80,11 @@ FIXPOINT_CASES: list[tuple[str, str, bool]] = [
     ("list_nest_2", "- top\n  - sub1\n  - sub2", True),
     ("list_nest_3_collapses", "- top\n  - sub1\n    - subsub1", False),
     ("bullet_star_normalizes", "* item one\n* item two", False),
+    ("ordered_list_basic", "1. first\n2. second\n3. third", True),
+    ("ordered_list_start", "3. first\n4. second", True),
+    ("ordered_list_renumbers", "3. first\n7. second\n9. third", False),
+    ("ordered_nest_in_bullet", "- top\n  1. sub1\n  2. sub2", True),
+    ("bullet_nest_in_ordered", "1. top\n  - sub1\n  - sub2", True),
     (
         "mixed_all",
         "Intro paragraph with **bold**, *em*, `code`, and a "
@@ -115,7 +120,6 @@ def test_synthetic_fixpoint(name: str, md: str, expect_identity: bool) -> None:
 REJECTED_CASES = [
     ("heading", "# Heading"),
     ("table", "| A | B |\n| - | - |\n| 1 | 2 |"),
-    ("ordered_list", "1. first\n2. second"),
     ("image", "![alt](http://example.com/x.png)"),
 ]
 
@@ -162,12 +166,23 @@ def _rand_paragraph(rng: random.Random) -> str:
 
 
 def _rand_list_block(rng: random.Random) -> str:
+    top_ordered = rng.random() < 0.3
+    n = rng.choice([1, 1, 1, 3, 5])
     bullet = rng.choice(["- ", "* "])
     lines = []
     for _ in range(rng.randint(1, 5)):
-        lines.append(bullet + _rand_paragraph(rng))
+        if top_ordered:
+            lines.append(f"{n}. " + _rand_paragraph(rng))
+            n += 1
+        else:
+            lines.append(bullet + _rand_paragraph(rng))
         if rng.random() < 0.4:
-            lines.append("  " + bullet + _rand_paragraph(rng))
+            if rng.random() < 0.3:
+                nested_n = rng.choice([1, 2, 4])
+                lines.append(f"  {nested_n}. " + _rand_paragraph(rng))
+            else:
+                nested_bullet = rng.choice(["- ", "* "])
+                lines.append("  " + nested_bullet + _rand_paragraph(rng))
     return "\n".join(lines)
 
 

@@ -10,21 +10,27 @@ must fail loudly (:class:`ConverterError`) rather than degrade silently or
 get dropped on the floor.
 
 Whitelist (both directions):
-  block:  ``<p>`` <-> paragraph, ``<ul><li>`` <-> ``- `` list item
+  block:  ``<p>`` <-> paragraph, ``<ul><li>`` <-> ``- `` list item,
+          ``<ol><li>`` <-> ``1. `` list item (numbered sequentially on emit;
+          ``<ol start="N">`` <-> the first item's literal number)
   inline: ``<strong>`` <-> ``**bold**``/``__bold__``, ``<code>`` <-> `` `code` ``,
           ``<em>`` <-> ``*em*``/``_em_``, ``<strong><em>`` <-> ``***both***``,
           ``<a href[ title]>`` <-> ``[text](url[ "title"])``,
           ``<br>`` <-> a hard line break inside a paragraph
   ``<span>`` is unwrapped (kept, tag dropped) rather than rejected, since
-  TinyMCE wraps highlighted text in it.
+  TinyMCE wraps highlighted text in it. An ``<ol type="...">`` (a/i/A/I
+  numbering style) is dropped the same way — markdown can't represent it —
+  and reported via ``on_loss``.
 
 Nesting: inline tokens nest arbitrarily inside bold/em/link text in both
 directions (e.g. a link whose visible text contains ``<strong>``). Lists
-support one level of nesting: a ``<ul>`` nested inside an ``<li>`` renders as
-a 2-space-indented ``  - `` sub-bullet; a ``<ul>`` nested inside ONE OF THOSE
-(three or more levels deep in the source) collapses into that same single
-sub-level rather than growing a third indent — markdown here only has one
-nesting convention.
+support one level of nesting: a ``<ul>``/``<ol>`` nested inside an ``<li>``
+renders as a 2-space-indented sub-item (``  - `` or ``  N. `` per its own
+tag); a list nested inside ONE OF THOSE (three or more levels deep in the
+source) collapses into that same single sub-level rather than growing a
+third indent — markdown here only has one nesting convention. ``<ul>`` and
+``<ol>`` mix freely at any level (an ordered list nested in a bullet item's
+``<li>``, or vice versa).
 
 Loss visibility: constructs GW's HTML carries but this vocabulary can't
 represent — TinyMCE ``data-color``/``style`` highlight spans, non-canonical
@@ -46,7 +52,7 @@ class ConverterError(ValueError):
     """Raised when HTML or markdown outside the tiny closed GW vocabulary is seen."""
 
 
-_BLOCK_TAGS = {"p", "ul", "li"}
+_BLOCK_TAGS = {"p", "ul", "ol", "li"}
 _INLINE_TAGS = {"strong", "code", "em", "a", "br"}
 _UNWRAP_TAGS = {"span"}
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
@@ -117,6 +123,12 @@ class _TreeBuilder(HTMLParser):
             for name, value in attrs:
                 if name in ("data-color", "style"):
                     node_attrs[name] = value or ""
+        elif tag == "ol":
+            # start is load-bearing (sets the rendered numbering); type is captured
+            # only for on_loss reporting — markdown can't represent a/i/A/I numbering.
+            for name, value in attrs:
+                if name in ("start", "type"):
+                    node_attrs[name] = value or ""
         node = _Node(tag, node_attrs)
         self.stack[-1].children.append(node)
         self.stack.append(node)
@@ -158,7 +170,7 @@ def html_to_md(
 
 
 def _group_top_level(children: list[_Node | str]) -> list[_Node]:
-    """Split top-level children into p/ul/heading blocks, wrapping stray inline
+    """Split top-level children into p/ul/ol/heading blocks, wrapping stray inline
     content in an implicit paragraph and dropping insignificant top-level whitespace."""
     blocks: list[_Node] = []
     buffer: list[_Node | str] = []
@@ -171,7 +183,9 @@ def _group_top_level(children: list[_Node | str]) -> list[_Node]:
     for child in children:
         if isinstance(child, str) and child.strip() == "":
             continue
-        if isinstance(child, _Node) and (child.tag in ("p", "ul") or child.tag in _HEADING_TAGS):
+        if isinstance(child, _Node) and (
+            child.tag in ("p", "ul", "ol") or child.tag in _HEADING_TAGS
+        ):
             flush()
             blocks.append(child)
         else:
@@ -185,20 +199,50 @@ def _render_block(node: _Node, on_loss: Callable[[str], None] | None = None) -> 
         return _render_inline(node.children, on_loss)
     if node.tag in _HEADING_TAGS:
         return "#" * int(node.tag[1]) + " " + _render_inline(node.children, on_loss)
-    if node.tag == "ul":
-        lines = []
-        for li in node.children:
-            if isinstance(li, str):
-                if li.strip() == "":
-                    continue
-                raise ConverterError("stray text directly inside <ul> (expected <li>)")
-            if li.tag != "li":
-                raise ConverterError(f"unsupported <ul> child: <{li.tag}>")
-            head, nested = _render_li(li, on_loss)
-            lines.append("- " + head)
-            lines.extend("  - " + n for n in nested)
-        return "\n".join(lines)
+    if node.tag in ("ul", "ol"):
+        return _render_list_node(node, on_loss)
     raise ConverterError(f"unsupported block-level tag: <{node.tag}>")
+
+
+def _ol_start(node: _Node, on_loss: Callable[[str], None] | None) -> int:
+    """Numbering start for an ``<ol>`` — ``start`` if given (else 1). ``type``
+    (a/i/A/I numbering) can't be represented in markdown, so it's dropped and
+    reported via ``on_loss`` — items are always rendered as decimal ``N. ``."""
+    type_attr = node.attrs.get("type")
+    if type_attr:
+        _report_loss(
+            on_loss, f"<ol type={type_attr!r}> numbering style dropped (rendered as 1. 2. 3. ...)"
+        )
+    start_attr = node.attrs.get("start")
+    if start_attr:
+        try:
+            return int(start_attr)
+        except ValueError:
+            pass
+    return 1
+
+
+def _render_list_node(node: _Node, on_loss: Callable[[str], None] | None = None) -> str:
+    is_ol = node.tag == "ol"
+    n = _ol_start(node, on_loss) if is_ol else 1
+    lines = []
+    for li in node.children:
+        if isinstance(li, str):
+            if li.strip() == "":
+                continue
+            raise ConverterError(f"stray text directly inside <{node.tag}> (expected <li>)")
+        if li.tag != "li":
+            raise ConverterError(f"unsupported <{node.tag}> child: <{li.tag}>")
+        head, nested = _render_li(li, on_loss)
+        marker = f"{n}. " if is_ol else "- "
+        lines.append(marker + head)
+        if is_ol:
+            n += 1
+        lines.extend("  " + m for m in nested)
+    return "\n".join(lines)
+
+
+_LIST_TAGS = ("ul", "ol")
 
 
 def _render_li(
@@ -207,34 +251,38 @@ def _render_li(
     """Render one ``<li>``'s content, unwrapping the ``<p>`` GW wraps item content in.
 
     Returns ``(head, nested)``: ``head`` is the item's own text; ``nested`` is a flat
-    list of single-level ``  - `` sub-bullet texts for any ``<ul>`` nested directly
-    inside this ``<li>``. A ``<ul>`` nested inside one of THOSE (three or more levels
-    deep in the source) collapses into that same sub-level rather than a deeper
-    indent, since markdown here supports only one nesting convention.
+    list of single-level, already marker-prefixed (``- `` or ``N. ``, per its own
+    tag) sub-item texts for any ``<ul>``/``<ol>`` nested directly inside this
+    ``<li>``. A list nested inside one of THOSE (three or more levels deep in the
+    source) collapses into that same sub-level rather than a deeper indent, since
+    markdown here supports only one nesting convention — each contributing list
+    keeps its own marker style, only the indent collapses.
 
     The corpus impact/mitigation/references fields are ``<ul><li><p>…</p></li></ul>``
     (possibly multiple ``<p>`` siblings, joined with a space); a bare ``<li>`` of
     inline content — including what THIS converter itself emits for a ``<li>`` that
-    has a nested ``<ul>``, since it doesn't add a ``<p>`` wrapper — is rendered as one
+    has a nested list, since it doesn't add a ``<p>`` wrapper — is rendered as one
     contiguous inline run instead, so whitespace round-trips exactly rather than
     being paragraph-joined/stripped.
     """
     has_p = any(isinstance(c, _Node) and c.tag == "p" for c in li.children)
-    has_ul = any(isinstance(c, _Node) and c.tag == "ul" for c in li.children)
-    if not has_p and not has_ul:
+    has_list = any(isinstance(c, _Node) and c.tag in _LIST_TAGS for c in li.children)
+    if not has_p and not has_list:
         return _render_inline(li.children, on_loss), []
     nested: list[str] = []
     if not has_p:
-        inline_children = [c for c in li.children if not (isinstance(c, _Node) and c.tag == "ul")]
+        inline_children = [
+            c for c in li.children if not (isinstance(c, _Node) and c.tag in _LIST_TAGS)
+        ]
         head = _render_inline(inline_children, on_loss)
         for child in li.children:
-            if isinstance(child, _Node) and child.tag == "ul":
-                nested.extend(_flatten_nested_ul(child, on_loss))
+            if isinstance(child, _Node) and child.tag in _LIST_TAGS:
+                nested.extend(_flatten_nested_list(child, on_loss))
         return head, nested
     inline_parts: list[str] = []
     for child in li.children:
-        if isinstance(child, _Node) and child.tag == "ul":
-            nested.extend(_flatten_nested_ul(child, on_loss))
+        if isinstance(child, _Node) and child.tag in _LIST_TAGS:
+            nested.extend(_flatten_nested_list(child, on_loss))
         elif isinstance(child, _Node) and child.tag == "p":
             rendered = _render_inline(child.children, on_loss)
             if rendered:
@@ -250,20 +298,26 @@ def _render_li(
     return head, nested
 
 
-def _flatten_nested_ul(ul: _Node, on_loss: Callable[[str], None] | None) -> list[str]:
-    """Flatten a ``<ul>`` nested inside an ``<li>`` — and anything nested inside IT —
-    into a flat list of sub-bullet texts, all at the one supported nesting level."""
+def _flatten_nested_list(lst: _Node, on_loss: Callable[[str], None] | None) -> list[str]:
+    """Flatten a ``<ul>``/``<ol>`` nested inside an ``<li>`` — and anything nested
+    inside IT — into a flat list of marker-prefixed sub-item texts, all at the one
+    supported nesting level (the 2-space indent is applied by the caller)."""
+    is_ol = lst.tag == "ol"
+    n = _ol_start(lst, on_loss) if is_ol else 1
     lines: list[str] = []
-    for li in ul.children:
+    for li in lst.children:
         if isinstance(li, str):
             if li.strip() == "":
                 continue
-            raise ConverterError("stray text directly inside <ul> (expected <li>)")
+            raise ConverterError(f"stray text directly inside <{lst.tag}> (expected <li>)")
         if li.tag != "li":
-            raise ConverterError(f"unsupported <ul> child: <{li.tag}>")
+            raise ConverterError(f"unsupported <{lst.tag}> child: <{li.tag}>")
         head, deeper = _render_li(li, on_loss)
         if head:
-            lines.append(head)
+            marker = f"{n}. " if is_ol else "- "
+            lines.append(marker + head)
+            if is_ol:
+                n += 1
         lines.extend(deeper)  # collapse a 3rd+ level into this same sub-level
     return lines
 
@@ -324,7 +378,7 @@ def _render_code_text(nodes: list[_Node | str]) -> str:
 # --- markdown -> html --------------------------------------------------------
 
 _HEADING_RE = re.compile(r"^#{1,6}\s")
-_ORDERED_RE = re.compile(r"^\d+\.\s")
+_ORDERED_ITEM_RE = re.compile(r"^(\d+)\. ")
 _IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _BLOCKQUOTE_RE = re.compile(r"^>\s?")
 _TABLE_SEP_RE = re.compile(r"\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?")
@@ -389,44 +443,86 @@ def _render_md_block(block: str, *, headings: bool = False) -> str:
 
 
 def _list_line_kind(line: str) -> str | None:
-    """``"top"`` for an unindented ``- ``/``* `` bullet, ``"nested"`` for one indented
-    by 2+ spaces (any deeper indent still collapses to the single supported
+    """``"top"`` for an unindented ``- ``/``* ``/``N. `` item, ``"nested"`` for one
+    indented by 2+ spaces (any deeper indent still collapses to the single supported
     sub-level — see module docstring), ``None`` otherwise."""
-    if line.startswith("- ") or line.startswith("* "):
+    if line.startswith("- ") or line.startswith("* ") or _ORDERED_ITEM_RE.match(line):
         return "top"
     stripped = line.lstrip(" ")
-    if len(line) - len(stripped) >= 2 and (stripped.startswith("- ") or stripped.startswith("* ")):
+    if len(line) - len(stripped) >= 2 and (
+        stripped.startswith("- ") or stripped.startswith("* ") or _ORDERED_ITEM_RE.match(stripped)
+    ):
         return "nested"
     return None
 
 
+def _list_marker_kind_and_start(line: str) -> tuple[bool, int]:
+    """``(is_ordered, start)`` for a top-level or nested list line — ``start`` is
+    the line's own literal number when ordered, else meaningless (1)."""
+    stripped = line.lstrip(" ")
+    m = _ORDERED_ITEM_RE.match(stripped)
+    if m:
+        return True, int(m.group(1))
+    return False, 1
+
+
+def _strip_list_marker(line: str) -> str:
+    """Strip a line's leading indent and ``- ``/``* ``/``N. `` marker, returning
+    just the item's own text content."""
+    stripped = line.lstrip(" ")
+    if stripped.startswith("- ") or stripped.startswith("* "):
+        return stripped[2:]
+    m = _ORDERED_ITEM_RE.match(stripped)
+    assert m  # callers only pass lines already classified by _list_line_kind
+    return stripped[m.end() :]
+
+
 def _render_list_block(lines: list[str]) -> str:
-    """Render a block of ``- ``/``  - `` lines into ``<ul>``, nesting a single ``<ul>``
-    inside an ``<li>`` for that item's contiguous run of indented sub-bullets."""
+    """Render a block of ``- ``/``* ``/``N. `` and their 2-space-indented sub-item
+    lines into ``<ul>``/``<ol>``, nesting a single list inside an ``<li>`` for that
+    item's contiguous run of indented sub-items.
+
+    The outer list's tag is set by the FIRST top-level line's marker; a nested
+    group's tag is set by the FIRST line of that contiguous indented run — each
+    independently, so ``<ol>`` nested in a ``<ul>`` item (or vice versa) round-trips.
+    An ordered list/group's ``start`` is the first item's literal number (an
+    explicit ``start="N"`` attribute is only emitted when N != 1); later numbers in
+    the same run are accepted but not otherwise significant — canonical sequential
+    renumbering happens when the HTML is read back (see ``_render_list_node``)."""
+    top_is_ol, top_start = _list_marker_kind_and_start(lines[0])
     items: list[str] = []
     head: str | None = None
-    nested: list[str] = []
+    nested_lines: list[str] = []
 
     def flush() -> None:
         nonlocal head
         if head is None:
             return
-        if nested:
-            nested_html = "".join(f"<li>{n}</li>" for n in nested)
-            items.append(f"<li>{head}<ul>{nested_html}</ul></li>")
+        if nested_lines:
+            nested_is_ol, nested_start = _list_marker_kind_and_start(nested_lines[0])
+            nested_html = "".join(
+                f"<li>{_inline_to_html(_strip_list_marker(n))}</li>" for n in nested_lines
+            )
+            if nested_is_ol:
+                attr = f' start="{nested_start}"' if nested_start != 1 else ""
+                items.append(f"<li>{head}<ol{attr}>{nested_html}</ol></li>")
+            else:
+                items.append(f"<li>{head}<ul>{nested_html}</ul></li>")
         else:
             items.append(f"<li>{head}</li>")
         head = None
-        nested.clear()
+        nested_lines.clear()
 
     for line in lines:
         if _list_line_kind(line) == "top":
             flush()
-            head = _inline_to_html(line[2:])
+            head = _inline_to_html(_strip_list_marker(line))
         else:  # "nested" — any indent depth collapses to this one sub-level
-            content = line.lstrip(" ")[2:]
-            nested.append(_inline_to_html(content))
+            nested_lines.append(line)
     flush()
+    if top_is_ol:
+        attr = f' start="{top_start}"' if top_start != 1 else ""
+        return f"<ol{attr}>{''.join(items)}</ol>"
     return f"<ul>{''.join(items)}</ul>"
 
 
@@ -434,8 +530,6 @@ def _check_line_whitelist(line: str, *, headings: bool = False) -> None:
     stripped = line.strip()
     if _HEADING_RE.match(line) and not headings:
         raise ConverterError(f"unsupported markdown: ATX heading ({line!r})")
-    if _ORDERED_RE.match(line):
-        raise ConverterError(f"unsupported markdown: ordered list ({line!r})")
     if _IMAGE_RE.search(line):
         raise ConverterError(f"unsupported markdown: image ({line!r})")
     if stripped.startswith("```"):
