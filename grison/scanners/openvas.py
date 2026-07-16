@@ -3,6 +3,7 @@ from __future__ import annotations
 import defusedxml.ElementTree as ET
 
 from grison.scanners.ir import Finding, cvss_to_severity
+from grison.scanners.ir.cvss2 import cvss2_to_cvss3
 
 from .base import ImportOptions, Scanner
 
@@ -85,12 +86,17 @@ class OpenVASScanner(Scanner):
             ]
 
             if oid not in aggregated:
-                cvss_raw = tags.get("cvss_base_vector", "")
+                # cvss_base_vector is bare CVSS v2 on older NVTs (v2 has no "CVSS:"
+                # prefix in its own spec) but a properly prefixed v3 vector on
+                # newer ones — convert only the former, leave the latter untouched.
+                cvss_raw = tags.get("cvss_base_vector", "").strip()
+                if cvss_raw and not cvss_raw.startswith("CVSS:"):
+                    cvss_raw = cvss2_to_cvss3(cvss_raw)
                 aggregated[oid] = {
                     "title": nvt.findtext("name") or oid,
                     "severity": severity,
                     "cvss_vector": cvss_raw,
-                    "description": tags.get("summary", result.findtext("description") or ""),
+                    "description": tags.get("summary") or result.findtext("description") or "",
                     "impact": tags.get("impact", ""),
                     "mitigation": tags.get("solution", ""),
                     "finding_guidance": tags.get("vuldetect", ""),

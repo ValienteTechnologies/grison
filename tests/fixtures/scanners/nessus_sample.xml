@@ -8,6 +8,7 @@
         <solution>Disable TLS 1.0 and TLS 1.1.</solution>
         <synopsis>An outdated TLS version is in use.</synopsis>
         <see_also>https://example.com/advisory/tls</see_also>
+        <cwe>79</cwe>
       </ReportItem>
     </ReportHost>
   </Report>

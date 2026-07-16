@@ -39,12 +39,24 @@ class QualysScanner(Scanner):
         for qid_el in root.findall(".//GLOSSARY/QID_LIST/QID"):
             qid = qid_el.findtext("QID") or ""
             if qid:
+                # WAS glossary entries carry a ready CVSS3.x vector under
+                # CVSS_V3/VECTOR_STRING. Qualys emits it bare (no "CVSS:3.x/"
+                # prefix) — prepend one, same as the Nessus cvss3_vector handling.
+                cvss3_raw = (qid_el.findtext("CVSS_V3/VECTOR_STRING") or "").strip()
+                if cvss3_raw:
+                    cvss_vector = (
+                        cvss3_raw if cvss3_raw.startswith("CVSS:3") else f"CVSS:3.0/{cvss3_raw}"
+                    )
+                else:
+                    cvss_vector = ""
+
                 glossary[qid] = {
                     "title": qid_el.findtext("TITLE") or f"QID {qid}",
                     "severity": qid_el.findtext("SEVERITY") or "3",
                     "description": qid_el.findtext("DESCRIPTION") or "",
                     "impact": qid_el.findtext("IMPACT") or "",
                     "solution": qid_el.findtext("SOLUTION") or "",
+                    "cvss_vector": cvss_vector,
                     "cve_list": [
                         c.text or ""
                         for c in qid_el.findall(".//CVE_LIST/CVE/ID")
@@ -116,6 +128,7 @@ class QualysScanner(Scanner):
                     title=meta.get("title", f"QID {qid}"),
                     plugin_id=qid,
                     severity=severity,
+                    cvss_vector=meta.get("cvss_vector", ""),
                     description=meta.get("description", ""),
                     impact=meta.get("impact", ""),
                     mitigation=meta.get("solution", ""),

@@ -1,0 +1,47 @@
+<?xml version="1.0" ?>
+<WAS_SCAN_REPORT>
+  <GLOSSARY>
+    <QID_LIST>
+      <QID>
+        <QID>150004</QID>
+        <TITLE>Reflected Cross-Site Scripting</TITLE>
+        <SEVERITY>4</SEVERITY>
+        <DESCRIPTION>The page reflects unsanitized user input in the response.</DESCRIPTION>
+        <IMPACT>An attacker could execute script in a victim's browser.</IMPACT>
+        <SOLUTION>Sanitize all user input before reflecting it in the response.</SOLUTION>
+        <CVE_LIST>
+          <CVE>
+            <ID>CVE-2023-1234</ID>
+          </CVE>
+        </CVE_LIST>
+        <CVSS_V3>
+          <BASE>6.1</BASE>
+          <VECTOR_STRING>AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N</VECTOR_STRING>
+        </CVSS_V3>
+      </QID>
+      <QID>
+        <QID>150010</QID>
+        <TITLE>SQL Injection</TITLE>
+        <SEVERITY>5</SEVERITY>
+        <DESCRIPTION>The page is vulnerable to SQL injection.</DESCRIPTION>
+        <SOLUTION>Use parameterized queries.</SOLUTION>
+        <CVSS_V3>
+          <BASE>9.8</BASE>
+          <VECTOR_STRING>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H</VECTOR_STRING>
+        </CVSS_V3>
+      </QID>
+    </QID_LIST>
+  </GLOSSARY>
+  <RESULTS>
+    <VULNERABILITY_LIST>
+      <VULNERABILITY>
+        <QID>150004</QID>
+        <URL>https://example.com/search?q=1</URL>
+      </VULNERABILITY>
+      <VULNERABILITY>
+        <QID>150010</QID>
+        <URL>https://example.com/login?id=1</URL>
+      </VULNERABILITY>
+    </VULNERABILITY_LIST>
+  </RESULTS>
+</WAS_SCAN_REPORT>

@@ -3,35 +3,9 @@ from __future__ import annotations
 import defusedxml.ElementTree as ET
 
 from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir.cvss2 import cvss2_to_cvss3 as _cvss2_to_cvss3
 
 from .base import ImportOptions, Scanner
-
-# Static CVSS2 → CVSS3.1 field mapping used for vector conversion
-_AV_MAP = {"L": "L", "A": "A", "N": "N"}
-_AC_MAP = {"L": "L", "M": "H", "H": "H"}
-_AU_TO_PR = {"N": "N", "S": "L", "M": "H"}
-_CIA_MAP = {"N": "N", "P": "L", "C": "H"}
-
-
-def _cvss2_to_cvss3(v2: str) -> str:
-    """Best-effort CVSS2 → CVSS3.1 vector string conversion."""
-    try:
-        # Nessus emits three shapes: "CVSS2#AV:N/...", bare "AV:N/...", and
-        # "(AV:N/...)". Strip the "CVSS2#" prefix (if any) and any surrounding
-        # parens/whitespace before splitting, so "AV:" survives as a real key.
-        vec = v2.split("#", 1)[-1].strip().strip("()")
-        parts = dict(p.split(":", 1) for p in vec.split("/") if ":" in p)
-        av = _AV_MAP.get(parts.get("AV", ""), "N")
-        ac = _AC_MAP.get(parts.get("AC", ""), "L")
-        pr = _AU_TO_PR.get(parts.get("Au", ""), "N")
-        ui = "N"
-        scope = "U"
-        c = _CIA_MAP.get(parts.get("C", ""), "N")
-        i = _CIA_MAP.get(parts.get("I", ""), "N")
-        a = _CIA_MAP.get(parts.get("A", ""), "N")
-        return f"CVSS:3.1/AV:{av}/AC:{ac}/PR:{pr}/UI:{ui}/S:{scope}/C:{c}/I:{i}/A:{a}"
-    except Exception:
-        return ""
 
 
 class NessusScanner(Scanner):
@@ -74,9 +48,24 @@ class NessusScanner(Scanner):
                     component += f" ({svc})"
 
                 if plugin_id not in aggregated:
-                    cvss_raw = item.findtext("cvss_vector") or item.findtext("cvss3_vector") or ""
-                    if cvss_raw and not cvss_raw.startswith("CVSS:3"):
-                        cvss_raw = _cvss2_to_cvss3(cvss_raw)
+                    # Prefer cvss3_vector by provenance, not by prefix-sniffing the
+                    # (possibly v2) cvss_vector field: real-world exports sometimes
+                    # populate both, and cvss3_vector sometimes lacks its "CVSS:3.x/"
+                    # prefix — either way it's already v3 and must never be routed
+                    # through the v2 converter, which would silently zero its impact.
+                    cvss3_raw = (item.findtext("cvss3_vector") or "").strip()
+                    if cvss3_raw:
+                        cvss_raw = (
+                            cvss3_raw
+                            if cvss3_raw.startswith("CVSS:3")
+                            else f"CVSS:3.0/{cvss3_raw}"
+                        )
+                    else:
+                        cvss2_raw = (item.findtext("cvss_vector") or "").strip()
+                        cvss_raw = _cvss2_to_cvss3(cvss2_raw) if cvss2_raw else ""
+
+                    cwe_raw = (item.findtext("cwe") or "").strip()
+                    cwe = f"CWE-{cwe_raw}" if cwe_raw.isdigit() else ""
 
                     see_also_raw = (item.findtext("see_also") or "").strip()
                     refs = [u.strip() for u in see_also_raw.splitlines() if u.strip()]
@@ -85,6 +74,7 @@ class NessusScanner(Scanner):
                         "title": item.get("pluginName", f"Plugin {plugin_id}"),
                         "severity": severity,
                         "cvss_vector": cvss_raw,
+                        "cwe": cwe,
                         "description": (item.findtext("description") or "").strip(),
                         "mitigation": (item.findtext("solution") or "").strip(),
                         "synopsis": (item.findtext("synopsis") or "").strip(),
@@ -115,6 +105,7 @@ class NessusScanner(Scanner):
                     plugin_id=plugin_id,
                     severity=meta["severity"],
                     cvss_vector=meta["cvss_vector"],
+                    cwe=meta["cwe"],
                     description=description.strip(),
                     mitigation=meta["mitigation"],
                     references=refs_html,
