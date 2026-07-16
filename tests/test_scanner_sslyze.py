@@ -190,6 +190,81 @@ def test_plugin_exclude(scanner: SslyzeScanner) -> None:
     assert all(f.plugin_id != "sslyze:ssl_2_0" for f in findings)
 
 
+def test_ec224_key_flagged_weak(scanner: SslyzeScanner) -> None:
+    """EC-224 must be flagged: the finding's own mitigation text recommends 'at least
+    ... EC-256 (P-256 or stronger)', so the detector threshold must be < 256, not < 224."""
+    doc = {
+        "server_scan_results": [
+            {
+                "server_location": {"hostname": "host.example.com", "port": 443},
+                "scan_result": {
+                    "certificate_info": {
+                        "status": "COMPLETED",
+                        "result": {
+                            "certificate_deployments": [
+                                {
+                                    "received_chain": [
+                                        {"public_key": {"algorithm": "EC", "key_size": 224}}
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                },
+            }
+        ]
+    }
+    findings = scanner.parse(json.dumps(doc).encode(), ImportOptions())
+    f = next((f for f in findings if f.plugin_id == "sslyze:cert_weak_key"), None)
+    assert f is not None
+
+
+def test_ec256_key_not_flagged(scanner: SslyzeScanner) -> None:
+    doc = {
+        "server_scan_results": [
+            {
+                "server_location": {"hostname": "host.example.com", "port": 443},
+                "scan_result": {
+                    "certificate_info": {
+                        "status": "COMPLETED",
+                        "result": {
+                            "certificate_deployments": [
+                                {
+                                    "received_chain": [
+                                        {"public_key": {"algorithm": "EC", "key_size": 256}}
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                },
+            }
+        ]
+    }
+    findings = scanner.parse(json.dumps(doc).encode(), ImportOptions())
+    assert not any(f.plugin_id == "sslyze:cert_weak_key" for f in findings)
+
+
+def test_robot_attack_enum_null_survives_parse(scanner: SslyzeScanner) -> None:
+    """robot_attack_enum present-but-null (``result.get(...)`` returns None, not a
+    missing key) must not raise on ``.startswith`` — and must not emit a finding."""
+    doc = {
+        "server_scan_results": [
+            {
+                "server_location": {"hostname": "host.example.com", "port": 443},
+                "scan_result": {
+                    "robot": {
+                        "status": "COMPLETED",
+                        "result": {"robot_attack_enum": None},
+                    }
+                },
+            }
+        ]
+    }
+    findings = scanner.parse(json.dumps(doc).encode(), ImportOptions())
+    assert not any(f.plugin_id == "sslyze:robot" for f in findings)
+
+
 def test_robot_not_triggered_when_not_vulnerable(scanner: SslyzeScanner) -> None:
     doc = {
         "server_scan_results": [

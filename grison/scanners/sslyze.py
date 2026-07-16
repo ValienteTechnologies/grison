@@ -209,7 +209,7 @@ class SslyzeScanner(Scanner):
         result = self._safe_result(scan_result, "robot")
         if not result:
             return
-        robot_enum = result.get("robot_attack_enum", "")
+        robot_enum = result.get("robot_attack_enum") or ""
         if robot_enum.startswith("VULNERABLE"):
             self._add(
                 aggregated,
@@ -379,7 +379,7 @@ class SslyzeScanner(Scanner):
             pk_type = public_key.get("algorithm", "")
             pk_size = public_key.get("key_size", 9999)
             weak = (pk_type == "RSA" and pk_size < 2048) or (
-                pk_type == "EC" and pk_size < 224
+                pk_type == "EC" and pk_size < 256
             )
             if weak:
                 self._add(
@@ -391,7 +391,7 @@ class SslyzeScanner(Scanner):
                         description=(
                             f"<p>The TLS certificate uses a weak public key "
                             f"(<code>{pk_type} {pk_size}-bit</code>). "
-                            "Keys shorter than RSA-2048 or EC-224 are considered insufficient "
+                            "Keys shorter than RSA-2048 or EC-256 are considered insufficient "
                             "for long-term security.</p>"
                         ),
                         mitigation=(
