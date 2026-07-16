@@ -341,3 +341,44 @@ def test_cli_isolates_methodology_phase_crash_after_clean_findings_and_reports(
     # a clean findings+reports run must not mask the methodology-phase crash
     assert r.exit_code == 1
     assert "methodology sync failed" in r.output and "methodology blew up" in r.output
+
+
+def test_cli_exits_nonzero_on_report_scope_failures_without_aborting_other_phases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The missing-scope trip-wire is a lint, not a crash: it must still fail the run
+    (same mechanism as collisions/errors) while letting findings and methodology run
+    to completion normally."""
+    import grison.cli as cli_mod
+
+    monkeypatch.chdir(tmp_path)
+    _set_gw_and_bs_creds(monkeypatch)
+
+    calls: list[str] = []
+
+    def ok_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None,
+                     on_event=None):
+        calls.append("findings")
+        return SyncResult()
+
+    def scope_failing_sync_reports(root, client, *, dry_run=False, force_local=None,
+                                    force_remote=None, on_event=None):
+        calls.append("report")
+        return ReportResult(
+            scope_failures=["report 5 (NoScope): project has no scope defined"]
+        )
+
+    def ok_sync_methodology(root, bs, *, dry_run=False, force_local=None, force_remote=None,
+                             on_event=None):
+        calls.append("methodology")
+        return MethResult()
+
+    monkeypatch.setattr(cli_mod, "run_sync", ok_run_sync)
+    monkeypatch.setattr(cli_mod, "sync_reports", scope_failing_sync_reports)
+    monkeypatch.setattr(cli_mod, "sync_methodology", ok_sync_methodology)
+
+    r = CliRunner().invoke(cli_mod.app, ["sync"])
+
+    assert calls == ["findings", "report", "methodology"]  # methodology still ran
+    assert r.exit_code == 1
+    assert "no scope defined" in r.output

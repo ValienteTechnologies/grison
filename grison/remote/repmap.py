@@ -21,9 +21,12 @@ from pathlib import Path
 import yaml
 
 from grison.markdown.converter import html_to_md, md_to_html
+from grison.sinks.file_sink import slugify
 
 REPORT_META = ".report.yml"
 NARRATIVE_DIR = "narrative"
+PROJECT_CONTEXT_FILE = "project.md"
+NOTES_DIR = "notes"
 
 
 @dataclass
@@ -40,6 +43,7 @@ class ReportDoc:
     meta: dict = field(default_factory=dict)  # project/client/status/dates — read-only mirror
     sections: dict[str, ReportSection] = field(default_factory=dict)
     raw_extra_fields: dict = field(default_factory=dict)  # verbatim GW jsonb, for lossless push
+    raw_project: dict = field(default_factory=dict)  # verbatim GW project row, for project.md/notes
 
 
 def section_hash(md: str) -> str:
@@ -97,7 +101,7 @@ def report_from_record(
         sections[key] = ReportSection(key=key, body=body)
     return ReportDoc(
         report_id=rec["id"], title=rec.get("title") or "", meta=meta,
-        sections=sections, raw_extra_fields=raw,
+        sections=sections, raw_extra_fields=raw, raw_project=project,
     )
 
 
@@ -137,3 +141,177 @@ def read_local_section(report_dir: Path, key: str) -> str | None:
 
 def section_path(report_dir: Path, key: str) -> Path:
     return report_dir / NARRATIVE_DIR / f"{key}.md"
+
+
+# --- project context (read-only mirror, regenerated every sync) ------------
+
+
+def project_context_to_md(project_rec: dict) -> str:
+    """Render ``project.md`` — a READ-ONLY mirror of the report's parent GW project
+    (codename, scope, objectives, targets, white cards, collab note), regenerated every
+    sync like ``.report.yml``. Sections with no data are omitted entirely. HTML fields
+    (white card descriptions, the collab note) go through the same narrative HTML->md
+    converter as report sections; a "<p></p>"-ish empty collab note is dropped."""
+    project_rec = project_rec or {}
+    client = project_rec.get("client") or {}
+    codename = (project_rec.get("codename") or "").strip()
+    client_name = (client.get("name") or "").strip()
+    start = project_rec.get("startDate") or ""
+    end = project_rec.get("endDate") or ""
+
+    lines: list[str] = ["<!-- grison: regenerated every sync — do not edit -->", ""]
+    lines.append(f"# {codename or client_name or 'Project'}")
+    meta_bits = []
+    if client_name:
+        meta_bits.append(f"**Client:** {client_name}")
+    if start or end:
+        meta_bits.append(f"**Dates:** {start} – {end}")
+    if meta_bits:
+        lines.append("")
+        lines.extend(meta_bits)
+
+    scopes = project_rec.get("scopes") or []
+    if scopes:
+        lines.append("")
+        lines.append("## Scope")
+        for sc in scopes:
+            name = sc.get("name") or "Scope"
+            flags = []
+            if sc.get("disallowed"):
+                flags.append("EXCLUDED")
+            if sc.get("requiresCaution"):
+                flags.append("CAUTION")
+            flag_str = f" ({', '.join(flags)})" if flags else ""
+            lines.append("")
+            lines.append(f"### {name}{flag_str}")
+            desc = (sc.get("description") or "").strip()
+            if desc:
+                lines.append("")
+                lines.append(desc)
+            entries = [
+                e.strip()
+                for e in (sc.get("scope") or "").replace("\r\n", "\n").split("\n")
+                if e.strip()
+            ]
+            if entries:
+                lines.append("")
+                lines.extend(f"- {e}" for e in entries)
+
+    objectives = project_rec.get("objectives") or []
+    if objectives:
+        lines.append("")
+        lines.append("## Objectives")
+        lines.append("")
+        for ob in objectives:
+            text = ob.get("objective") or ""
+            status = (ob.get("objectiveStatus") or {}).get("objectiveStatus")
+            priority = (ob.get("objectivePriority") or {}).get("priority")
+            bits = [b for b in (status, priority) if b]
+            head = f"- **{text}**"
+            if bits:
+                head += f" — {' / '.join(bits)}"
+            deadline = ob.get("deadline")
+            if deadline:
+                head += f" (deadline: {deadline})"
+            if ob.get("complete") or ob.get("markedComplete"):
+                head += " [COMPLETE]"
+            lines.append(head)
+            desc = (ob.get("description") or "").strip()
+            if desc:
+                lines.append(f"  {desc}")
+            result = (ob.get("result") or "").strip()
+            if result:
+                lines.append(f"  Result: {result}")
+
+    targets = project_rec.get("targets") or []
+    if targets:
+        lines.append("")
+        lines.append("## Targets")
+        lines.append("")
+        for t in targets:
+            host_ip = " / ".join(x for x in (t.get("hostname"), t.get("ipAddress")) if x)
+            marker = " (COMPROMISED)" if t.get("compromised") else ""
+            lines.append(f"- {host_ip or 'unknown target'}{marker}")
+            desc = (t.get("description") or "").strip()
+            if desc:
+                lines.append(f"  {desc}")
+
+    whitecards = project_rec.get("whitecards") or []
+    if whitecards:
+        lines.append("")
+        lines.append("## White cards")
+        for wc in whitecards:
+            title = wc.get("title") or ""
+            issued = wc.get("issued") or ""
+            lines.append("")
+            lines.append(f"### {title}" + (f" — {issued}" if issued else ""))
+            desc_md = html_section_to_md(wc.get("description") or "").strip()
+            if desc_md:
+                lines.append("")
+                lines.append(desc_md)
+
+    collab_md = html_section_to_md(project_rec.get("collab_note") or "").strip()
+    if collab_md:
+        lines.append("")
+        lines.append("## Collab note")
+        lines.append("")
+        lines.append(collab_md)
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# --- project notes (read-only pull mirror; new local files are push candidates) --
+
+
+def note_to_md(note_rec: dict) -> tuple[str, str]:
+    """Render one GW ``projectNote`` as its local mirror: ``<id>-<slug>.md`` with
+    identity frontmatter (``grison.gw.note_id``/``project_id``) plus author/timestamp,
+    body = note HTML->md. Read-only, regenerated every sync — never hand-edit an
+    already-id-stamped note file. ``note_rec`` is the raw GW comment row with a
+    ``projectId`` key merged in by the caller (the ``comments`` relation itself carries
+    no project id)."""
+    note_id = note_rec.get("id")
+    body = html_section_to_md(note_rec.get("note") or "").strip()
+    user = note_rec.get("user") or {}
+    author = (user.get("name") or user.get("username") or "").strip()
+    words = body.split()
+    slug = slugify(" ".join(words[:6])) if words else "note"
+    filename = f"{note_id}-{slug}.md"
+
+    fm: dict = {
+        "grison": {
+            "kind": "note",
+            "gw": {"note_id": note_id, "project_id": note_rec.get("projectId")},
+        },
+    }
+    if author:
+        fm["author"] = author
+    if note_rec.get("timestamp"):
+        fm["timestamp"] = note_rec["timestamp"]
+    fm_yaml = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip()
+    content = f"---\n{fm_yaml}\n---\n\n{body}\n" if body else f"---\n{fm_yaml}\n---\n"
+    return filename, content
+
+
+def read_local_note(path: Path) -> tuple[int | None, str]:
+    """Parse a ``notes/`` file: returns ``(note_id, body_markdown)``. ``note_id`` is
+    ``None`` when the file has no frontmatter, unparseable frontmatter, or no
+    ``grison.gw.note_id`` — i.e. a fresh, locally-authored note not yet pushed to
+    Ghostwriter (the note-push scan's candidate set)."""
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        return None, text.strip()
+    lines = text.splitlines()
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            raw = "\n".join(lines[1:i])
+            body = "\n".join(lines[i + 1 :]).strip()
+            try:
+                fm = yaml.safe_load(raw) or {}
+            except yaml.YAMLError:
+                return None, text.strip()
+            if not isinstance(fm, dict):
+                return None, body
+            note_id = ((fm.get("grison") or {}).get("gw") or {}).get("note_id")
+            return note_id, body
+    return None, text.strip()  # unterminated fence — treat the whole file as body

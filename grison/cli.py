@@ -190,7 +190,9 @@ def sync(
                 or result.mass_change_blocked or result.errors
             )
         if rep is not None:
-            bad = bad or bool(rep.collisions or rep.mass_change_blocked or rep.errors)
+            bad = bad or bool(
+                rep.collisions or rep.mass_change_blocked or rep.errors or rep.scope_failures
+            )
 
         if creds.bs_url and creds.bs_token_id and creds.bs_token_secret:
             def _do_methodology() -> MethResult:
@@ -292,6 +294,8 @@ def _print_report_summary(rep: ReportResult, *, dry_run: bool) -> None:
         f"({len(rep.unchanged)} clean, {len(rep.repaired)} repaired)",
         fg=typer.colors.GREEN,
     )
+    if rep.notes_pushed:
+        typer.echo(f"notes: {tense}push {len(rep.notes_pushed)}")
     if rep.snapshot_dir:
         typer.echo(f"snapshot: {rep.snapshot_dir}")
     if rep.mass_change_blocked:
@@ -303,6 +307,10 @@ def _print_report_summary(rep: ReportResult, *, dry_run: bool) -> None:
         )
         for p in rep.collisions:
             typer.echo(f"  ! {p}")
+    if rep.scope_failures:
+        typer.secho(f"{len(rep.scope_failures)} report(s) missing scope:", fg=typer.colors.RED)
+        for msg in rep.scope_failures:
+            typer.echo(f"  ! {msg}")
     for p, reason in rep.skipped:
         typer.secho(f"skipped  {p}: {reason}", fg=typer.colors.YELLOW)
     for e in rep.errors:

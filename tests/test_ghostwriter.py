@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import date
 
 import httpx
 import pytest
@@ -443,4 +444,75 @@ def test_set_tags_sends_report_finding_link_model_string_for_instance_table() ->
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
         client.set_tags(183, "reportedFinding", ["CWE:89"])
+    assert len(captured) == 1
+
+
+# --- project context / notes (Track: pull GW project + append-only project notes) ----
+
+
+def test_fetch_reports_query_includes_project_context_fields() -> None:
+    """The extended ``_REPORT_QUERY`` must actually ask for the new project relations —
+    a wrong/missing sub-selection would silently degrade project.md to an empty mirror."""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return _gql_response({"report": _REPORT_ROWS})
+
+    with GhostwriterClient(_CREDS, transport=httpx.MockTransport(handler)) as client:
+        client.fetch_reports()
+    query = json.loads(captured[0].content)["query"]
+    for marker in (
+        "codename", "collab_note", "scopes {", "objectives {", "targets {",
+        "whitecards {", "comments {", "objectiveStatus {", "objectivePriority {",
+    ):
+        assert marker in query
+
+
+def test_whoami_parses_data_whoami() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _gql_response({"whoami": {"username": "operator1", "role": "user", "expires": None}})
+
+    with GhostwriterClient(_CREDS, transport=httpx.MockTransport(handler)) as client:
+        who = client.whoami()
+    assert who == {"username": "operator1", "role": "user", "expires": None}
+
+
+def test_resolve_user_id_returns_id_for_known_username() -> None:
+    transport, captured = _single_mutation_transport(
+        expected_query_marker="user(where:",
+        expected_variables={"username": "operator1"},
+        response_data={"user": [{"id": 42}]},
+    )
+    with GhostwriterClient(_CREDS, transport=transport) as client:
+        user_id = client.resolve_user_id("operator1")
+    assert user_id == 42
+    assert len(captured) == 1
+
+
+def test_resolve_user_id_returns_none_for_unknown_username() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _gql_response({"user": []})
+
+    with GhostwriterClient(_CREDS, transport=httpx.MockTransport(handler)) as client:
+        user_id = client.resolve_user_id("nobody")
+    assert user_id is None
+
+
+def test_insert_project_note_sends_mutation_and_returns_id() -> None:
+    transport, captured = _single_mutation_transport(
+        expected_query_marker="insert_projectNote_one",
+        expected_variables={
+            "obj": {
+                "projectId": 1,
+                "note": "<p>hello</p>",
+                "operatorId": 42,
+                "timestamp": "2026-07-16",
+            }
+        },
+        response_data={"insert_projectNote_one": {"id": 100}},
+    )
+    with GhostwriterClient(_CREDS, transport=transport) as client:
+        note_id = client.insert_project_note(1, "<p>hello</p>", 42, date(2026, 7, 16))
+    assert note_id == 100
     assert len(captured) == 1

@@ -22,17 +22,22 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from grison.remote.repmap import (
     NARRATIVE_DIR,
+    NOTES_DIR,
+    PROJECT_CONTEXT_FILE,
     REPORT_META,
     ReportDoc,
     html_section_to_md,
     md_section_to_html,
     meta_to_yaml,
+    note_to_md,
+    project_context_to_md,
+    read_local_note,
     read_local_section,
     report_from_record,
     section_hash,
@@ -53,7 +58,12 @@ class ReportResult:
     unchanged: list[Path] = field(default_factory=list)
     repaired: list[Path] = field(default_factory=list)
     collisions: list[Path] = field(default_factory=list)
-    materialized: list[Path] = field(default_factory=list)  # .report.yml metadata mirrors
+    # .report.yml / project.md / pulled note mirrors — all read-only, regenerated every sync
+    materialized: list[Path] = field(default_factory=list)
+    notes_pushed: list[Path] = field(default_factory=list)  # new local notes inserted into GW
+    # reports whose project has zero scopes defined — a lint, not a sync block (see
+    # _check_scope below); folded into the phase's bad/exit-1 computation like errors.
+    scope_failures: list[str] = field(default_factory=list)
     skipped: list[tuple[Path, str]] = field(default_factory=list)
     snapshot_dir: Path | None = None
     mass_change_blocked: bool = False
@@ -127,6 +137,7 @@ def sync_reports(
     result = ReportResult()
     now = datetime.now(UTC)
     snap = Snapshot()
+    operator_cache: dict[str, int | str] = {}  # resolved once per sync, lazily, on first note push
 
     _emit(on_event, "pulling ghostwriter reports…")
     reports = client.fetch_reports()
@@ -175,7 +186,8 @@ def sync_reports(
         for doc, rdir, plans in per_report:
             try:
                 _apply_report(doc, rdir, plans, client, snap, result, now,
-                              dry_run=dry_run, on_event=on_event, root=root)
+                              dry_run=dry_run, on_event=on_event, root=root,
+                              operator_cache=operator_cache)
             except Exception as e:  # noqa: BLE001 — isolate one report, keep the batch + snapshot
                 result.errors.append(f"{rdir}: {e}")
                 _emit(on_event, f"error {_rel(root, rdir)}: {e}")
@@ -336,6 +348,7 @@ def _apply_report(
     dry_run: bool,
     on_event: Callable[[str], None] | None,
     root: Path,
+    operator_cache: dict[str, int | str],
 ) -> None:
     pushes = [p for p in plans if p.action == "push"]
     fresh_extra: dict | None = None
@@ -422,6 +435,109 @@ def _apply_report(
             meta_path.write_text(text, encoding="utf-8")
             result.materialized.append(meta_path)
             _emit(on_event, f"report meta {_rel(root, meta_path)}")
+
+    _sync_project_context(
+        doc, rdir, client, result, operator_cache, now.date(),
+        dry_run=dry_run, on_event=on_event, root=root,
+    )
+
+
+def _check_scope(doc: ReportDoc, result: ReportResult) -> None:
+    """Missing-scope trip-wire: a project with zero ``scopes`` rows is a lint, not a
+    sync block — record it and let this report's sync work proceed regardless."""
+    if not doc.raw_project.get("scopes"):
+        codename = (doc.raw_project.get("codename") or "").strip()
+        result.scope_failures.append(
+            f"report {doc.report_id} ({codename}): project has no scope defined"
+        )
+
+
+def _resolve_operator(client: GhostwriterClient, cache: dict[str, int | str]) -> tuple[int, str]:
+    """Resolve+cache the syncing operator's GW user id (whoami -> user lookup) once per
+    sync — ``insert_project_note`` has no session-derived ``operatorId``, so it must be
+    supplied on every note push."""
+    if "id" not in cache:
+        username = client.whoami()["username"]
+        user_id = client.resolve_user_id(username)
+        if user_id is None:
+            raise RuntimeError(f"could not resolve Ghostwriter user id for {username!r}")
+        cache["id"], cache["username"] = user_id, username
+    return cache["id"], cache["username"]  # type: ignore[return-value]
+
+
+def _sync_project_context(
+    doc: ReportDoc,
+    rdir: Path,
+    client: GhostwriterClient,
+    result: ReportResult,
+    operator_cache: dict[str, int | str],
+    today: date,
+    *,
+    dry_run: bool,
+    on_event: Callable[[str], None] | None,
+    root: Path,
+) -> None:
+    """Mirror the report's parent project (``project.md`` + ``notes/<id>-*.md``) and
+    push any locally-authored ``notes/*.md`` file that carries no GW note id. All of
+    this is a lint/mirror step layered on top of the narrative sync above — a project
+    with no data (test fixtures that never modeled the ``project`` relation) is a no-op,
+    not a scope failure, so this returns early when the report has no project id."""
+    project = doc.raw_project
+    if project.get("id") is None:
+        return
+
+    _check_scope(doc, result)
+
+    ctx_path = rdir / PROJECT_CONTEXT_FILE
+    if not dry_run:
+        text = project_context_to_md(project)
+        if not ctx_path.exists() or ctx_path.read_text(encoding="utf-8") != text:
+            ctx_path.parent.mkdir(parents=True, exist_ok=True)
+            ctx_path.write_text(text, encoding="utf-8")
+            result.materialized.append(ctx_path)
+            _emit(on_event, f"project context {_rel(root, ctx_path)}")
+
+    ndir = rdir / NOTES_DIR
+    if not dry_run:
+        for comment in project.get("comments") or []:
+            note_rec = dict(comment)
+            note_rec["projectId"] = project.get("id")
+            filename, content = note_to_md(note_rec)
+            npath = ndir / filename
+            if not npath.exists() or npath.read_text(encoding="utf-8") != content:
+                npath.parent.mkdir(parents=True, exist_ok=True)
+                npath.write_text(content, encoding="utf-8")
+                result.materialized.append(npath)
+                _emit(on_event, f"note {_rel(root, npath)}")
+
+    if not ndir.exists():
+        return
+    for f in sorted(ndir.glob("*.md")):
+        note_id, body = read_local_note(f)
+        if note_id is not None or not body.strip():
+            continue  # already an id-stamped mirror, or an empty file — nothing to push
+        if dry_run:
+            result.notes_pushed.append(f)
+            _emit(on_event, f"would push note {_rel(root, f)}")
+            continue
+        operator_id, username = _resolve_operator(client, operator_cache)
+        note_html = md_section_to_html(body)
+        new_id = client.insert_project_note(project["id"], note_html, operator_id, today)
+        note_rec = {
+            "id": new_id,
+            "note": note_html,
+            "timestamp": today.isoformat(),
+            "operatorId": operator_id,
+            "projectId": project.get("id"),
+            "user": {"name": None, "username": username},
+        }
+        filename, content = note_to_md(note_rec)
+        new_path = ndir / filename
+        new_path.write_text(content, encoding="utf-8")
+        if new_path != f:
+            f.unlink()
+        result.notes_pushed.append(new_path)
+        _emit(on_event, f"push note {_rel(root, new_path)}")
 
 
 def _final_section_hashes(

@@ -18,6 +18,11 @@ class FakeGW:
 
     def __init__(self) -> None:
         self.reports: dict[int, dict] = {}
+        # project-note push surface (Track: pull GW project context + append-only notes)
+        self.whoami_username = "operator1"
+        self.user_ids = {"operator1": 42}
+        self.next_note_id = 100
+        self.notes_inserted: list[dict] = []
 
     def add_report(self, rid: int, title: str, extra: dict, **meta) -> None:
         self.reports[rid] = {
@@ -34,6 +39,27 @@ class FakeGW:
 
     def update_report(self, report_id: int, fields: dict) -> None:
         self.reports[report_id]["extraFields"] = dict(fields["extraFields"])
+
+    def whoami(self) -> dict:
+        return {"username": self.whoami_username, "role": "user", "expires": None}
+
+    def resolve_user_id(self, username: str) -> int | None:
+        return self.user_ids.get(username)
+
+    def insert_project_note(
+        self, project_id: int, note_html: str, operator_id: int, timestamp
+    ) -> int:
+        note_id = self.next_note_id
+        self.next_note_id += 1
+        self.notes_inserted.append(
+            {
+                "projectId": project_id,
+                "note": note_html,
+                "operatorId": operator_id,
+                "timestamp": timestamp,
+            }
+        )
+        return note_id
 
 
 @pytest.fixture(autouse=True)
@@ -257,3 +283,220 @@ def test_push_canonicalization_failure_surfaces_error_and_leaves_base_unstamped(
     assert es in r2.repaired
     r3 = sync_reports(tmp_path, fake)
     assert es in r3.unchanged
+
+
+# --- project context mirror (project.md) + append-only project notes ----------------
+
+
+_TURKISH_PROJECT = {
+    "id": 1,
+    "codename": "Şahin Operasyonu",
+    "client": {"id": 2, "name": "Acme Türkiye", "shortName": "ACM"},
+    "startDate": "2026-01-01",
+    "endDate": "2026-02-01",
+    "collab_note": "<p>Türkçe not: dikkatli ol.</p>",
+    "scopes": [
+        {
+            "name": "Internal",
+            "scope": "10.0.0.0/8\r\n10.1.1.1",
+            "description": "İç ağ",
+            "disallowed": False,
+            "requiresCaution": True,
+        },
+        {
+            "name": "Excluded hosts",
+            "scope": "10.9.9.9",
+            "description": "",
+            "disallowed": True,
+            "requiresCaution": False,
+        },
+    ],
+    "objectives": [],
+    "targets": [],
+    "whitecards": [
+        {
+            "title": "Kill switch",
+            "issued": "2026-01-10T00:00:00Z",
+            "description": "<p>Acil durdurma <strong>talimatı</strong></p>",
+        }
+    ],
+    "comments": [],
+}
+
+
+def _project_md(root: Path, rid: int, slug: str) -> Path:
+    return root / "findings" / "reports" / f"{rid}-{slug}" / "project.md"
+
+
+def _notes_dir(root: Path, rid: int, slug: str) -> Path:
+    return root / "findings" / "reports" / f"{rid}-{slug}" / "notes"
+
+
+def test_project_context_md_renders_scope_flags_and_turkish_content(tmp_path: Path) -> None:
+    """Golden-ish render test: Turkish strings, a disallowed scope, a caution scope, a
+    whitecard with HTML description — content + EXCLUDED/CAUTION markers must survive."""
+    from grison.remote.repmap import project_context_to_md
+
+    md = project_context_to_md(_TURKISH_PROJECT)
+    assert "Şahin Operasyonu" in md
+    assert "Acme Türkiye" in md
+    assert "İç ağ" in md
+    assert "Türkçe not: dikkatli ol." in md
+    assert "### Internal (CAUTION)" in md
+    assert "### Excluded hosts (EXCLUDED)" in md
+    assert "10.0.0.0/8" in md and "10.1.1.1" in md
+    assert "Kill switch" in md
+    assert "Acil durdurma **talimatı**" in md
+
+
+def test_project_context_md_omits_empty_collab_note() -> None:
+    from grison.remote.repmap import project_context_to_md
+
+    for empty in ("", "<p></p>", "<p> </p>"):
+        project = dict(_TURKISH_PROJECT, collab_note=empty, scopes=[], whitecards=[])
+        md = project_context_to_md(project)
+        assert "Collab note" not in md
+
+
+def test_sync_writes_project_context_mirror(tmp_path: Path) -> None:
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>s</p>"}, project=_TURKISH_PROJECT)
+    r = sync_reports(tmp_path, fake)
+    ctx = _project_md(tmp_path, 6, "acme")
+    assert ctx in r.materialized and ctx.exists()
+    text = ctx.read_text(encoding="utf-8")
+    assert "regenerated every sync" in text
+    assert "Şahin Operasyonu" in text
+
+
+def test_sync_pulls_two_notes_as_mirror_files(tmp_path: Path) -> None:
+    project = dict(
+        _TURKISH_PROJECT,
+        comments=[
+            {
+                "id": 10,
+                "note": "<p>First note here</p>",
+                "timestamp": "2026-07-01",
+                "operatorId": 42,
+                "user": {"name": "Jane Doe", "username": "jane"},
+            },
+            {
+                "id": 11,
+                "note": "<p>Second note here</p>",
+                "timestamp": "2026-07-02",
+                "operatorId": 42,
+                "user": {"name": None, "username": "jane"},
+            },
+        ],
+    )
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>s</p>"}, project=project)
+    r = sync_reports(tmp_path, fake)
+
+    ndir = _notes_dir(tmp_path, 6, "acme")
+    files = sorted(p.name for p in ndir.glob("*.md"))
+    assert files == ["10-first-note-here.md", "11-second-note-here.md"]
+    for name in files:
+        assert (ndir / name) in r.materialized
+
+    first = (ndir / "10-first-note-here.md").read_text(encoding="utf-8")
+    assert "note_id: 10" in first
+    assert "project_id: 1" in first
+    assert "author: Jane Doe" in first
+    assert "First note here" in first
+
+    second = (ndir / "11-second-note-here.md").read_text(encoding="utf-8")
+    assert "author: jane" in second  # falls back to username when name is absent
+
+
+def test_sync_pushes_new_local_note_and_stamps_mirror(tmp_path: Path) -> None:
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>s</p>"}, project=_TURKISH_PROJECT)
+    sync_reports(tmp_path, fake)  # materializes the report dir + empty notes/ absent yet
+
+    ndir = _notes_dir(tmp_path, 6, "acme")
+    ndir.mkdir(parents=True, exist_ok=True)
+    new_note = ndir / "new-idea.md"
+    new_note.write_text("A brand **new** idea\n", encoding="utf-8")
+
+    r = sync_reports(tmp_path, fake)
+
+    assert not new_note.exists()  # replaced by its id-stamped mirror
+    assert len(fake.notes_inserted) == 1
+    inserted = fake.notes_inserted[0]
+    assert inserted["projectId"] == 1
+    assert inserted["operatorId"] == 42  # resolved via whoami -> resolve_user_id
+    assert inserted["note"] == "<p>A brand <strong>new</strong> idea</p>"
+
+    mirrors = sorted(p.name for p in ndir.glob("*.md"))
+    assert len(mirrors) == 1 and mirrors[0].startswith("100-")  # fake's first minted id
+    stamped = (ndir / mirrors[0]).read_text(encoding="utf-8")
+    assert "note_id: 100" in stamped
+    assert "A brand **new** idea" in stamped
+    assert (ndir / mirrors[0]) in r.notes_pushed
+
+
+def test_sync_push_note_leaves_existing_mirrors_and_extra_fields_untouched(tmp_path: Path) -> None:
+    project = dict(
+        _TURKISH_PROJECT,
+        comments=[
+            {
+                "id": 10,
+                "note": "<p>Existing note</p>",
+                "timestamp": "2026-07-01",
+                "operatorId": 42,
+                "user": {"name": "Jane Doe", "username": "jane"},
+            }
+        ],
+    )
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>s</p>"}, project=project)
+    sync_reports(tmp_path, fake)  # pulls the existing note mirror
+
+    ndir = _notes_dir(tmp_path, 6, "acme")
+    existing_mirror = ndir / "10-existing-note.md"
+    before = existing_mirror.read_text(encoding="utf-8")
+    (ndir / "new-idea.md").write_text("Fresh thought\n", encoding="utf-8")
+
+    r = sync_reports(tmp_path, fake)
+
+    assert existing_mirror.read_text(encoding="utf-8") == before  # untouched
+    assert len(fake.notes_inserted) == 1  # only the new-idea file was pushed
+    assert len(r.notes_pushed) == 1
+
+
+def test_note_push_dry_run_makes_no_insert_or_file_change(tmp_path: Path) -> None:
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>s</p>"}, project=_TURKISH_PROJECT)
+    sync_reports(tmp_path, fake)
+
+    ndir = _notes_dir(tmp_path, 6, "acme")
+    ndir.mkdir(parents=True, exist_ok=True)
+    new_note = ndir / "new-idea.md"
+    new_note.write_text("A dry-run idea\n", encoding="utf-8")
+
+    events: list[str] = []
+    r = sync_reports(tmp_path, fake, dry_run=True, on_event=events.append)
+
+    assert not fake.notes_inserted  # no insert happened
+    assert new_note.exists()  # untouched
+    assert new_note.read_text(encoding="utf-8") == "A dry-run idea\n"
+    assert new_note in r.notes_pushed
+    assert any("would push note" in e and "new-idea.md" in e for e in events)
+
+
+def test_scope_trip_wire_flags_report_but_other_reports_still_sync(tmp_path: Path) -> None:
+    no_scope_project = dict(_TURKISH_PROJECT, id=5, scopes=[])
+    fake = FakeGW()
+    fake.add_report(5, "NoScope", {"executive_summary": "<p>a</p>"}, project=no_scope_project)
+    fake.add_report(6, "Acme", {"executive_summary": "<p>b</p>"}, project=_TURKISH_PROJECT)
+
+    r = sync_reports(tmp_path, fake)
+
+    assert any(
+        "report 5" in msg and "no scope defined" in msg for msg in r.scope_failures
+    )
+    good = _sec(tmp_path, 6, "acme", "executive_summary")
+    assert good in r.pulled and good.exists()
+    noscope_section = _sec(tmp_path, 5, "noscope", "executive_summary")
+    assert noscope_section in r.pulled and noscope_section.exists()  # sync work still proceeds

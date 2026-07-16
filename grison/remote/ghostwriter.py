@@ -8,6 +8,7 @@ token plus the CF service-token header pair (see :mod:`grison.remote.creds`).
 from __future__ import annotations
 
 import base64
+from datetime import date
 
 import httpx
 
@@ -143,12 +144,83 @@ query {
       id
       startDate
       endDate
+      codename
+      collab_note
       client {
         id
         name
         shortName
       }
+      scopes {
+        name
+        scope
+        description
+        disallowed
+        requiresCaution
+      }
+      objectives {
+        objective
+        description
+        complete
+        deadline
+        position
+        result
+        markedComplete
+        objectiveStatus {
+          objectiveStatus
+        }
+        objectivePriority {
+          priority
+        }
+      }
+      targets {
+        hostname
+        ipAddress
+        description
+        compromised
+      }
+      whitecards {
+        title
+        issued
+        description
+      }
+      comments {
+        id
+        note
+        timestamp
+        operatorId
+        user {
+          name
+          username
+        }
+      }
     }
+  }
+}
+"""
+
+_WHOAMI_QUERY = """
+query {
+  whoami {
+    username
+    role
+    expires
+  }
+}
+"""
+
+_USER_ID_BY_USERNAME_QUERY = """
+query($username: String!) {
+  user(where: {username: {_eq: $username}}) {
+    id
+  }
+}
+"""
+
+_INSERT_PROJECT_NOTE_MUTATION = """
+mutation($obj: projectNote_insert_input!) {
+  insert_projectNote_one(object: $obj) {
+    id
   }
 }
 """
@@ -436,6 +508,33 @@ class GhostwriterClient:
     def update_report(self, report_id: int, fields: dict) -> None:
         """Patch a report's ``_set`` columns (grison only ever sends ``extraFields``)."""
         self._post(_UPDATE_REPORT_MUTATION, {"id": report_id, "set": fields})
+
+    def whoami(self) -> dict:
+        """``{username, role, expires}`` for the token's own session — no ``id`` field
+        (verified by introspection), so a note push resolves the operator's numeric id
+        separately via :meth:`resolve_user_id`."""
+        return self._post(_WHOAMI_QUERY)["whoami"]
+
+    def resolve_user_id(self, username: str) -> int | None:
+        """The GW user row id for a username (``None`` if no such user) — used once per
+        sync to turn ``whoami()``'s username into the ``operatorId`` a project-note
+        insert requires (no session-derived default)."""
+        rows = self._post(_USER_ID_BY_USERNAME_QUERY, {"username": username})["user"]
+        return rows[0]["id"] if rows else None
+
+    def insert_project_note(
+        self, project_id: int, note_html: str, operator_id: int, timestamp: date
+    ) -> int:
+        """Insert a new ``projectNote`` (append-only — grison never updates or deletes an
+        existing GW note). Returns the new row's id."""
+        obj = {
+            "projectId": project_id,
+            "note": note_html,
+            "operatorId": operator_id,
+            "timestamp": timestamp.isoformat(),
+        }
+        data = self._post(_INSERT_PROJECT_NOTE_MUTATION, {"obj": obj})
+        return data["insert_projectNote_one"]["id"]
 
     def download_evidence(self, evidence_id: int) -> tuple[str, bytes]:
         data = self._post(_DOWNLOAD_EVIDENCE_QUERY, {"id": evidence_id})["downloadEvidence"]
