@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 
 import defusedxml.ElementTree as ET
@@ -8,16 +9,18 @@ from grison.scanners.ir import Finding, Severity
 
 from .base import ImportOptions, Scanner
 
+# ZAP's native riskcode scale is 0=Informational, 1=Low, 2=Medium, 3=High.
+# ZAP has no Critical tier.
 _RISKCODE_MAP = {
-    "3": Severity.CRITICAL,
-    "2": Severity.HIGH,
-    "1": Severity.MEDIUM,
-    "0": Severity.LOW,
+    "3": Severity.HIGH,
+    "2": Severity.MEDIUM,
+    "1": Severity.LOW,
+    "0": Severity.INFO,
 }
 
 # Fallback when riskcode is missing/unrecognized: derive the code from the
 # leading word of riskdesc (e.g. "High (Medium)" -> "High"), so both paths
-# agree on severity instead of riskdesc silently degrading to LOW.
+# agree on severity instead of riskdesc silently degrading to INFO.
 _RISKDESC_WORD_MAP = {
     "informational": "0",
     "low": "1",
@@ -101,10 +104,15 @@ class ZapScanner(Scanner):
                 )
                 rep_steps = f"<ul>{rows}</ul>"
 
+            # cweid of "-1" (unmapped) or "0" is a ZAP sentinel, not a real CWE ID.
+            cweid = alert.get("cweid")
+            cweid_str = str(cweid).strip() if cweid not in (None, "") else ""
+            cwe = "" if cweid_str in ("", "-1", "0") else cweid_str
+
             aggregated[alert_ref] = {
                 "title": alert.get("name", alert.get("alert", f"Alert {alert_ref}")),
                 "severity": severity,
-                "cwe": str(alert.get("cweid", "")),
+                "cwe": cwe,
                 "description": alert.get("desc", alert.get("description", "")),
                 "mitigation": alert.get("solution", ""),
                 "references": refs_html,
@@ -112,6 +120,9 @@ class ZapScanner(Scanner):
                 "affected": list(dict.fromkeys(uris)),
             }
         else:
+            aggregated[alert_ref]["severity"] = self.max_severity(
+                aggregated[alert_ref]["severity"], severity
+            )
             for uri in uris:
                 if uri and uri not in aggregated[alert_ref]["affected"]:
                     aggregated[alert_ref]["affected"].append(uri)
@@ -123,16 +134,16 @@ class ZapScanner(Scanner):
             riskdesc = str(alert.get("riskdesc", ""))
             word = riskdesc.split("(", 1)[0].strip().lower()
             code = _RISKDESC_WORD_MAP.get(word, "")
-        return _RISKCODE_MAP.get(code, Severity.LOW)
+        return _RISKCODE_MAP.get(code, Severity.INFO)
 
     def _refs_to_html(self, raw: str) -> str:
         if not raw:
             return ""
         lines = [line.strip() for line in raw.replace("\r", "").split("\n") if line.strip()]
         items = "".join(
-            f'<li><a href="{line}">{line}</a></li>'
+            f'<li><a href="{html.escape(line, quote=True)}">{html.escape(line)}</a></li>'
             if line.startswith("http")
-            else f"<li>{line}</li>"
+            else f"<li>{html.escape(line)}</li>"
             for line in lines
         )
         return f"<ul>{items}</ul>" if items else ""

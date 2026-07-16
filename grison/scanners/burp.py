@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 
 import defusedxml.ElementTree as ET
@@ -59,6 +60,8 @@ class BurpScanner(Scanner):
 
         base = group[0]
         severity: Severity = base["_severity"]
+        for raw in group[1:]:
+            severity = self.max_severity(severity, raw["_severity"])
         title = base.get("name", "Unknown")
         type_id = base.get("type", "")
 
@@ -74,10 +77,18 @@ class BurpScanner(Scanner):
                 affected.append(component)
 
         refs_html = base.get("references", "")
-        ref_urls = re.findall(r"<a\s+href=['\"]([^'\"]+)['\"]", refs_html, re.IGNORECASE)
+        ref_links = re.findall(
+            r"<a\s+href=['\"]([^'\"]+)['\"][^>]*>(.*?)</a>", refs_html, re.IGNORECASE | re.DOTALL
+        )
         references = (
-            "<ul>" + "".join(f"<li><a href=\"{u}\">{u}</a></li>" for u in ref_urls) + "</ul>"
-            if ref_urls
+            "<ul>"
+            + "".join(
+                f'<li><a href="{html.escape(u, quote=True)}">'
+                f'{html.escape(text.strip() or u)}</a></li>'
+                for u, text in ref_links
+            )
+            + "</ul>"
+            if ref_links
             else ""
         )
 

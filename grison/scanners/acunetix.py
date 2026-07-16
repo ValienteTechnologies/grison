@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+
 import defusedxml.ElementTree as ET
 
 from grison.scanners.ir import Finding, Severity
@@ -79,9 +81,9 @@ class AcunetixScanner(Scanner):
 
                     if refs:
                         refs_html = "<ul>" + "".join(
-                            f'<li><a href="{r}">{r}</a></li>'
+                            f'<li><a href="{html.escape(r, quote=True)}">{html.escape(r)}</a></li>'
                             if r.startswith("http")
-                            else f"<li>{r}</li>"
+                            else f"<li>{html.escape(r)}</li>"
                             for r in refs
                         ) + "</ul>"
                     else:
@@ -105,6 +107,9 @@ class AcunetixScanner(Scanner):
                         "affected": [component] if component else [],
                     }
                 else:
+                    aggregated[vuln_id]["severity"] = self.max_severity(
+                        aggregated[vuln_id]["severity"], severity
+                    )
                     if component and component not in aggregated[vuln_id]["affected"]:
                         aggregated[vuln_id]["affected"].append(component)
 

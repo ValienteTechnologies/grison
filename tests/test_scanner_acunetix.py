@@ -147,6 +147,38 @@ def test_empty_scan_group(scanner: AcunetixScanner) -> None:
     assert findings == []
 
 
+def test_merge_takes_max_severity(scanner: AcunetixScanner) -> None:
+    # Two occurrences of the same vuln_id with different severities should merge to
+    # the higher severity, not freeze on whichever occurrence arrived first.
+    xml = b"""<ScanGroup>
+      <Scan>
+        <StartURL>https://site1.example.com</StartURL>
+        <ReportItems>
+          <ReportItem>
+            <Name>SQL Injection</Name>
+            <VulnID>sqli-001</VulnID>
+            <Severity>low</Severity>
+            <AffectedItem>/login.php</AffectedItem>
+          </ReportItem>
+        </ReportItems>
+      </Scan>
+      <Scan>
+        <StartURL>https://site2.example.com</StartURL>
+        <ReportItems>
+          <ReportItem>
+            <Name>SQL Injection</Name>
+            <VulnID>sqli-001</VulnID>
+            <Severity>critical</Severity>
+            <AffectedItem>/search.php</AffectedItem>
+          </ReportItem>
+        </ReportItems>
+      </Scan>
+    </ScanGroup>"""
+    findings = scanner.parse(xml, ImportOptions())
+    assert len(findings) == 1
+    assert findings[0].severity == Severity.CRITICAL
+
+
 def test_inline_aggregation_across_scans(scanner: AcunetixScanner) -> None:
     xml = b"""<ScanGroup>
       <Scan>

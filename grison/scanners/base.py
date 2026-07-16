@@ -43,6 +43,12 @@ class Scanner(ABC):
         order = list(Severity)
         return sorted(findings, key=lambda f: order.index(f.severity), reverse=True)
 
+    @staticmethod
+    def max_severity(a: Severity, b: Severity) -> Severity:
+        """Return the more severe of two (for merging occurrences of the same finding)."""
+        order = list(Severity)
+        return a if order.index(a) >= order.index(b) else b
+
     def _severity_allowed(self, severity: Severity, opts: ImportOptions) -> bool:
         if opts.severity_filter is None:
             return True
