@@ -258,7 +258,12 @@ def pull(
     lib_slugs = _library_slug_counts(findings)
 
     for rec in findings:
-        f = gw_record_to_finding(rec, tier="library", tags=tag_map.get(("finding", rec["id"])))
+        try:
+            f = gw_record_to_finding(rec, tier="library", tags=tag_map.get(("finding", rec["id"])))
+        except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
+            result.errors.append(f"finding {rec['id']}: {e}")
+            _emit(on_event, f"error finding {rec['id']}: {e}")
+            continue
         _reconcile(
             result, f, local, root / "findings" / "library", None, client, root,
             slug_counts=lib_slugs, dry_run=dry_run, on_event=on_event,
@@ -267,9 +272,14 @@ def pull(
     ev_names = _evidence_name_counters(reported, ev_by)
     for rec in reported:
         evs = ev_by.get(rec["id"], [])
-        f = gw_record_to_finding(rec, tier="instance", evidence_rows=evs,
-                                 evidence_names=ev_names.get(rec["reportId"]),
-                                 tags=tag_map.get(("reportedFinding", rec["id"])))
+        try:
+            f = gw_record_to_finding(rec, tier="instance", evidence_rows=evs,
+                                     evidence_names=ev_names.get(rec["reportId"]),
+                                     tags=tag_map.get(("reportedFinding", rec["id"])))
+        except Exception as e:  # noqa: BLE001 — one malformed record must not abort the batch
+            result.errors.append(f"reportedFinding {rec['id']}: {e}")
+            _emit(on_event, f"error reportedFinding {rec['id']}: {e}")
+            continue
         rdir = _report_dir(root, rec["reportId"], reports)
         _reconcile(result, f, local, rdir, evs, client, root, dry_run=dry_run, on_event=on_event)
 

@@ -116,6 +116,17 @@ def test_pull_detects_collision(tmp_path: Path) -> None:
     assert "LOCAL" in libf.read_text()  # collision never overwrites local
 
 
+def test_pull_isolates_malformed_record(tmp_path: Path) -> None:
+    """One record with an unparseable cvssVector must not abort the whole pull — it's
+    skipped and reported in ``result.errors``, every other record still lands."""
+    lib = [_LIB[0], {**_LIB[0], "id": 2, "title": "Lib B", "cvssVector": "garbage"}]
+    r = pull(tmp_path, FakeGW(findings=lib))
+    assert len(r.written) == 2  # Lib A + Inst A land; Lib B is skipped
+    assert any(e.startswith("finding 2:") for e in r.errors)
+    assert (tmp_path / "findings" / "library" / "lib-a.md").exists()
+    assert not (tmp_path / "findings" / "library" / "lib-b.md").exists()
+
+
 def test_dry_run_writes_nothing(tmp_path: Path) -> None:
     r = pull(tmp_path, FakeGW(), dry_run=True)
     assert len(r.written) == 2  # would-write reported
