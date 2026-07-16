@@ -152,8 +152,9 @@ confirmation prompts, `--dry-run` is opt-in. Three layers:
 
 Ghostwriter's rich-text fields use a small closed vocabulary, and the converter fails
 loudly on anything outside it rather than corrupt silently. Inline: `**bold**`,
-`` `code` ``, `*em*`, `[links](…)`. Block: paragraphs and unordered lists (one level
-of `  - ` sub-bullets). Rejected inside a field: tables, ordered lists, images,
+`` `code` ``, `*em*`, `[links](…)`. Block: paragraphs and unordered/ordered lists
+(`- ` and `1. `, one level of 2-space sub-items, freely nested either way). Rejected
+inside a field: tables, images,
 headings (the `##` section headers are grison structure mapping to Ghostwriter's
 separate fields, not field content). Constructs grison canonicalizes on purpose —
 editor highlight spans, non-standard link `rel`/`target` — are reported as sync
@@ -201,6 +202,16 @@ auto-gitignored. Paste values there, or set the same keys as environment variabl
 | `GRISON_GW_URL`, `GRISON_GW_TOKEN` | Ghostwriter — GraphQL API token |
 | `GRISON_BS_URL`, `GRISON_BS_TOKEN_ID`, `GRISON_BS_TOKEN_SECRET` | BookStack — REST API token; only needed for methodology sync |
 | `GRISON_CF_CLIENT_ID`, `GRISON_CF_CLIENT_SECRET` | optional — Cloudflare Access service token, if your deployment sits behind CF Access |
+
+## Settings
+
+Two more keys in the same file — non-secret behavior toggles, same env-var-overrides-file
+precedence:
+
+| Key | Values | Default | Does |
+|---|---|---|---|
+| `GRISON_GIT` | `commit` | off | drive git around `sync`/`parse`: commit a checkpoint of any dirty tree before the run, then commit the result after (`grison: sync (...)`, `grison: parse <scanner>`) — only when the workspace root already sits inside a git repo. grison never `init`s, pushes, branches, or touches a remote; `--dry-run` commits nothing; any git failure is a warning, never a command failure. |
+| `GRISON_CLAUDE_MD` | `off` | on | scaffold a `CLAUDE.md` operator-notes file on first bootstrap (never overwritten if one already exists) |
 
 ## License
 

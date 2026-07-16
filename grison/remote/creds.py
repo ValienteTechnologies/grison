@@ -5,6 +5,9 @@ human only pastes values. ``GRISON_*`` environment variables override the file s
 headless/CI runs need no file. If the deployment sits behind Cloudflare Access ZTNA,
 set the CF service-token pair and it is sent with every remote call; leave both empty
 otherwise.
+
+The same file also carries a couple of non-secret behavioral settings (:class:`Settings`)
+— same file/env precedence, kept separate from :class:`Creds` because they're not secrets.
 """
 
 from __future__ import annotations
@@ -22,6 +25,12 @@ _KEYS: dict[str, str] = {
     "bs_token_secret": "GRISON_BS_TOKEN_SECRET",
     "cf_client_id": "GRISON_CF_CLIENT_ID",
     "cf_client_secret": "GRISON_CF_CLIENT_SECRET",
+}
+
+# field name -> env var / .grison/env key, for the non-secret behavioral settings
+_SETTING_KEYS: dict[str, str] = {
+    "git": "GRISON_GIT",
+    "claude_md": "GRISON_CLAUDE_MD",
 }
 
 
@@ -77,6 +86,23 @@ class Creds:
             )
 
 
+@dataclass(frozen=True)
+class Settings:
+    """Non-secret behavioral toggles, opt-in and off by default (except ``claude_md``,
+    which is opt-out) so a bare workspace behaves exactly as before these existed."""
+
+    git: str = ""  # "" (default, off) | "commit" — let grison drive git around sync/parse
+    claude_md: str = ""  # "" (default, on) | "off" — scaffold CLAUDE.md on first bootstrap
+
+    @property
+    def git_commit(self) -> bool:
+        return self.git == "commit"
+
+    @property
+    def claude_md_enabled(self) -> bool:
+        return self.claude_md != "off"
+
+
 def _parse_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -90,10 +116,20 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _resolve(keys: dict[str, str], file_vals: dict[str, str]) -> dict[str, str]:
+    return {
+        field: os.environ.get(env_key) or file_vals.get(env_key, "") or ""
+        for field, env_key in keys.items()
+    }
+
+
 def load(root: Path) -> Creds:
     """Load creds for a workspace: ``.grison/env`` values, overlaid by ``GRISON_*`` env vars."""
     file_vals = _parse_env_file(root / ".grison" / "env")
-    resolved: dict[str, str] = {}
-    for field, env_key in _KEYS.items():
-        resolved[field] = os.environ.get(env_key) or file_vals.get(env_key, "") or ""
-    return Creds(**resolved)
+    return Creds(**_resolve(_KEYS, file_vals))
+
+
+def load_settings(root: Path) -> Settings:
+    """Load behavioral settings for a workspace — same file/env precedence as :func:`load`."""
+    file_vals = _parse_env_file(root / ".grison" / "env")
+    return Settings(**_resolve(_SETTING_KEYS, file_vals))

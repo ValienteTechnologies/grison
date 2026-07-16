@@ -82,3 +82,32 @@ def test_bootstrap_is_idempotent(tmp_path: Path) -> None:
     assert (tmp_path / ".grison" / "env").read_text() == "GRISON_GW_TOKEN=filled\n"
     # gitignore entry not duplicated
     assert (tmp_path / ".gitignore").read_text().count(".grison/") == 1
+
+
+def test_bootstrap_scaffolds_claude_md_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GRISON_CLAUDE_MD", raising=False)
+    result = bootstrap_workspace(tmp_path)
+    claude_md = tmp_path / "CLAUDE.md"
+    assert claude_md.exists() and result.claude_md_created
+    assert "grison workspace" in claude_md.read_text()
+
+
+def test_bootstrap_never_overwrites_existing_claude_md(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GRISON_CLAUDE_MD", raising=False)
+    (tmp_path / "CLAUDE.md").write_text("# my own notes\n")
+    result = bootstrap_workspace(tmp_path)
+    assert not result.claude_md_created
+    assert (tmp_path / "CLAUDE.md").read_text() == "# my own notes\n"
+
+
+def test_bootstrap_skips_claude_md_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GRISON_CLAUDE_MD", "off")
+    result = bootstrap_workspace(tmp_path)
+    assert not result.claude_md_created
+    assert not (tmp_path / "CLAUDE.md").exists()

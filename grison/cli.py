@@ -16,10 +16,11 @@ from typing import Annotated, TypeVar
 
 import typer
 
+from grison import gitdrive
 from grison.model import FindingType
 from grison.remote.bookstack import BookStackClient
 from grison.remote.bootstrap import bootstrap_workspace
-from grison.remote.creds import MissingCreds
+from grison.remote.creds import MissingCreds, Settings, load_settings
 from grison.remote.creds import load as load_creds
 from grison.remote.ghostwriter import GhostwriterClient
 from grison.remote.methodology import MethResult, sync_methodology
@@ -78,9 +79,10 @@ def parse(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without writing.")] = False,
 ) -> None:
     """Turn scanner export(s) into markdown findings in findings/inbox/ (offline)."""
+    root = Path.cwd()
     if out is None:
-        bootstrap_tree(Path.cwd())  # the binary scaffolds; no init
-        out_dir = inbox_dir(Path.cwd())
+        bootstrap_tree(root)  # the binary scaffolds; no init
+        out_dir = inbox_dir(root)
     else:
         out_dir = out
     summary = run_parse(
@@ -92,6 +94,8 @@ def parse(
         dry_run=dry_run,
     )
     _print_parse_summary(summary, out_dir, dry_run=dry_run)
+    if not dry_run:
+        _git_commit_or_warn(root, load_settings(root), f"grison: parse {_scanner_label(summary)}")
     if summary.errors:
         raise typer.Exit(code=1)
 
@@ -148,11 +152,14 @@ def sync(
     root = Path.cwd()
     boot = bootstrap_workspace(root)
     creds = load_creds(root)
+    settings = load_settings(root)
     try:
         creds.require_ghostwriter()
     except MissingCreds as e:
         if boot.env_created:
             typer.secho(f"Scaffolded workspace + wrote {boot.env_path}", fg=typer.colors.GREEN)
+        if boot.claude_md_created:
+            typer.secho("Scaffolded workspace + wrote CLAUDE.md", fg=typer.colors.GREEN)
         typer.secho(str(e), fg=typer.colors.YELLOW)
         raise typer.Exit(code=1) from None
 
@@ -161,7 +168,10 @@ def sync(
     # Each phase (findings / reports / methodology) is isolated: a raised exception in
     # one is recorded and printed, never left to silently cancel the phases after it.
     phase_errors: list[str] = []
+    m: MethResult | None = None
     with _workspace_lock(root):  # one sync at a time per workspace (GW has no compare-and-swap)
+        if not dry_run:  # checkpoint whatever was dirty before we touch anything
+            _git_commit_or_warn(root, settings, "grison: pre-sync checkpoint")
         with GhostwriterClient(creds) as client:
             result = _run_phase(
                 "findings",
@@ -211,6 +221,9 @@ def sync(
                 )
         bad = bad or bool(phase_errors)  # catches a methodology-phase failure too
 
+        if not dry_run:  # capturing state is the point, even (especially) after failures
+            _git_commit_or_warn(root, settings, _git_sync_message(bad, result, rep, m))
+
     if bad:
         raise typer.Exit(code=1)
 
@@ -250,6 +263,46 @@ def _workspace_lock(root: Path) -> Iterator[None]:
     finally:
         fcntl.flock(fh, fcntl.LOCK_UN)
         fh.close()
+
+
+def _git_commit_or_warn(root: Path, settings: Settings, message: str) -> None:
+    """Commit under ``root`` if git driving is enabled — see :mod:`grison.gitdrive`.
+
+    Silent no-op when the setting is off, or when the root isn't a git repo (detection
+    is the feature). Any other git failure warns; it never fails the command, because
+    grison's own outcome must not depend on git state.
+    """
+    if not settings.git_commit or not gitdrive.is_repo(root):
+        return
+    try:
+        gitdrive.commit(root, message)
+    except gitdrive.GitDriveError as e:
+        typer.secho(f"git: {e}", fg=typer.colors.YELLOW)
+
+
+def _scanner_label(summary: ParseSummary) -> str:
+    return "+".join(sorted(summary.files_parsed)) or "(no files)"
+
+
+def _git_sync_message(
+    bad: bool,
+    result: SyncResult | None,
+    rep: ReportResult | None,
+    m: MethResult | None,
+) -> str:
+    """``bad`` is the same clean/failed signal that decides the process exit code — the
+    commit message and the exit code must never disagree about whether this run was
+    clean."""
+    bits = []
+    if bad:
+        bits.append("with failures")
+    if result is not None:
+        bits.append(f"findings: pull {len(result.pulled)} push {len(result.pushed)}")
+    if rep is not None:
+        bits.append(f"reports: pull {len(rep.pulled)} push {len(rep.pushed)}")
+    if m is not None:
+        bits.append(f"methodology: pull {len(m.pulled)} push {len(m.pushed)}")
+    return f"grison: sync ({'; '.join(bits)})" if bits else "grison: sync"
 
 
 def _print_meth_summary(m: MethResult, *, dry_run: bool) -> None:
