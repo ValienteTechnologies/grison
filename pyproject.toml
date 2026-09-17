@@ -25,6 +25,7 @@ dependencies = [
     "httpx>=0.27",
     "markdown-it-py>=4",
     "graphql-core>=3.2",
+    "pydantic-settings>=2",
 ]
 # NOTE: no LLM SDK by design — "AI is not a subsystem". An LLM editing the
 # markdown workspace IS the transform layer; grison only validates + syncs it.
