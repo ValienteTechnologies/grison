@@ -14,10 +14,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from grison.errors import GrisonError
+
 _TIMEOUT = 30  # seconds — a safety net against a wedged git (e.g. an interactive hook)
 
 
-class GitDriveError(RuntimeError):
+class GitDriveError(GrisonError, RuntimeError):
     """A git operation failed. Callers must warn, never fail the command, on this."""
 
 

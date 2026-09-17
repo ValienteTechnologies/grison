@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from grison.errors import GrisonError
+
 _SUPPORTED_VERSIONS = ("3.0", "3.1")
 
 _BASE_METRIC_ORDER = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
@@ -54,7 +56,7 @@ _PR_WEIGHTS_UNCHANGED = {"N": 0.85, "L": 0.62, "H": 0.27}
 _PR_WEIGHTS_CHANGED = {"N": 0.85, "L": 0.68, "H": 0.5}
 
 
-class CvssError(ValueError):
+class CvssError(GrisonError, ValueError):
     """Raised when a CVSS vector string is malformed or unsupported."""
 
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from grison.errors import GrisonError
+
 
 class Severity(StrEnum):
     """Finding severity. GW ``severityId``: 1=Informational … 5=Critical."""
@@ -78,7 +80,7 @@ _FINDING_TYPE_GW_ID: dict[FindingType, int] = {
 _FINDING_TYPE_BY_GW_ID: dict[int, FindingType] = {v: k for k, v in _FINDING_TYPE_GW_ID.items()}
 
 
-class EnumDriftError(RuntimeError):
+class EnumDriftError(GrisonError, RuntimeError):
     """Raised when Ghostwriter's live ``findingSeverity``/``findingType`` lookup tables
     disagree with the hardcoded gw_id maps above. Those ids are baked in at import
     time (never re-derived per instance), so a per-install re-seed or a Ghostwriter

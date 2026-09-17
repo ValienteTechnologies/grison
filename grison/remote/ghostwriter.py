@@ -12,6 +12,7 @@ from datetime import date
 
 import httpx
 
+from grison.errors import GrisonError
 from grison.remote.creds import Creds
 
 _FINDING_QUERY = """
@@ -392,7 +393,7 @@ mutation($id: bigint!) {
 """
 
 
-class GhostwriterError(RuntimeError):
+class GhostwriterError(GrisonError, RuntimeError):
     """Raised on a non-2xx HTTP response or a GraphQL ``errors`` payload."""
 
 

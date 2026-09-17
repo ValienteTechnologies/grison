@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import yaml
 
+from grison.errors import GrisonError
 from grison.model import Finding
 
 # (section header in the document, model field). Fixed order, always all five.
@@ -24,7 +25,7 @@ _HEADER_TO_FIELD = {h: f for h, f in _SECTIONS}
 _BODY_FIELDS = {f for _, f in _SECTIONS}
 
 
-class DocumentError(ValueError):
+class DocumentError(GrisonError, ValueError):
     """A markdown document that can't be parsed into a Finding (bad frontmatter/structure)."""
 
 

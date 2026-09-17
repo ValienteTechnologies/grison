@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import httpx
 
+from grison.errors import GrisonError
 from grison.remote.creds import Creds
 
 _LIST_COUNT = 1000
 
 
-class BookStackError(RuntimeError):
+class BookStackError(GrisonError, RuntimeError):
     """Raised on a non-2xx HTTP response from the BookStack API."""
 
 

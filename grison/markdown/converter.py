@@ -47,8 +47,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
+from grison.errors import GrisonError
 
-class ConverterError(ValueError):
+
+class ConverterError(GrisonError, ValueError):
     """Raised when HTML or markdown outside the tiny closed GW vocabulary is seen."""
 
 

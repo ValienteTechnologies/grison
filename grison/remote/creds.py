@@ -16,6 +16,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from grison.errors import GrisonError
+
 # field name -> env var / .grison/env key
 _KEYS: dict[str, str] = {
     "gw_url": "GRISON_GW_URL",
@@ -34,7 +36,7 @@ _SETTING_KEYS: dict[str, str] = {
 }
 
 
-class MissingCreds(RuntimeError):
+class MissingCreds(GrisonError, RuntimeError):
     """Required credentials are absent — the message tells the user what to fill."""
 
 
