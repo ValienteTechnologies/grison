@@ -1,0 +1,78 @@
+{
+  "data": {
+    "evidence": [
+      {
+        "id": 1,
+        "reportId": 1,
+        "document": "evidence/1/login_page.png",
+        "caption": "Login Page Screenshot",
+        "friendlyName": "Login Page Screenshot",
+        "description": "",
+        "uploadDate": "2026-09-17"
+      },
+      {
+        "id": 2,
+        "reportId": 1,
+        "document": "evidence/1/db_dump.png",
+        "caption": "DB \u015eifre Dump",
+        "friendlyName": "DB \u015eifre Dump",
+        "description": "",
+        "uploadDate": "2026-09-17"
+      },
+      {
+        "id": 3,
+        "reportId": 1,
+        "document": "evidence/1/nmap_scan.png",
+        "caption": "Nmap Scan \u00d6zet",
+        "friendlyName": "Nmap Scan \u00d6zet",
+        "description": "Full TCP scan output against the internal segment, cropped for brevity.",
+        "uploadDate": "2026-09-17"
+      },
+      {
+        "id": 4,
+        "reportId": 1,
+        "document": "evidence/1/config.txt",
+        "caption": "Vulnerable Config File",
+        "friendlyName": "Vulnerable Config File",
+        "description": "",
+        "uploadDate": "2026-09-17"
+      },
+      {
+        "id": 5,
+        "reportId": 1,
+        "document": "evidence/1/admin_panel.jpg",
+        "caption": "Admin Panel Access",
+        "friendlyName": "Admin Panel Access",
+        "description": "",
+        "uploadDate": "2026-09-17"
+      },
+      {
+        "id": 6,
+        "reportId": 2,
+        "document": "evidence/2/network_diagram.png",
+        "caption": "Network Diagram",
+        "friendlyName": "Network Diagram",
+        "description": "",
+        "uploadDate": "2026-09-17"
+      },
+      {
+        "id": 7,
+        "reportId": 2,
+        "document": "evidence/2/error_trace.txt",
+        "caption": "Raw Error Trace",
+        "friendlyName": "Raw Error Trace",
+        "description": "",
+        "uploadDate": "2026-09-17"
+      },
+      {
+        "id": 8,
+        "reportId": 2,
+        "document": "evidence/2/idor_response.jpg",
+        "caption": "IDOR Response Body",
+        "friendlyName": "IDOR Response Body",
+        "description": "",
+        "uploadDate": "2026-09-17"
+      }
+    ]
+  }
+}

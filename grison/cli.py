@@ -20,7 +20,7 @@ from grison import gitdrive
 from grison.model import FindingType
 from grison.remote.bookstack import BookStackClient
 from grison.remote.bootstrap import bootstrap_workspace
-from grison.remote.creds import MissingCreds, Settings, load_settings
+from grison.remote.creds import Creds, MissingCreds, Settings, load_settings
 from grison.remote.creds import load as load_creds
 from grison.remote.ghostwriter import GhostwriterClient
 from grison.remote.methodology import MethResult, sync_methodology
@@ -36,6 +36,17 @@ app = typer.Typer(
     help="A markdown hub between security scanners and Ghostwriter + BookStack.",
     no_args_is_help=True,
 )
+
+
+def _make_gw_client(creds: Creds) -> GhostwriterClient:
+    """Build the Ghostwriter client — the seam tests monkeypatch to inject a
+    transport (``httpx.MockTransport``) instead of hitting the network."""
+    return GhostwriterClient(creds)
+
+
+def _make_bs_client(creds: Creds) -> BookStackClient:
+    """Build the BookStack client — same seam as :func:`_make_gw_client`."""
+    return BookStackClient(creds)
 
 
 def _print_version(value: bool) -> None:
@@ -172,7 +183,7 @@ def sync(
     with _workspace_lock(root):  # one sync at a time per workspace (GW has no compare-and-swap)
         if not dry_run:  # checkpoint whatever was dirty before we touch anything
             _git_commit_or_warn(root, settings, "grison: pre-sync checkpoint")
-        with GhostwriterClient(creds) as client:
+        with _make_gw_client(creds) as client:
             result = _run_phase(
                 "findings",
                 lambda: run_sync(
@@ -206,7 +217,7 @@ def sync(
 
         if creds.bs_url and creds.bs_token_id and creds.bs_token_secret:
             def _do_methodology() -> MethResult:
-                with BookStackClient(creds) as bs:
+                with _make_bs_client(creds) as bs:
                     return sync_methodology(
                         root, bs, dry_run=dry_run, force_local=fl, force_remote=fr,
                         on_event=lambda msg: typer.secho(msg, dim=True),

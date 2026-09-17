@@ -1,0 +1,174 @@
+{
+  "data": {
+    "report": [
+      {
+        "id": 1,
+        "title": "Acme Test Corp - Network Penetration Test Report",
+        "complete": false,
+        "archived": false,
+        "delivered": false,
+        "creation": "2026-09-17",
+        "last_update": "2026-09-17",
+        "extraFields": {
+          "about_us": "<p>Acme Test Labs is a fictitious security consultancy used only for grison integration tests.</p>",
+          "appendix": "<p>No additional appendix material for this synthetic report.</p>",
+          "disclaimer": "<p>This report reflects a point-in-time synthetic assessment for lab purposes only.</p>",
+          "scope_text": "<p>See the Scope section for the full list of in-scope and disallowed targets.</p>",
+          "methodology": "<p>Testing followed a standard black-box-then-gray-box methodology aligned with PTES.</p>",
+          "attack_chain": "<p>1) SQL injection on the login form yielded valid credentials.</p><p>2) Those credentials were reused against the admin panel (also using default creds).</p><p>3) From the admin panel, a file upload feature was abused to reach db01.example.com.</p>",
+          "executive_summary": "<p>Between 2026-08-01 and 2026-08-14, Acme Test Labs performed a synthetic penetration test of Acme Test Corp's example.com estate. Testing identified critical issues including SQL injection and default credentials.</p>"
+        },
+        "project": {
+          "id": 2,
+          "startDate": "2026-08-01",
+          "endDate": "2026-08-14",
+          "codename": "OP-NIGHTOWL",
+          "collab_note": null,
+          "client": {
+            "id": 2,
+            "name": "Acme Test Corp",
+            "shortName": "ACME"
+          },
+          "scopes": [
+            {
+              "name": "",
+              "scope": "10.0.1.0/24",
+              "description": "Internal test segment A",
+              "disallowed": false,
+              "requiresCaution": false
+            },
+            {
+              "name": "",
+              "scope": "10.0.2.0/24",
+              "description": "Internal test segment B (caution: legacy gear)",
+              "disallowed": false,
+              "requiresCaution": true
+            },
+            {
+              "name": "",
+              "scope": "*.example.com",
+              "description": "External web presence",
+              "disallowed": false,
+              "requiresCaution": false
+            },
+            {
+              "name": "",
+              "scope": "db-internal.example.com",
+              "description": "Production DB host -- out of scope, do not touch",
+              "disallowed": true,
+              "requiresCaution": false
+            },
+            {
+              "name": "",
+              "scope": "app.example.com",
+              "description": "Primary web application",
+              "disallowed": false,
+              "requiresCaution": false
+            }
+          ],
+          "objectives": [
+            {
+              "objective": "Obtain domain admin on the internal segment",
+              "description": "",
+              "complete": false,
+              "deadline": "2026-08-10",
+              "position": 1,
+              "result": "",
+              "markedComplete": null,
+              "objectiveStatus": {
+                "objectiveStatus": "In Progress"
+              },
+              "objectivePriority": {
+                "priority": "Primary"
+              }
+            },
+            {
+              "objective": "Exfiltrate a synthetic 'customer records' file from db01",
+              "description": "",
+              "complete": false,
+              "deadline": "2026-08-12",
+              "position": 2,
+              "result": "",
+              "markedComplete": null,
+              "objectiveStatus": {
+                "objectiveStatus": "Active"
+              },
+              "objectivePriority": {
+                "priority": "Primary"
+              }
+            },
+            {
+              "objective": "Assess web application for OWASP Top 10 issues",
+              "description": "",
+              "complete": false,
+              "deadline": "2026-08-09",
+              "position": 3,
+              "result": "",
+              "markedComplete": null,
+              "objectiveStatus": {
+                "objectiveStatus": "In Progress"
+              },
+              "objectivePriority": {
+                "priority": "Secondary"
+              }
+            }
+          ],
+          "targets": [
+            {
+              "hostname": "web01.example.com",
+              "ipAddress": "10.0.1.10",
+              "description": "Public web frontend",
+              "compromised": false
+            },
+            {
+              "hostname": "db01.example.com",
+              "ipAddress": "10.0.1.20",
+              "description": "Internal database server",
+              "compromised": true
+            },
+            {
+              "hostname": "dc01.example.com",
+              "ipAddress": "10.0.1.5",
+              "description": "Domain controller",
+              "compromised": false
+            }
+          ],
+          "whitecards": [
+            {
+              "title": "Scheduled Maintenance Window",
+              "issued": "2026-08-02T09:00:00+00:00",
+              "description": "Acme IT will reboot db01 nightly at 02:00 UTC; expect brief outages."
+            },
+            {
+              "title": "Emergency Contact Card",
+              "issued": "2026-08-01T08:00:00+00:00",
+              "description": "Call +1-555-0100 (Acme SOC) if any production impact is observed."
+            }
+          ],
+          "comments": [
+            {
+              "id": 1,
+              "note": "Kickoff call held with Acme Test Corp on 2026-07-30. Scope confirmed as below.",
+              "timestamp": "2026-09-17",
+              "operatorId": 1,
+              "user": {
+                "name": "",
+                "username": "admin"
+              }
+            },
+            {
+              "id": 2,
+              "note": "Client asked us to avoid scanning db-internal.example.com -- added to disallowed scope.",
+              "timestamp": "2026-09-17",
+              "operatorId": 1,
+              "user": {
+                "name": "",
+                "username": "admin"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
