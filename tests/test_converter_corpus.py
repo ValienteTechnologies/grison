@@ -11,7 +11,9 @@ before this support was added, happens not to contain one yet.
 
 from __future__ import annotations
 
-from grison.markdown import html_to_md, md_to_html
+import pytest
+
+from grison.markdown import ConverterError, html_to_md, md_to_html
 
 
 def test_li_unwraps_paragraph() -> None:
@@ -39,10 +41,31 @@ def test_three_level_nesting_degrades_to_one_sub_level() -> None:
     assert html_to_md(html) == "- a\n  - b\n  - c"
 
 
+def test_three_level_nesting_collapse_reports_on_loss() -> None:
+    events: list[str] = []
+    html = (
+        "<ul><li><p>a</p><ul><li><p>b</p>"
+        "<ul><li><p>c</p></li></ul>"
+        "</li></ul></li></ul>"
+    )
+    html_to_md(html, on_loss=events.append)
+    assert any("collapsed" in e and "sub-level" in e for e in events)
+
+
+def test_authoring_a_third_list_level_is_a_hard_error() -> None:
+    # The markdown side has no way to express a 3rd level at all — unlike the
+    # html->md side (which may see one in existing GW data and collapses it),
+    # freshly-authored markdown attempting one is a hard, loud rejection.
+    with pytest.raises(ConverterError):
+        md_to_html("- a\n  - b\n    - c")
+
+
 def test_md_nested_bullets_round_trip_to_html_and_back() -> None:
     md = "- parent\n  - child a\n  - child b"
     html = md_to_html(md)
-    assert html == "<ul><li>parent<ul><li>child a</li><li>child b</li></ul></li></ul>"
+    assert html == (
+        "<ul><li><p>parent</p><ul><li><p>child a</p></li><li><p>child b</p></li></ul></li></ul>"
+    )
     assert html_to_md(html) == md
 
 
@@ -70,18 +93,27 @@ def test_reference_link_idiom_drops_cosmetic_attrs_and_roundtrips() -> None:
 
 
 def test_multi_paragraph_li_joins() -> None:
+    # CHANGED behavior (defect fix, brief item 1): a multi-paragraph/"loose" list
+    # item used to be lossily joined onto one line with a space, destroying the
+    # paragraph break. It now renders as a loose-list continuation — a blank line
+    # then a 2-space-indented block — matching GW's own <li><p>...</p><p>...</p>
+    # shape without collapsing it.
     html = "<ul><li><p>first step</p><p>then <code>nmap</code></p></li></ul>"
     md = html_to_md(html)
-    assert md == "- first step then `nmap`"
+    assert md == "- first step\n\n  then `nmap`"
     # md -> html -> md is a fixed point (the merge base relies on this)
     assert html_to_md(md_to_html(md)) == md
 
 
 def test_link_url_with_quote_cannot_break_out_of_href() -> None:
-    # a malformed/hostile URL must not escape the href attribute and inject markup
+    # CHANGED behavior (markdown-it now owns URL parsing): a malformed/hostile URL
+    # must still not escape the href attribute and inject markup, but it's now
+    # prevented by markdown-it's own URL normalization (percent-encoding unsafe
+    # characters) rather than by grison's own quote-escaping seeing a literal `"`
+    # reach the attribute — there's no literal quote left to escape.
     html = md_to_html('see [x](http://evil/a"><img/onerror>)')
-    assert "&quot;" in html  # the quote is escaped
     assert '"><' not in html and "<img" not in html  # no attribute breakout / injected tag
+    assert "%22" in html  # the quote was neutralized by percent-encoding, not dropped
 
 
 # --- ordered lists (<ol>), same GW <li><p>…</p></li> item wrapping as <ul> -----
@@ -104,12 +136,15 @@ def test_ol_nested_in_ul_renders_as_indented_sub_items() -> None:
 
 
 def test_ul_nested_in_ol_renders_as_indented_sub_items() -> None:
+    # Outer marker "1. " is 3 chars — the nested sub-level's indent matches that
+    # width (not a flat 2 spaces), so grison's own output is real, previewable
+    # CommonMark (see _render_list_node).
     html = (
         "<ol><li><p>parent</p><ul><li><p>child a</p></li><li><p>child b</p></li></ul>"
         "</li></ol>"
     )
     md = html_to_md(html)
-    assert md == "1. parent\n  - child a\n  - child b"
+    assert md == "1. parent\n   - child a\n   - child b"
     assert html_to_md(md_to_html(md)) == md
 
 

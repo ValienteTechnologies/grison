@@ -227,7 +227,7 @@ def test_push_of_noncanonical_markdown_stamps_base_from_rebuilt_form(tmp_path: P
     # local file rewritten to the canonical form the next pull would produce
     assert es.read_text().strip() == "- item one\n- item two"
     assert fake.reports[6]["extraFields"]["executive_summary"] == (
-        "<ul><li>item one</li><li>item two</li></ul>"
+        "<ul><li><p>item one</p></li><li><p>item two</p></li></ul>"
     )
     from grison.remote.repmap import section_hash
 

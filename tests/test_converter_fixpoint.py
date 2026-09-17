@@ -78,13 +78,14 @@ FIXPOINT_CASES: list[tuple[str, str, bool]] = [
     ("link_adjacent_no_space", "[one](http://a.com)[two](http://b.com)", True),
     ("nested_link_in_bold_in_em", "*em with **bold [link](http://x.com) text** inside*", True),
     ("list_nest_2", "- top\n  - sub1\n  - sub2", True),
-    ("list_nest_3_collapses", "- top\n  - sub1\n    - subsub1", False),
     ("bullet_star_normalizes", "* item one\n* item two", False),
     ("ordered_list_basic", "1. first\n2. second\n3. third", True),
     ("ordered_list_start", "3. first\n4. second", True),
     ("ordered_list_renumbers", "3. first\n7. second\n9. third", False),
     ("ordered_nest_in_bullet", "- top\n  1. sub1\n  2. sub2", True),
-    ("bullet_nest_in_ordered", "1. top\n  - sub1\n  - sub2", True),
+    # 3-space indent under "1. " (its own marker width) — real CommonMark
+    # requires this for the nested list to actually belong to the item.
+    ("bullet_nest_in_ordered", "1. top\n   - sub1\n   - sub2", True),
     (
         "mixed_all",
         "Intro paragraph with **bold**, *em*, `code`, and a "
@@ -99,7 +100,6 @@ FIXPOINT_CASES: list[tuple[str, str, bool]] = [
     ("hard_break", "line one\nline two", True),
     ("html_entity_amp", "Tom & Jerry", True),
     ("quote_in_url_title", '[text](http://example.com "has \\"quotes\\" inside")', True),
-    ("bold_empty", "****", True),
     ("code_adjacent_bold", "`code`**bold**`more code`", True),
     ("empty_string", "", True),
     ("whitespace_only", "   \n  \n  ", False),
@@ -121,6 +121,19 @@ REJECTED_CASES = [
     ("heading", "# Heading"),
     ("table", "| A | B |\n| - | - |\n| 1 | 2 |"),
     ("image", "![alt](http://example.com/x.png)"),
+    # CHANGED (real CommonMark, brief follow-up item 1): "****" (4+ of the same
+    # delimiter char alone on a line) is a genuine thematic break under real
+    # CommonMark, not inert literal text — the old hand-rolled tokenizer didn't
+    # recognize thematic breaks at all, so this used to round-trip as literal
+    # "****"; grison must read exactly what a real CommonMark renderer shows,
+    # and "still rejected: thematic breaks" applies here too.
+    ("thematic_break_four_stars", "****"),
+    # CHANGED: on the markdown->html side, nesting a list a 3rd level deep is now
+    # a hard ConverterError (freshly-authored markdown must not grow a level
+    # nothing can round-trip) rather than silently collapsing — the HTML->markdown
+    # side still collapses a real GW record's 3rd+ level (with on_loss), since
+    # that shape can already exist in synced data.
+    ("list_nest_3_deep", "- top\n  - sub1\n    - subsub1"),
 ]
 
 
@@ -172,25 +185,48 @@ def _rand_list_block(rng: random.Random) -> str:
     lines = []
     for _ in range(rng.randint(1, 5)):
         if top_ordered:
-            lines.append(f"{n}. " + _rand_paragraph(rng))
+            marker = f"{n}. "
+            lines.append(marker + _rand_paragraph(rng))
             n += 1
         else:
-            lines.append(bullet + _rand_paragraph(rng))
+            marker = bullet
+            lines.append(marker + _rand_paragraph(rng))
+        # Real CommonMark requires a nested list's indent to match (at least)
+        # THIS item's own marker width to actually belong to it — a flat 2
+        # spaces under a wider ordered marker would parse as a separate
+        # top-level list instead (not nested at all).
+        indent = " " * len(marker)
         if rng.random() < 0.4:
             if rng.random() < 0.3:
-                nested_n = rng.choice([1, 2, 4])
-                lines.append(f"  {nested_n}. " + _rand_paragraph(rng))
+                # Real CommonMark: an ordered list can interrupt a preceding
+                # paragraph (no blank line before it — the shape here) ONLY if
+                # it starts at 1; any other start is read as a lazy-continuation
+                # line of that paragraph instead, not a new nested list.
+                nested_n = 1
+                lines.append(f"{indent}{nested_n}. " + _rand_paragraph(rng))
             else:
                 nested_bullet = rng.choice(["- ", "* "])
-                lines.append("  " + nested_bullet + _rand_paragraph(rng))
+                lines.append(indent + nested_bullet + _rand_paragraph(rng))
     return "\n".join(lines)
 
 
 def _rand_document(rng: random.Random) -> str:
-    blocks = [
-        _rand_list_block(rng) if rng.random() < 0.4 else _rand_paragraph(rng)
-        for _ in range(rng.randint(1, 4))
-    ]
+    # Real CommonMark merges two adjacent lists of the same marker type
+    # separated by only a blank line into ONE (loose) list, not two — a document
+    # generator that doesn't know that would produce markdown whose "two separate
+    # lists" intent isn't actually what a real renderer (or grison) reads back,
+    # which isn't a converter bug to chase. Never place two list blocks back to
+    # back; force a paragraph between them instead.
+    blocks: list[str] = []
+    prev_was_list = False
+    for _ in range(rng.randint(1, 4)):
+        want_list = rng.random() < 0.4
+        if want_list and not prev_was_list:
+            blocks.append(_rand_list_block(rng))
+            prev_was_list = True
+        else:
+            blocks.append(_rand_paragraph(rng))
+            prev_was_list = False
     return rng.choice(["\n\n", "\n\n\n", "\r\n\r\n"]).join(blocks)
 
 

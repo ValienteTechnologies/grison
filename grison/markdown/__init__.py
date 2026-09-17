@@ -20,11 +20,15 @@ from grison.markdown.mapping import (
     default_finding_type,
     ir_to_finding,
 )
+from grison.markdown.refs import LocalRef, RefResolver, RemoteRef
 
 __all__ = [
     "ConverterError",
     "DocumentError",
+    "LocalRef",
     "MappingResult",
+    "RefResolver",
+    "RemoteRef",
     "default_finding_type",
     "extract_gw_identity",
     "finding_to_markdown",

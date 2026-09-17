@@ -618,14 +618,16 @@ def test_dry_run_emits_would_prefixed_events(tmp_path: Path) -> None:
 
 def test_push_then_reclassify_clean_no_echo(tmp_path: Path) -> None:
     """The core echo-fix regression: a locally-edited finding whose GW-stored HTML
-    round-trips differently than the local markdown (mixed '-'/'* ' bullets always
+    round-trips differently than the local markdown ('* ' bullets always
     canonicalize to '-') must classify 'clean' against the post-push remote state on
     the very next sync, and the local file on disk must already equal the canonical
-    form right after the push — not merely echo what was sent."""
+    form right after the push — not merely echo what was sent. (A '-'/'* ' MIX
+    within one list is a different list entirely under real CommonMark — a marker
+    change starts a new list — so this uses one consistent non-canonical marker.)"""
     fake = FakeGW()
     path, rid = _seed_synced(tmp_path, fake, tier="instance", report_id=2, title="Echo")
     data = markdown_to_finding(path.read_text()).model_dump(mode="json")
-    data["description"] = "- item one\n* item two"  # non-canonical bullet marker
+    data["description"] = "* item one\n* item two"  # non-canonical bullet marker
     _write(path, Finding.model_validate(data))
 
     r = sync(tmp_path, fake)
