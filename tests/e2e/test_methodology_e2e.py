@@ -68,6 +68,7 @@ tested by the pre-engine version of this file):
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -386,28 +387,40 @@ def test_mass_change_guard_withholds_pulls_too(run_grison, bs_server):
 
 
 def test_wysiwyg_page_is_skipped_not_mirrored(run_grison, bs_server):
+    """A wysiwyg page grison has never managed is an INFO-severity veto (nothing
+    lost, nothing to do) — hidden from plain text output by default (tests changed
+    on purpose: item 4's veto-severity split; ``--verbose`` shows it, ``--json``
+    always would)."""
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(
         book_id=book["id"], name="WYSIWYG Page", editor="wysiwyg", markdown="",
         raw_html="<p>Authored in the rich editor.</p>",
     )
 
-    result = run_grison("sync")
+    quiet = run_grison("sync")
+    assert "wysiwyg" not in quiet.output.lower()  # INFO severity: hidden by default
 
-    assert "wysiwyg" in result.output.lower()
     lib = Path.cwd() / "methodology" / "library"
     assert not list(lib.rglob("wysiwyg-page.md"))
 
+    verbose = run_grison("sync", "--verbose")
+    assert 'skip "WYSIWYG Page" (page' in verbose.output  # identifies its record (item 2)
+
 
 def test_draft_page_is_skipped(run_grison, bs_server):
+    """A draft is INFO-severity — same rationale as the wysiwyg case above."""
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(book_id=book["id"], name="Draft Page", markdown="# D", draft=True)
 
-    result = run_grison("sync")
+    quiet = run_grison("sync")
+    assert "draft" not in quiet.output.lower()
 
-    assert "draft" in result.output.lower()
     lib = Path.cwd() / "methodology" / "library"
     assert not list(lib.rglob("draft-page.md"))
+
+    verbose = run_grison("sync", "--verbose")
+    assert "draft" in verbose.output.lower()
+    assert 'skip "Draft Page" (page' in verbose.output
 
 
 # --- structure: chapter/book moves, renames, chapter creation -------------------
@@ -654,6 +667,40 @@ def test_remote_delete_lands_in_the_recycle_bin_and_is_skipped_not_deleted(run_g
     assert any(d["deletable_id"] == page["id"] for d in bs_server.store.recycle_bin)
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     assert path.exists()  # the local file is left alone, not deleted
+
+    # the record stays SKIPped, quietly, on every later sync too — never re-surfaces
+    # as anything else and never disappears from the recycle-bin awareness either
+    result2 = run_grison("sync")
+    assert "recycle bin" in result2.output
+
+
+def test_unknown_recycled_page_is_ignored_silently(run_grison, bs_server):
+    """Coordinator feedback item 3: a page grison never indexed that happens to sit
+    in the recycle bin (someone else's housekeeping, or one this workspace never
+    pulled) is none of grison's business — no event, not counted, not on every sync
+    forever. Only an INDEXED record whose remote landed in the bin gets that SKIP
+    (proven above)."""
+    book = bs_server.store.seed_book(name="Playbook")
+    tracked = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")  # indexes "Notes" only
+
+    # a page grison never even pulled, deleted directly on the server — never indexed
+    untracked = bs_server.store.seed_page(book_id=book["id"], name="Untracked", markdown="# U")
+    from grison.remote.bookstack import BookStackClient
+    from grison.remote.creds import Creds
+
+    BookStackClient(
+        Creds(bs_url="https://x", bs_token_id=bs_server.token_id,
+              bs_token_secret=bs_server.token_secret),
+        transport=bs_server.transport,
+    ).delete_page(untracked["id"])
+    assert any(d["deletable_id"] == untracked["id"] for d in bs_server.store.recycle_bin)
+
+    result = run_grison("sync", "--verbose")  # --verbose too: still nothing about it
+
+    assert "Untracked" not in result.output
+    assert "wiki (bs.page): clean 1" in result.output  # only "Notes" counted, nothing else
+    del tracked
 
 
 def test_corrupt_local_page_file_is_an_error_isolated_from_others(run_grison, bs_server):
@@ -983,13 +1030,80 @@ def test_undo_reverts_a_push(run_grison, bs_server):
 def test_undo_list_shows_snapshots_newest_first(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
-    run_grison("sync")
+    run_grison("sync")  # pull-only — no snapshot at all (see the read-only test below)
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     _write_page_file(path, title="Notes", body="# N\n\nedit 1")
-    run_grison("sync")
+    run_grison("sync")  # push #1 — one real snapshot
+    _write_page_file(path, title="Notes", body="# N\n\nedit 2")
+    run_grison("sync")  # push #2 — a second, newer snapshot
 
     result = run_grison("undo", "--list")
 
     lines = [ln for ln in result.output.splitlines() if ln.strip()]
+    assert len(lines) == 2  # exactly the two push runs — the pull-only run left none
     assert lines == sorted(lines, reverse=True)
-    assert len(lines) >= 1
+
+
+def test_undo_list_shows_time_and_verb_counts_per_snapshot(run_grison, bs_server):
+    """``grison undo --list`` shows per snapshot: time, and counts per verb —
+    coordinator feedback item 1, e.g. '2026-09-17 17:32  push 1'."""
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# N\n\nedited")
+
+    result = run_grison("undo", "--list")
+
+    assert result.output.strip() == "no snapshots"  # no push happened yet — nothing to list
+
+    run_grison("sync")  # now push the edit
+    result2 = run_grison("undo", "--list")
+    lines2 = [ln for ln in result2.output.splitlines() if ln.strip()]
+    assert len(lines2) == 1
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}  push 1$", lines2[0]), lines2[0]
+
+
+def test_undo_prints_what_it_did_per_record(run_grison, bs_server):
+    """``grison undo`` prints what it did per record — coordinator feedback item 1."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# N\n\nedited")
+    run_grison("sync")
+
+    result = run_grison("undo")
+
+    assert "methodology/library/playbook/notes.md" in result.output
+    assert "restored pre-undo content" in result.output
+    del page
+
+
+def test_read_only_sync_leaves_no_snapshot(run_grison, bs_server):
+    """Coordinator feedback item 1: a run with no remote write leaves no snapshot at
+    all — undo is for remote writes; with prune-to-10, ordinary pull-only syncs would
+    otherwise evict every real undo point."""
+    book = bs_server.store.seed_book(name="Playbook")
+    for i in range(3):
+        bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"Body {i}.")
+
+    result = run_grison("sync")  # pure pull_new — no remote write at all
+
+    assert "snapshot:" not in result.output
+    assert run_grison("undo", "--list").output.strip() == "no snapshots"
+
+
+def test_second_read_only_sync_does_not_evict_the_one_real_snapshot(run_grison, bs_server):
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# N\n\nedited")
+    run_grison("sync")  # the one real (push) snapshot
+
+    for _ in range(3):
+        run_grison("sync")  # clean, read-only — must not touch the snapshot history
+
+    assert len(run_grison("undo", "--list").output.strip().splitlines()) == 1
+    del page

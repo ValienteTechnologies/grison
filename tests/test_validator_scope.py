@@ -285,3 +285,110 @@ def test_union_of_top_level_directories_equals_whole_workspace(tmp_path: Path) -
     # and the union is non-trivial — this test would pass vacuously on an all-clean
     # workspace, so assert there really are failures on both sides
     assert len(whole) >= 5
+
+
+# --- item 7: a single FILE argument narrows to itself + genuine cross-file hits -----
+
+_ACME = ("findings", "reports", "14-acme-corp")
+_ACME_XSS = "findings/reports/14-acme-corp/reflected-xss.md"
+_ACME_SQLI = "findings/reports/14-acme-corp/sql-injection.md"
+
+
+def _paths_of(fails: list) -> set[str]:
+    return {f.path for f in fails}
+
+
+def test_scope_one_finding_file_excludes_sibling_finding_failures(tmp_path: Path) -> None:
+    """Two finding files break in the same report dir; naming only one of them must
+    not surface the other's own-only failure."""
+    root = copy_fixture(tmp_path)
+    edit(root / _ACME_XSS, "severity: critical", "severity: banana")
+    edit(root / _ACME_SQLI, "severity: high", "severity: banana")
+
+    xss_only = validate_workspace(root, paths=[root / _ACME_XSS])
+
+    assert "FND-003" in rule_ids(xss_only)
+    assert _ACME_SQLI not in _paths_of(xss_only)
+    assert all(p == _ACME_XSS for p in _paths_of(xss_only) if p in (_ACME_XSS, _ACME_SQLI))
+
+
+def test_scope_one_finding_file_still_reports_a_cross_file_failure_naming_it(
+    tmp_path: Path,
+) -> None:
+    """REF-004 (caption conflict) fires once per involved document, each under its
+    own path (verified against grison/validator/core.py's _EmbedHit collection) — so
+    narrowing to reflected-xss.md must still show ITS half of the conflict, while the
+    unrelated FND-003 on sql-injection.md (the other file) stays excluded."""
+    root = copy_fixture(tmp_path)
+    edit(
+        root / _ACME_XSS,
+        '![Alert firing in the browser](evidence/xss-alert.png "captured during testing")',
+        '![Alert firing in the browser](evidence/xss-alert.png "captured during testing")\n\n'
+        '![Reused evidence](evidence/bypass-attempt.png "captured after mitigation")',
+    )
+    edit(root / _ACME_SQLI, "severity: high", "severity: banana")
+
+    xss_only = validate_workspace(root, paths=[root / _ACME_XSS])
+    fails = rule_ids(xss_only)
+
+    assert "REF-004" in fails
+    assert _ACME_XSS in _paths_of(xss_only)
+    # the conflict's OTHER half (sql-injection.md's own hit) is a different document
+    assert _ACME_SQLI not in _paths_of(xss_only)
+    assert "FND-003" not in fails  # sql-injection.md's unrelated own-only failure
+
+
+def test_scope_report_directory_still_returns_both_files_failures(tmp_path: Path) -> None:
+    """A DIRECTORY argument "keeps today's behaviour" — the union property must
+    still hold: naming the report dir itself returns every file's own failures,
+    unnarrowed, exactly like validating the whole workspace and filtering down."""
+    root = copy_fixture(tmp_path)
+    edit(
+        root / _ACME_XSS,
+        '![Alert firing in the browser](evidence/xss-alert.png "captured during testing")',
+        '![Alert firing in the browser](evidence/xss-alert.png "captured during testing")\n\n'
+        '![Reused evidence](evidence/bypass-attempt.png "captured after mitigation")',
+    )
+    edit(root / _ACME_SQLI, "severity: high", "severity: banana")
+
+    whole_dir = validate_workspace(root, paths=[root / Path(*_ACME)])
+    paths = _paths_of(whole_dir)
+
+    assert "REF-004" in rule_ids(whole_dir)
+    assert "FND-003" in rule_ids(whole_dir)
+    assert _ACME_XSS in paths
+    assert _ACME_SQLI in paths
+
+
+def test_scope_one_book_file_excludes_sibling_chapter_failure(tmp_path: Path) -> None:
+    """Same narrowing, in methodology/library/: naming one chapter file inside a
+    book must not surface a sibling chapter's own-only failure."""
+    root = copy_fixture(tmp_path)
+    book = root / "methodology" / "library" / "web-application-testing"
+    edit(book / "recon.md", "title: Reconnaissance overview", "title: ''")
+    chapter = book / "reconnaissance" / "subdomain-enum.md"
+    edit(chapter, "title: Subdomain enumeration", "title: ''")
+
+    chapter_only = validate_workspace(root, paths=[chapter])
+    fails = rule_ids(chapter_only)
+    paths = _paths_of(chapter_only)
+    recon_rel = "methodology/library/web-application-testing/recon.md"
+
+    assert "WIKI-002" in fails
+    assert recon_rel not in paths
+
+
+def test_scope_book_directory_still_returns_both_chapters_failures(tmp_path: Path) -> None:
+    """Union property for methodology/library/<book>: the book DIRECTORY still
+    returns every chapter's own failures, not just one."""
+    root = copy_fixture(tmp_path)
+    book = root / "methodology" / "library" / "web-application-testing"
+    edit(book / "recon.md", "title: Reconnaissance overview", "title: ''")
+    chapter = book / "reconnaissance" / "subdomain-enum.md"
+    edit(chapter, "title: Subdomain enumeration", "title: ''")
+
+    whole_book = validate_workspace(root, paths=[book])
+    paths = _paths_of(whole_book)
+
+    assert "methodology/library/web-application-testing/recon.md" in paths
+    assert "methodology/library/web-application-testing/reconnaissance/subdomain-enum.md" in paths

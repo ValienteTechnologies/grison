@@ -33,6 +33,12 @@ class BSContext:
     state: StateStore | None = None
     books: list[dict[str, Any]] = field(default_factory=list)
     chapters: list[dict[str, Any]] = field(default_factory=list)
+    #: Page ids already in ``.grison/index.json`` when this sync started — set by the
+    #: CLI before calling the engine. Used by :meth:`grison.adapters.bs_pages.
+    #: BsPageAdapter.fetch_remote` to scope recycle-bin awareness (BRIEF B) to records
+    #: grison actually tracks; a binned page grison never indexed is none of its
+    #: business and must never surface as a permanent, unidentified "skip" every sync.
+    indexed_page_ids: frozenset[int] = frozenset()
 
     @property
     def books_by_id(self) -> dict[int, dict[str, Any]]:

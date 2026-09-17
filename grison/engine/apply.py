@@ -17,9 +17,9 @@ from typing import Any
 
 from grison.engine.adapter import Adapter
 from grison.engine.classify import classify
+from grison.engine.events import build_event
 from grison.engine.identity import Missing, PairDecision, Unindexed, pair
 from grison.engine.model import (
-    PROBLEM_OUTCOMES,
     Event,
     KindSummary,
     LocalDoc,
@@ -59,7 +59,10 @@ def _remote_hash(adapter: Adapter, remote: RemoteRecord | None) -> str | None:
     return digest(adapter.canonical_remote(remote.data))
 
 
-def _sidecar_path(path: PurePosixPath) -> PurePosixPath:
+def sidecar_path(path: PurePosixPath) -> PurePosixPath:
+    """The collision-sidecar path for ``path`` (``page.md`` -> ``page.remote.md``).
+    Public (not ``_``-prefixed) because :mod:`grison.engine.offline_status` needs the
+    exact same convention to detect a live sidecar without a real sync."""
     if path.suffix:
         return path.with_suffix(f".remote{path.suffix}")
     return path.with_name(path.name + ".remote")
@@ -140,20 +143,24 @@ def run(  # noqa: PLR0913
         if p.outcome not in (Outcome.CLEAN, Outcome.REPAIR, Outcome.FORGET) and (
             p.local is not None or p.remote is not None
         ):
-            reason = adapter.veto(
+            veto = adapter.veto(
                 p.local.doc if p.local else None, p.remote.data if p.remote else None
             )
-            if reason:
+            if veto is not None:
                 p.outcome = Outcome.SKIP
-                p.reason = reason
+                p.reason = veto.reason
+                p.severity = veto.severity
 
     _apply_change_guard(plans, options, summary)
 
     for p in plans:
         _apply_one(root, ctx, adapter, p, index, state, snapshot, events, options)
         summary.bump(p.outcome)
-        if p.outcome in PROBLEM_OUTCOMES and p.path is not None:
-            summary.problem_paths.append(str(p.path))
+        if p.is_problem:
+            label = str(p.path) if p.path is not None else (
+                adapter.remote_label(p.remote.data) if p.remote is not None else str(p.id)
+            )
+            summary.problem_paths.append(label)
 
     _clear_stale_sidecars(root, plans)
     return plans, events, summary
@@ -289,7 +296,7 @@ def _apply_one(  # noqa: PLR0912, PLR0913, PLR0915
     except Exception as e:  # noqa: BLE001 — per-record isolation (ENGINE.md §5)
         p.outcome = Outcome.FAILED
         p.reason = f"{type(e).__name__}: {e}"
-        events.append(Event(verb="failed", path=str(p.path) if p.path else None, detail=p.reason))
+        events.append(build_event("failed", p, adapter, detail=p.reason))
 
 
 def _dispatch(  # noqa: PLR0912, PLR0913, PLR0915
@@ -326,7 +333,7 @@ def _dispatch(  # noqa: PLR0912, PLR0913, PLR0915
         return
 
     if p.outcome is Outcome.SKIP:
-        events.append(Event(verb="skip", path=str(p.path) if p.path else None, detail=p.reason))
+        events.append(build_event("skip", p, adapter, detail=p.reason))
         return
 
     if p.outcome is Outcome.CREATE:
@@ -422,11 +429,12 @@ def _apply_update(  # noqa: PLR0913
     # the wysiwyg/draft/recycle-bin guard is re-checked here, against the FRESH
     # pre-write data, not just the bulk-fetch snapshot classify() used — a page can
     # flip editor/draft state between classification and this write.
-    veto_reason = adapter.veto(p.local.doc if p.local else None, fresh.data if fresh else None)
-    if veto_reason:
+    veto = adapter.veto(p.local.doc if p.local else None, fresh.data if fresh else None)
+    if veto is not None:
         p.outcome = Outcome.SKIP
-        p.reason = veto_reason
-        events.append(Event(verb="skip", path=str(p.path), detail=veto_reason))
+        p.reason = veto.reason
+        p.severity = veto.severity
+        events.append(build_event("skip", p, adapter, detail=veto.reason))
         return
     if dry:
         verb = "move" if p.outcome is Outcome.MOVE_EDIT else "push"
@@ -523,13 +531,9 @@ def _apply_pull(  # noqa: PLR0913
     if dry:
         events.append(Event(verb="pull", path=str(path), detail=detail, dry_run=True))
         return
-    old_text = target.read_text(encoding="utf-8") if existed else None
-    snapshot.record(
-        UndoOp(kind=adapter.kind, outcome=p.outcome.value, path=str(path), id=p.remote.id,
-              local_existed_before=existed, local_preimage_text=old_text,
-              local_created=not existed,
-              move_from=str(relocated_from) if relocated_from is not None else None)
-    )
+    # No undo entry: PULL/PULL_NEW is not a remote write (ENGINE.md 'Undo capture' —
+    # "undo is for remote writes"; grison.engine.undo's own module docstring). The
+    # local, git-tracked tree already has its own history for this.
     atomic_write_text(target, text)
     if relocated_from is not None:
         (root / relocated_from).unlink(missing_ok=True)
@@ -583,14 +587,11 @@ def _apply_delete_local(
     events: list[Event], dry: bool,
 ) -> None:
     assert p.path is not None and p.id is not None
+    del snapshot  # not a remote write — no undo entry (see grison.engine.undo's docstring)
     target = root / p.path
     if dry:
         events.append(Event(verb="delete-local", path=str(p.path), dry_run=True))
         return
-    old_text = target.read_text(encoding="utf-8") if target.exists() else None
-    snapshot.record(UndoOp(kind=p.kind, outcome="delete_local", path=str(p.path), id=p.id,
-                           local_existed_before=old_text is not None,
-                           local_preimage_text=old_text, local_created=False))
     target.unlink(missing_ok=True)
     index.remove(str(p.path))
     state.forget(p.kind, p.id)
@@ -603,7 +604,7 @@ def _write_collision_sidecar(
     if p.path is None or remote is None:
         return
     text = adapter.render_local(remote.data, path=p.path)
-    atomic_write_text(root / _sidecar_path(p.path), text)
+    atomic_write_text(root / sidecar_path(p.path), text)
 
 
 def _apply_collision(
@@ -622,5 +623,5 @@ def _clear_stale_sidecars(root: Path, plans: list[Plan]) -> None:
     for p in plans:
         if p.path is None or p.outcome is Outcome.COLLISION:
             continue
-        sidecar = root / _sidecar_path(p.path)
+        sidecar = root / sidecar_path(p.path)
         sidecar.unlink(missing_ok=True)

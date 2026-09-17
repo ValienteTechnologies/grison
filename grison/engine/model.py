@@ -19,6 +19,27 @@ from typing import Any
 Canonical = Any
 
 
+class VetoSeverity(StrEnum):
+    """How much attention an adapter veto (ENGINE.md 'a server-side condition the
+    table can't express') deserves. ``INFO``: nothing the user must do — a draft or
+    template page, say — never affects the run's exit code and is only shown with
+    ``--verbose``/in ``--json``. ``ATTENTION``: something the user may need to act on
+    (a wysiwyg page blocking a record grison already manages, a binned record grison
+    was tracking) — always shown, and makes the run's exit code nonzero."""
+
+    INFO = "info"
+    ATTENTION = "attention"
+
+
+@dataclass(frozen=True)
+class Veto:
+    """An adapter's veto of a record the classification table would otherwise have
+    written to (:meth:`grison.engine.adapter.Adapter.veto`)."""
+
+    reason: str
+    severity: VetoSeverity = VetoSeverity.ATTENTION
+
+
 class Outcome(StrEnum):
     """Every result classify()/apply() can land a record in — the closed set the
     events/result/exit-code policy (ENGINE.md §10) is built on. String-valued so it
@@ -46,10 +67,21 @@ class Outcome(StrEnum):
 #: problem by the exit-code policy).
 QUIET_OUTCOMES = frozenset({Outcome.CLEAN})
 
-#: Outcomes ENGINE.md §10 says make a run's exit code nonzero.
+#: Outcomes ENGINE.md §10 says make a run's exit code nonzero UNCONDITIONALLY. SKIP is
+#: deliberately not here — it only counts as a problem when its veto's severity is
+#: ATTENTION (see :func:`is_problem`); an INFO-severity skip (a draft/template page)
+#: must never make a run permanently exit nonzero.
 PROBLEM_OUTCOMES = frozenset(
     {Outcome.INVALID, Outcome.COLLISION, Outcome.FAILED, Outcome.WITHHELD}
 )
+
+
+def is_problem(outcome: Outcome, severity: VetoSeverity | None = None) -> bool:
+    """The one predicate the exit-code policy and ``grison status`` both use for
+    "does this record need attention". ``severity`` only matters for SKIP."""
+    if outcome is Outcome.SKIP:
+        return severity is VetoSeverity.ATTENTION
+    return outcome in PROBLEM_OUTCOMES
 
 
 @dataclass(frozen=True)
@@ -119,22 +151,48 @@ class Plan:
     remote: RemoteRecord | None = None
     base_hash: str | None = None
     reason: str = ""
+    severity: VetoSeverity | None = None  # set alongside `reason` for a SKIP outcome
     move_from: PurePosixPath | None = None
     forced: bool = False
     rule_ids: tuple[str, ...] = ()
 
+    @property
+    def is_problem(self) -> bool:
+        return is_problem(self.outcome, self.severity)
+
 
 @dataclass(frozen=True)
 class Event:
-    """One line of sync output (ENGINE.md 'Events'): ``<verb> <path>[ — detail]``,
-    verb from the closed list in :mod:`grison.engine.events`. No arrow glyphs — a move
-    says "from <old>" in its detail, in words. ``dry_run`` controls the renderer's
-    "would " prefix; it is not baked into ``verb``/``detail`` themselves."""
+    """One line of sync output (ENGINE.md 'Events'): ``<subject> <detail>``, verb from
+    the closed list in :mod:`grison.engine.events`. No arrow glyphs — a move says
+    "from <old>" in its detail, in words. ``dry_run`` controls the renderer's "would "
+    prefix; it is not baked into ``verb``/``detail`` themselves.
+
+    Every event identifies its record: ``path`` when there is a local file, else
+    ``label`` (a human-readable remote identifier — title + id — from the adapter's
+    own :meth:`~grison.engine.adapter.Adapter.remote_label`). An event naming
+    neither is a programming error (see ``__post_init__``) — silently unidentifiable
+    output is exactly the "skip — remote page is not markdown-native …" bug this
+    guards against.
+    """
 
     verb: str
     path: str | None
+    label: str | None = None
     detail: str = ""
     dry_run: bool = False
+    severity: VetoSeverity | None = None
+
+    def __post_init__(self) -> None:
+        if self.path is None and not self.label:
+            raise ValueError(
+                f"Event(verb={self.verb!r}) has neither a path nor a remote label — "
+                "every event must identify its record"
+            )
+
+    @property
+    def subject(self) -> str:
+        return self.path if self.path is not None else str(self.label)
 
 
 @dataclass
@@ -168,6 +226,6 @@ class SyncResult:
     @property
     def exit_code(self) -> int:
         for p in self.plans:
-            if p.outcome in PROBLEM_OUTCOMES:
+            if p.is_problem:
                 return 1
         return 0

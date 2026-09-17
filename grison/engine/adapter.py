@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
-from grison.engine.model import Canonical, LocalDoc, RemoteRecord
+from grison.engine.model import Canonical, LocalDoc, RemoteRecord, Veto
 
 AdapterMode = Literal["read-write", "append-only", "read-only"]
 
@@ -81,25 +81,61 @@ class Adapter(Protocol):
         captured pre-image (adapter-defined shape)."""
         ...
 
-    def veto(self, local: Any | None, remote: Any | None) -> str | None:
-        """A reason string if this record must be SKIPped regardless of what the
-        classification table says (a server-side condition the table can't express —
-        ENGINE.md: a non-markdown editor, a recycle-bin record, a record moved to
-        another parent on the server), else ``None``."""
+    def veto(self, local: Any | None, remote: Any | None) -> Veto | None:
+        """A :class:`~grison.engine.model.Veto` if this record must be SKIPped
+        regardless of what the classification table says (a server-side condition the
+        table can't express — ENGINE.md: a non-markdown editor, a recycle-bin record,
+        a record moved to another parent on the server), else ``None``.
+
+        Severity rule (ENGINE.md exit-code policy extended to SKIP): use
+        ``VetoSeverity.INFO`` when there is nothing the user must do about it — the
+        record is inert by its own nature (a draft, a template) regardless of
+        anything grison or the user did. Use ``VetoSeverity.ATTENTION`` when the veto
+        blocks something grison actually manages or was asked to do — a record the
+        index already tracks (``local is not None``, or the record is indexed at all)
+        whose remote copy became unusable (flipped to wysiwyg, landed in the recycle
+        bin, moved to a parent grison can't resolve). The same underlying condition
+        (e.g. a wysiwyg editor) can be either: a wysiwyg page grison has never seen
+        before is INFO (nothing lost, nothing to do); a wysiwyg page that used to be
+        markdown and blocks a pending local edit is ATTENTION.
+        """
+        ...
+
+    def remote_label(self, data: Any) -> str:
+        """A human-readable identifier for a remote record with no local path yet —
+        e.g. a vetoed PULL_NEW candidate. Every event names its record (path when
+        there is one, this label otherwise); an adapter that can be vetoed before a
+        local path exists must implement this so that never degrades to a bare,
+        unidentifiable "skip — <reason>" line. Conventionally ``'"<title>" (<noun>
+        <id>)'``, e.g. ``'"WYSIWYG Created Page" (page 28)'``."""
         ...
 
 
-class UndoAdapter(Protocol):
-    """The subset of :class:`Adapter` :mod:`grison.engine.undo` actually calls —
-    every full ``Adapter`` already satisfies this structurally. A record kind whose
-    only ever-recorded undo op is a create (e.g. a structure adapter that creates a
-    parent directory's remote counterpart but never pushes/deletes it through the
-    engine) may implement just this smaller shape instead of the full protocol."""
+@runtime_checkable
+class CreateUndoAdapter(Protocol):
+    """The subset of :class:`Adapter` needed to undo a CREATE — refetch the record
+    (to confirm it's still exactly what was created) and delete it. Every full
+    ``Adapter`` already satisfies this structurally; a record kind whose only
+    ever-recorded undo op is a create (a structure adapter that creates a parent
+    directory's remote counterpart but never pushes/deletes it through the engine —
+    :class:`grison.adapters.bs_structure.BookUndoAdapter`/``ChapterUndoAdapter``) can
+    implement *just* this, with no ``restore`` stub: the undo engine only ever calls
+    ``restore`` on an op it knows requires it (PUSH/MOVE_EDIT/DELETE_REMOTE), and only
+    those adapters need to satisfy :class:`RestorableUndoAdapter` — the impossible
+    call (asking a create-only adapter to restore a pre-image it never captured) is
+    unrepresentable rather than a method that exists only to raise.
+    """
 
     kind: str
 
     def refetch(self, ctx: Any, id: int) -> RemoteRecord | None: ...
 
     def delete(self, ctx: Any, id: int) -> None: ...
+
+
+@runtime_checkable
+class RestorableUndoAdapter(CreateUndoAdapter, Protocol):
+    """:class:`CreateUndoAdapter` plus ``restore`` — required for undoing a
+    PUSH/MOVE_EDIT/DELETE_REMOTE op (anything with a captured remote pre-image)."""
 
     def restore(self, ctx: Any, preimage: Any) -> RemoteRecord: ...

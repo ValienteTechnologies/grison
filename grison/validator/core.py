@@ -908,6 +908,17 @@ class _Scope:
     check_library_flat: bool = False
     check_methodology_top: bool = False
     check_shelves: bool = False
+    #: directory -> the exact file(s) within it to narrow this directory's own
+    #: failures down to (task item 7): a single FILE argument inside a report/book/
+    #: checklist directory reports only that file's own failures plus cross-file
+    #: failures that involve it — every such rule (REF-003/004, IDX-003, WS-009/010,
+    #: WIKI-007, …) already files its failure under the SPECIFIC document it
+    #: concerns (never one shared failure for a whole directory), so "narrow to file
+    #: X" is exactly "keep only failures whose own path is X". Absent from this
+    #: dict, or mapped to ``None``, means unnarrowed (today's whole-directory
+    #: behaviour) — a DIRECTORY argument (or "the workspace root"/"findings"/
+    #: "methodology") never narrows.
+    narrow: dict[PurePosixPath, frozenset[PurePosixPath] | None] = field(default_factory=dict)
 
     def merge(self, other: _Scope) -> None:
         self.library_files |= other.library_files
@@ -921,6 +932,28 @@ class _Scope:
         self.check_library_flat = self.check_library_flat or other.check_library_flat
         self.check_methodology_top = self.check_methodology_top or other.check_methodology_top
         self.check_shelves = self.check_shelves or other.check_shelves
+        for d, files in other.narrow.items():
+            existing = self.narrow.get(d)
+            if d not in self.narrow:
+                self.narrow[d] = files
+            elif existing is None or files is None:
+                self.narrow[d] = None  # either request wants the whole directory
+            else:
+                self.narrow[d] = existing | files  # union: both files' own failures
+
+
+def _narrowed(scope: _Scope, d: PurePosixPath, failures: list[Failure]) -> list[Failure]:
+    """Apply ``scope.narrow[d]`` (task item 7) to one directory's own failure list.
+    Every rule this validator fires already files its failure under the specific
+    document it concerns — including the cross-file ones (REF-003/004): each
+    involved document gets its OWN failure entry with its own path, never one shared
+    failure for a whole directory — so "narrow to file X" is exactly "keep only
+    failures whose own path is X", with no extra cross-referencing logic needed."""
+    only = scope.narrow.get(d)
+    if only is None:
+        return failures
+    wanted = {f.as_posix() for f in only}
+    return [f for f in failures if f.path in wanted]
 
 
 def _scope_everything(root: Path) -> _Scope:
@@ -981,7 +1014,15 @@ def _scope_for_path(root: Path, parts: tuple[str, ...], *, is_dir: bool) -> _Sco
         if len(parts) == 2:
             s.report_dirs = set(_discover_report_dirs(root))
         else:
-            s.report_dirs = {PurePosixPath(*parts[:3])}
+            d = PurePosixPath(*parts[:3])
+            s.report_dirs = {d}
+            if len(parts) > 3 and not is_dir:
+                # a FILE inside the report dir (task item 7): narrow to just its own
+                # failures + whichever cross-file failures name it — never the whole
+                # report's sibling files. A DIRECTORY argument (the report dir
+                # itself, or narrative/notes/evidence as a subdirectory) is left
+                # unnarrowed — "a DIRECTORY argument keeps today's behaviour".
+                s.narrow[d] = frozenset({PurePosixPath(*parts)})
         return s
 
     if parts[0] == "findings":
@@ -1003,14 +1044,20 @@ def _scope_for_path(root: Path, parts: tuple[str, ...], *, is_dir: bool) -> _Sco
             s.book_dirs = set(_discover_book_dirs(root, "methodology/library"))
             s.check_shelves = True
             return s
-        s.book_dirs = {PurePosixPath(*parts[:3])}
+        d = PurePosixPath(*parts[:3])
+        s.book_dirs = {d}
+        if len(parts) > 3 and not is_dir:
+            s.narrow[d] = frozenset({PurePosixPath(*parts)})
         return s
 
     if len(parts) >= 2 and parts[1] == "checklists":
         if len(parts) == 2:
             s.checklist_dirs = set(_discover_book_dirs(root, "methodology/checklists"))
             return s
-        s.checklist_dirs = {PurePosixPath(*parts[:3])}
+        d = PurePosixPath(*parts[:3])
+        s.checklist_dirs = {d}
+        if len(parts) > 3 and not is_dir:
+            s.narrow[d] = frozenset({PurePosixPath(*parts)})
         return s
 
     raise ValidationScopeError(f"{'/'.join(parts)} is not a validated workspace location")
@@ -1106,11 +1153,14 @@ def validate_workspace(
             out.extend(_validate_finding_file(root, p.as_posix(), "inbox", None, cterms))
 
     for d in sorted(scope.report_dirs):
-        out.extend(_validate_report_dir(root, d, index, cterms))
+        out.extend(_narrowed(scope, d, _validate_report_dir(root, d, index, cterms)))
     for d in sorted(scope.book_dirs):
-        out.extend(_validate_book_dir(root, d, index, cterms, library_slugs, bs_host))
+        out.extend(
+            _narrowed(scope, d, _validate_book_dir(root, d, index, cterms, library_slugs, bs_host))
+        )
     for d in sorted(scope.checklist_dirs):
         cslugs = _checklist_slugs(root / d, library_slugs)
-        out.extend(_validate_book_dir(root, d, None, cterms, cslugs, bs_host,
-                                      check_mirror_digest=False, noun="checklist"))
+        out.extend(_narrowed(scope, d, _validate_book_dir(
+            root, d, None, cterms, cslugs, bs_host, check_mirror_digest=False, noun="checklist",
+        )))
     return out

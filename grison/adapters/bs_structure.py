@@ -11,6 +11,13 @@ ENGINE.md's read-only-record-type note). This keeps the shape close to what the
 module it replaces (`grison/remote/methodology.py`) already did, adapted to the v2
 mirror schema and the engine's own state layer (``.grison/state/mirrors.json``, not
 the old ``.grison/mirrors.json``).
+
+The actual "regenerate if unedited, leave alone if hand-edited" guard is
+:func:`grison.engine.mirrors.write_mirror_guarded` — a small shared helper so the
+next read-only adapter (the REPORTS adapter's own project.md/index.md mirrors) does
+not have to re-implement this pattern; see that module's docstring for the rule
+itself. This module only decides WHEN to regenerate (its own witness check) and
+translates the guard's result into :class:`StructureResult` and an event.
 """
 
 from __future__ import annotations
@@ -20,12 +27,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from grison.adapters._bs_common import BSContext, slugify
+from grison.engine.mirrors import MirrorWrite, write_mirror_guarded
 from grison.engine.model import RemoteRecord
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
 from grison.formats import mirrors as mirrors_fmt
-from grison.fsio import atomic_write_text
-from grison.hashing import digest_text
 from grison.index import Index, IndexKind
 from grison.remote.bookstack import BookStackClient, BookStackError
 
@@ -34,13 +40,13 @@ _RECYCLE_REASON = "in the BookStack recycle bin, recoverable there"
 
 
 class BookUndoAdapter:
-    """Just enough of the :class:`~grison.engine.adapter.UndoAdapter` shape for
+    """Exactly :class:`~grison.engine.adapter.CreateUndoAdapter` (no more) for
     ``grison undo`` to reverse a book *creation* (``sync_structure``'s only write to
-    this kind) — :func:`grison.engine.undo.replay`'s "create" branch only ever calls
-    ``refetch``/``delete`` on it. ``restore`` exists only to satisfy the shared
-    ``UndoAdapter`` shape; it is never invoked in practice (``sync_structure`` never
-    records a push/delete-remote undo op for this kind — a book is only ever
-    created, never updated or deleted, through the engine)."""
+    this kind) — a book is only ever created, never pushed or deleted, through the
+    engine, so there is no pre-image to restore, and this deliberately has no
+    ``restore`` method at all: the undo engine's own types (``CreateUndoAdapter`` vs.
+    ``RestorableUndoAdapter``) make asking this adapter to restore a pre-image
+    unrepresentable, rather than a method that would exist only to raise."""
 
     kind = "bs.book"
 
@@ -56,13 +62,6 @@ class BookUndoAdapter:
 
     def delete(self, ctx: object, id: int) -> None:
         self.client.delete_book(id)
-
-    def restore(self, ctx: object, preimage: object) -> RemoteRecord:
-        raise NotImplementedError(
-            "a book is only ever created through sync_structure, never pushed or "
-            "deleted through the engine — there is no push/delete-remote undo op to "
-            "restore from"
-        )
 
 
 class ChapterUndoAdapter:
@@ -82,13 +81,6 @@ class ChapterUndoAdapter:
 
     def delete(self, ctx: object, id: int) -> None:
         self.client.delete_chapter(id)
-
-    def restore(self, ctx: object, preimage: object) -> RemoteRecord:
-        raise NotImplementedError(
-            "a chapter is only ever created through sync_structure, never pushed or "
-            "deleted through the engine — there is no push/delete-remote undo op to "
-            "restore from"
-        )
 
 
 @dataclass
@@ -115,27 +107,21 @@ def _write_mirror_guarded(
     root: Path, rel_path: str, text: str, mirrors: dict[str, str], result: StructureResult,
     *, dry_run: bool, on_event: Callable[[str], None] | None,
 ) -> None:
-    path = root / rel_path
-    recorded = mirrors.get(rel_path)
-    if path.exists():
-        on_disk = path.read_text(encoding="utf-8")
-        if recorded is not None and digest_text(on_disk) != recorded:
-            msg = "hand-edited — run `git checkout -- " + rel_path + "` or delete it to regenerate"
-            result.skipped.append((rel_path, msg))
-            if on_event:
-                on_event(f"skip {rel_path}: {msg}")
-            return
-        if on_disk == text:
-            return
-    result.materialized.append(rel_path)
-    if dry_run:
-        if on_event:
-            on_event(f"would mirror {rel_path}")
+    """Adapts :func:`grison.engine.mirrors.write_mirror_guarded`'s result onto this
+    module's own :class:`StructureResult`/event shape."""
+    outcome = write_mirror_guarded(root, rel_path, text, mirrors, dry_run=dry_run)
+    if outcome.outcome is MirrorWrite.UNCHANGED:
         return
-    atomic_write_text(path, text)
-    mirrors[rel_path] = digest_text(text)
+    if outcome.outcome is MirrorWrite.HAND_EDITED:
+        assert outcome.message is not None
+        result.skipped.append((rel_path, outcome.message))
+        if on_event:
+            on_event(f"skip {rel_path}: {outcome.message}")
+        return
+    result.materialized.append(rel_path)
     if on_event:
-        on_event(f"mirror {rel_path}")
+        verb = "would mirror" if outcome.outcome is MirrorWrite.WOULD_WRITE else "mirror"
+        on_event(f"{verb} {rel_path}")
 
 
 def _witness_unchanged(state: StateStore, kind: str, id: int, updated_at: str | None) -> bool:
