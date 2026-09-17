@@ -11,14 +11,13 @@ tags join on ``(content_type, object_id)`` rather than living on the finding row
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
+from grison import hashing
 from grison.markdown import html_to_md, md_to_html
 from grison.model import Finding, FindingType, Severity, SyncState, is_known_cwe
 
@@ -57,12 +56,14 @@ def evidence_meta_hash(caption: str, friendly_name: str, description: str) -> st
     """Hash of an evidence image's caption/friendly_name/description — the per-image
     3-way merge base (Track 1b). These fields sit outside :func:`content_hash` (GW's
     evidence API predates a bulk record-level update), so each image tracks its own
-    tiny base in ``EvidenceGwRef.meta`` instead of riding the record's hash."""
-    payload = json.dumps(
-        {"caption": caption, "friendly_name": friendly_name, "description": description},
-        sort_keys=True, ensure_ascii=False,
+    tiny base in ``EvidenceGwRef.meta`` instead of riding the record's hash.
+
+    Prefixed (``sha256:...``) since this module's refactor; a value stored before
+    that had no prefix — see :func:`grison.hashing.normalize` for the comparison
+    shim that treats the two spellings as equal."""
+    return hashing.digest_legacy(
+        {"caption": caption, "friendly_name": friendly_name, "description": description}
     )
-    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _evidence_entries(
@@ -214,8 +215,7 @@ def _syncable_view(finding: Finding) -> dict:
 
 def content_hash(finding: Finding) -> str:
     """The 3-way merge base: a stable hash of the finding's Ghostwriter-syncable content."""
-    payload = json.dumps(_syncable_view(finding), sort_keys=True, ensure_ascii=False)
-    return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+    return hashing.digest_legacy(_syncable_view(finding))
 
 
 _GW_FIELD_KEYS = (

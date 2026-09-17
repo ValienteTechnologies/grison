@@ -72,10 +72,11 @@ def run_grison(
     """
 
     def make_gw(creds: Creds) -> GhostwriterClient:
-        return GhostwriterClient(creds, transport=gw_server.transport)
+        # sleep=lambda: no-op so an e2e test exercising a retry path stays fast
+        return GhostwriterClient(creds, transport=gw_server.transport, sleep=lambda _: None)
 
     def make_bs(creds: Creds) -> BookStackClient:
-        return BookStackClient(creds, transport=bs_server.transport)
+        return BookStackClient(creds, transport=bs_server.transport, sleep=lambda _: None)
 
     monkeypatch.setattr(cli_mod, "_make_gw_client", make_gw)
     monkeypatch.setattr(cli_mod, "_make_bs_client", make_bs)

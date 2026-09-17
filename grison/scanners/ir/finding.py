@@ -6,7 +6,7 @@ from .severity import Severity
 
 
 @dataclass
-class Finding:
+class ScanFinding:
     title: str
     plugin_id: str  # scanner-native ID used for deduplication
     severity: Severity

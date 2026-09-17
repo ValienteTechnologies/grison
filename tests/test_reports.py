@@ -485,6 +485,34 @@ def test_note_push_dry_run_makes_no_insert_or_file_change(tmp_path: Path) -> Non
     assert any("would push note" in e and "new-idea.md" in e for e in events)
 
 
+def test_note_with_corrupt_frontmatter_is_isolated_not_pushed_as_new(tmp_path: Path) -> None:
+    """Behavior change (deliberate, see grison.remote.repmap.read_local_note): a
+    ``notes/`` file that DOES start with a frontmatter fence but fails to parse
+    (unterminated fence here) used to silently read as ``(None, text)`` — a fresh,
+    unstamped note — which would push it to Ghostwriter as brand new. It must
+    instead be isolated as an error, and every other note in the same report dir
+    must still push normally."""
+    fake = FakeGW()
+    fake.add_report(6, "Acme", {"executive_summary": "<p>s</p>"}, project=_TURKISH_PROJECT)
+    sync_reports(tmp_path, fake)
+
+    ndir = _notes_dir(tmp_path, 6, "acme")
+    ndir.mkdir(parents=True, exist_ok=True)
+    broken = ndir / "broken.md"
+    broken.write_text("---\ngrison:\n  gw: {note_id: null\nno closing fence", encoding="utf-8")
+    good = ndir / "good-idea.md"
+    good.write_text("A good idea\n", encoding="utf-8")
+
+    r = sync_reports(tmp_path, fake)
+
+    assert len(fake.notes_inserted) == 1  # the good note still pushed
+    assert fake.notes_inserted[0]["note"] == "<p>A good idea</p>"
+    assert broken.exists()  # never touched, never silently pushed
+    assert broken.read_text(encoding="utf-8").startswith("---\ngrison:")
+    assert any("broken.md" in e for e in r.errors)
+    assert len(r.notes_pushed) == 1
+
+
 def test_scope_trip_wire_flags_report_but_other_reports_still_sync(tmp_path: Path) -> None:
     no_scope_project = dict(_TURKISH_PROJECT, id=5, scopes=[])
     fake = FakeGW()

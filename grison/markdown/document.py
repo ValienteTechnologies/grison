@@ -8,9 +8,8 @@ content. Round-trip: ``markdown_to_finding(finding_to_markdown(f)) == f``.
 
 from __future__ import annotations
 
-import yaml
-
-from grison.errors import GrisonError
+from grison.markdown import frontmatter as fm
+from grison.markdown.frontmatter import DocumentError
 from grison.model import Finding
 
 # (section header in the document, model field). Fixed order, always all five.
@@ -23,10 +22,6 @@ _SECTIONS: list[tuple[str, str]] = [
 ]
 _HEADER_TO_FIELD = {h: f for h, f in _SECTIONS}
 _BODY_FIELDS = {f for _, f in _SECTIONS}
-
-
-class DocumentError(GrisonError, ValueError):
-    """A markdown document that can't be parsed into a Finding (bad frontmatter/structure)."""
 
 
 def _prune_empty(obj: object) -> object:
@@ -74,38 +69,16 @@ def finding_to_markdown(f: Finding) -> str:
     _strip_state(dumped)
     title = dumped.pop("title")
     bodies = {field: dumped.pop(field, "") or "" for _, field in _SECTIONS}
-    frontmatter = _prune_empty(dumped)
+    meta = _prune_empty(dumped)
 
-    fm_yaml = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
-    parts = ["---", fm_yaml, "---", "", f"# {title}", ""]
+    body_parts = [f"# {title}", ""]
     for header, field in _SECTIONS:
-        parts.append(f"## {header}")
+        body_parts.append(f"## {header}")
         content = bodies[field].strip()
         if content:
-            parts.extend(["", content])
-        parts.append("")
-    return "\n".join(parts).rstrip() + "\n"
-
-
-def _split_frontmatter(text: str) -> tuple[dict, str]:
-    if not text.startswith("---"):
-        raise DocumentError("document has no YAML frontmatter (must start with '---')")
-    # Split on the closing fence: lines[0] is '---', find the next '---' line.
-    lines = text.splitlines()
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            raw = "\n".join(lines[1:i])
-            body = "\n".join(lines[i + 1 :])
-            break
-    else:
-        raise DocumentError("unterminated YAML frontmatter (no closing '---')")
-    try:
-        data = yaml.safe_load(raw) or {}
-    except yaml.YAMLError as e:
-        raise DocumentError(f"invalid YAML frontmatter: {e}") from e
-    if not isinstance(data, dict):
-        raise DocumentError("frontmatter is not a mapping")
-    return data, body
+            body_parts.extend(["", content])
+        body_parts.append("")
+    return fm.dump(meta, "\n".join(body_parts))
 
 
 def _parse_body(body: str) -> tuple[str, dict[str, str]]:
@@ -157,14 +130,14 @@ def markdown_to_finding(text: str, *, tier: str | None = None) -> Finding:
     the sync engine supply the location-derived value for a table-less file it is scanning.
     The merge base and per-image bookkeeping are absent here — :func:`grison.state.hydrate_finding`
     fills them from the state store after parse; ``cvss.score`` recomputes from the vector."""
-    frontmatter, body = _split_frontmatter(text)
+    meta, body = fm.split(text)
     title, sections = _parse_body(body)
 
     unknown = set(sections) - set(_HEADER_TO_FIELD)
     if unknown:
         raise DocumentError(f"unknown section(s): {', '.join(sorted(unknown))}")
 
-    data = dict(frontmatter)
+    data = dict(meta)
     data["title"] = title
     for header, field in _SECTIONS:
         data[field] = sections.get(header, "")
@@ -187,10 +160,10 @@ def extract_gw_identity(text: str) -> tuple[str, int] | None:
     missing/malformed ``grison.gw`` — all return ``None`` rather than raising.
     """
     try:
-        frontmatter, _body = _split_frontmatter(text)
+        meta, _body = fm.split(text)
     except DocumentError:
         return None
-    gw = frontmatter.get("grison")
+    gw = meta.get("grison")
     if not isinstance(gw, dict):
         return None
     gw = gw.get("gw")

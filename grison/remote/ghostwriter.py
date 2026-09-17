@@ -8,12 +8,15 @@ token plus the CF service-token header pair (see :mod:`grison.remote.creds`).
 from __future__ import annotations
 
 import base64
+import time
+from collections.abc import Callable
 from datetime import date
 
 import httpx
 
 from grison.errors import GrisonError
 from grison.remote.creds import Creds
+from grison.remote.http import BaseHttpClient
 
 _FINDING_QUERY = """
 query {
@@ -397,28 +400,44 @@ class GhostwriterError(GrisonError, RuntimeError):
     """Raised on a non-2xx HTTP response or a GraphQL ``errors`` payload."""
 
 
-class GhostwriterClient:
-    """Thin read-only wrapper over Ghostwriter's Hasura GraphQL endpoint."""
+class GhostwriterClient(BaseHttpClient):
+    """Thin wrapper over Ghostwriter's Hasura GraphQL endpoint."""
 
-    def __init__(self, creds: Creds, *, timeout: float = 30.0, transport=None) -> None:
-        headers = {
-            "Authorization": f"Bearer {creds.gw_token}",
-            "Content-Type": "application/json",
-            **creds.cf_headers(),
-        }
-        self._client = httpx.Client(
+    def __init__(
+        self,
+        creds: Creds,
+        *,
+        timeout: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
+        max_attempts: int = 4,
+        base_delay: float = 0.5,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        super().__init__(
+            creds,
             base_url=creds.gw_url,
-            headers=headers,
+            url_setting_name="GRISON_GW_URL",
+            headers={
+                "Authorization": f"Bearer {creds.gw_token}",
+                "Content-Type": "application/json",
+            },
             timeout=timeout,
             transport=transport,
+            max_attempts=max_attempts,
+            base_delay=base_delay,
+            sleep=sleep,
         )
         self._content_type_ids: dict[str, int] | None = None  # {table: content_type_id}, cached
 
-    def _post(self, query: str, variables: dict | None = None) -> dict:
+    def _post(self, query: str, variables: dict | None = None, *, idempotent: bool = False) -> dict:
+        """Every GraphQL operation is an HTTP POST — ``idempotent`` is what
+        actually decides retry eligibility (see :mod:`grison.remote.http`): a
+        *query* call site passes ``idempotent=True``; a *mutation* call site
+        leaves the default, since replaying it could double-apply the write."""
         payload: dict = {"query": query}
         if variables is not None:
             payload["variables"] = variables
-        resp = self._client.post("/v1/graphql", json=payload)
+        resp = self._send("POST", "/v1/graphql", json=payload, idempotent=idempotent)
         if not resp.is_success:
             raise GhostwriterError(
                 f"Ghostwriter request failed: HTTP {resp.status_code}: {resp.text[:200]}"
@@ -430,27 +449,27 @@ class GhostwriterClient:
         return body["data"]
 
     def fetch_findings(self) -> list[dict]:
-        return self._post(_FINDING_QUERY)["finding"]
+        return self._post(_FINDING_QUERY, idempotent=True)["finding"]
 
     def fetch_reported_findings(self) -> list[dict]:
-        return self._post(_REPORTED_FINDING_QUERY)["reportedFinding"]
+        return self._post(_REPORTED_FINDING_QUERY, idempotent=True)["reportedFinding"]
 
     def fetch_evidence(self) -> list[dict]:
-        return self._post(_EVIDENCE_QUERY)["evidence"]
+        return self._post(_EVIDENCE_QUERY, idempotent=True)["evidence"]
 
     def fetch_reports(self) -> list[dict]:
-        return self._post(_REPORT_QUERY)["report"]
+        return self._post(_REPORT_QUERY, idempotent=True)["report"]
 
     def fetch_finding_severities(self) -> list[dict]:
         """``{id, severity, weight}`` rows — the live source of truth checked at sync
         start against grison's hardcoded severity gw_id map (severity/finding-type
         drift tripwire)."""
-        return self._post(_FINDING_SEVERITY_QUERY)["findingSeverity"]
+        return self._post(_FINDING_SEVERITY_QUERY, idempotent=True)["findingSeverity"]
 
     def fetch_finding_types(self) -> list[dict]:
         """``{id, findingType}`` rows — the lookup table's name column is camelCase
         ``findingType`` on the live schema (verified by introspection 2026-07-15)."""
-        return self._post(_FINDING_TYPE_LOOKUP_QUERY)["findingType"]
+        return self._post(_FINDING_TYPE_LOOKUP_QUERY, idempotent=True)["findingType"]
 
     def _resolve_content_types(self) -> dict[str, int]:
         """``{"finding": id, "reportedFinding": id}`` — content-type ids are per-install,
@@ -459,7 +478,7 @@ class GhostwriterClient:
         ``reportfindinglink`` (no underscore — Django's own ``ContentType.model``
         convention), distinct from the ``report_finding_link`` string ``setTags`` wants."""
         if self._content_type_ids is None:
-            rows = self._post(_CONTENT_TYPES_QUERY)["djangoContentType"]
+            rows = self._post(_CONTENT_TYPES_QUERY, idempotent=True)["djangoContentType"]
             by_model = {row["model"]: row["id"] for row in rows}
             mapping: dict[str, int] = {}
             if "finding" in by_model:
@@ -475,7 +494,8 @@ class GhostwriterClient:
         content_types = self._resolve_content_types()
         table_by_ct_id = {ct_id: table for table, ct_id in content_types.items()}
         rows = self._post(
-            _TAGGED_ITEM_QUERY, {"content_type_ids": list(content_types.values())}
+            _TAGGED_ITEM_QUERY, {"content_type_ids": list(content_types.values())},
+            idempotent=True,
         )["taggedItem"]
         tag_map: dict[tuple[str, int], list[str]] = {}
         for row in rows:
@@ -502,7 +522,8 @@ class GhostwriterClient:
         if ct_id is None:
             return []
         rows = self._post(
-            _TAGGED_ITEM_FOR_QUERY, {"content_type_id": ct_id, "object_id": object_id}
+            _TAGGED_ITEM_FOR_QUERY, {"content_type_id": ct_id, "object_id": object_id},
+            idempotent=True,
         )["taggedItem"]
         return [row["tag"]["name"] for row in rows]
 
@@ -514,13 +535,15 @@ class GhostwriterClient:
         """``{username, role, expires}`` for the token's own session — no ``id`` field
         (verified by introspection), so a note push resolves the operator's numeric id
         separately via :meth:`resolve_user_id`."""
-        return self._post(_WHOAMI_QUERY)["whoami"]
+        return self._post(_WHOAMI_QUERY, idempotent=True)["whoami"]
 
     def resolve_user_id(self, username: str) -> int | None:
         """The GW user row id for a username (``None`` if no such user) — used once per
         sync to turn ``whoami()``'s username into the ``operatorId`` a project-note
         insert requires (no session-derived default)."""
-        rows = self._post(_USER_ID_BY_USERNAME_QUERY, {"username": username})["user"]
+        rows = self._post(
+            _USER_ID_BY_USERNAME_QUERY, {"username": username}, idempotent=True
+        )["user"]
         return rows[0]["id"] if rows else None
 
     def insert_project_note(
@@ -538,7 +561,9 @@ class GhostwriterClient:
         return data["insert_projectNote_one"]["id"]
 
     def download_evidence(self, evidence_id: int) -> tuple[str, bytes]:
-        data = self._post(_DOWNLOAD_EVIDENCE_QUERY, {"id": evidence_id})["downloadEvidence"]
+        data = self._post(
+            _DOWNLOAD_EVIDENCE_QUERY, {"id": evidence_id}, idempotent=True
+        )["downloadEvidence"]
         raw = base64.b64decode(data["fileBase64"])
         return data["filename"], raw
 
@@ -612,7 +637,7 @@ class GhostwriterClient:
         name isn't guaranteed to be what actually landed)."""
         if not ids:
             return []
-        return self._post(_EVIDENCE_BY_IDS_QUERY, {"ids": ids})["evidence"]
+        return self._post(_EVIDENCE_BY_IDS_QUERY, {"ids": ids}, idempotent=True)["evidence"]
 
     def delete_evidence(self, evidence_id: int) -> None:
         self._post(_DELETE_EVIDENCE_MUTATION, {"id": evidence_id})
@@ -624,12 +649,3 @@ class GhostwriterClient:
     def delete_reported_finding(self, reported_finding_id: int) -> None:
         """Delete a report finding (used to roll back an insert)."""
         self._post(_DELETE_REPORTED_FINDING_MUTATION, {"id": reported_finding_id})
-
-    def close(self) -> None:
-        self._client.close()
-
-    def __enter__(self) -> GhostwriterClient:
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()

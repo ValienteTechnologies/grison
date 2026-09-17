@@ -30,7 +30,6 @@ BookStack's own revision history is the second rollback layer.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -41,7 +40,8 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from grison import workspace
+from grison import hashing, workspace
+from grison.fsio import atomic_write_text, ensure_private_dir
 from grison.remote import snapshot as _snapshot  # module ref so tests can monkeypatch SNAPSHOT_ROOT
 from grison.remote.bookstack import BookStackError
 from grison.remote.bsmap import (
@@ -215,10 +215,11 @@ class _BSSnapshot:
 
     def persist(self, when: str) -> Path:
         out = _snapshot.SNAPSHOT_ROOT / f"bs-{when}"
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "bs_undo.json").write_text(
+        ensure_private_dir(out)
+        atomic_write_text(
+            out / "bs_undo.json",
             json.dumps([asdict(u) for u in self.undos], indent=2, ensure_ascii=False),
-            encoding="utf-8",
+            private=True,
         )
         return out
 
@@ -319,7 +320,11 @@ _MIRROR_HEADER = "# READ-ONLY mirror — regenerated every sync; edits here are 
 
 
 def _mirror_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    """Prefixed (``sha256:...``) since this module's refactor onto ``grison.hashing``;
+    an entry in ``mirrors.json`` written before that has no prefix — the comparison
+    in :func:`_write_mirror` normalizes it before comparing (see
+    :func:`grison.hashing.normalize`)."""
+    return hashing.digest_text(text)
 
 
 def _load_mirrors(root: Path) -> dict[str, str]:
@@ -335,8 +340,7 @@ def _load_mirrors(root: Path) -> dict[str, str]:
 
 def _save_mirrors(root: Path, mirrors: dict[str, str]) -> None:
     path = workspace.mirrors_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(mirrors, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(path, json.dumps(mirrors, indent=2, sort_keys=True), private=True)
 
 
 def _write_mirror(
@@ -361,7 +365,7 @@ def _write_mirror(
     recorded = mirrors.get(key)
     if path.exists():
         on_disk = path.read_text(encoding="utf-8")
-        if recorded is not None and _mirror_hash(on_disk) != recorded:
+        if recorded is not None and _mirror_hash(on_disk) != hashing.normalize(recorded):
             sidecar = path.with_suffix(".remote.yml")
             wrote = "would write" if dry_run else "wrote"
             msg = (
@@ -372,7 +376,7 @@ def _write_mirror(
             result.errors.append(msg)
             _emit(on_event, f"error {_rel(root, path)}: mirror hand-edited, kept local copy")
             if not dry_run:
-                sidecar.write_text(text, encoding="utf-8")
+                atomic_write_text(sidecar, text)
             return
         if on_disk == text:
             return  # unchanged — nothing to (re)materialize
@@ -380,8 +384,7 @@ def _write_mirror(
     if dry_run:
         _emit(on_event, f"would materialize {_rel(root, path.parent)}")
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    atomic_write_text(path, text)
     mirrors[key] = _mirror_hash(text)
     _emit(on_event, f"materialize {_rel(root, path.parent)}")
 
@@ -789,7 +792,7 @@ def _apply(  # noqa: PLR0913
             return
         stamp(page, now=now, remote_updated_at=page.remote_updated_at,
               remote_revision_count=page.remote_revision_count)
-        path.write_text(page_to_markdown(page), encoding="utf-8")
+        atomic_write_text(path, page_to_markdown(page))
         _persist_page(root, page)
         result.repaired.append(path)
         _emit(on_event, f"repair {_rel(root, path)}")
@@ -798,7 +801,7 @@ def _apply(  # noqa: PLR0913
             result.collisions.append(path)
             _emit(on_event, f"would collision {_rel(root, path)}")
             return
-        path.with_suffix(".remote.md").write_text(page_to_markdown(page), encoding="utf-8")
+        atomic_write_text(path.with_suffix(".remote.md"), page_to_markdown(page))
         result.collisions.append(path)
         _emit(on_event, f"collision {_rel(root, path)} → sidecar written")
     elif action == "pull":
@@ -812,8 +815,7 @@ def _apply(  # noqa: PLR0913
             return
         stamp(page, now=now, remote_updated_at=page.remote_updated_at,
               remote_revision_count=page.remote_revision_count)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(page_to_markdown(page), encoding="utf-8")
+        atomic_write_text(path, page_to_markdown(page))
         _persist_page(root, page)
         if plan.old_path is not None:
             plan.old_path.unlink(missing_ok=True)
@@ -875,8 +877,7 @@ def _apply(  # noqa: PLR0913
             ):
                 fresh_book = books.get(pre.get("book_id"), page.book)
                 fresh = page_from_record(pre, book_slug=fresh_book, chapter_slug=page.chapter)
-                path.with_suffix(".remote.md").write_text(page_to_markdown(fresh),
-                                                           encoding="utf-8")
+                atomic_write_text(path.with_suffix(".remote.md"), page_to_markdown(fresh))
                 result.collisions.append(path)
                 _emit(on_event, f"collision {_rel(root, path)} → name/tags/priority "
                                 "changed on BookStack mid-sync")
@@ -902,7 +903,7 @@ def _apply(  # noqa: PLR0913
             page.chapter_id = pre.get("chapter_id") or 0
         stamp(page, now=now, remote_updated_at=resp.get("updated_at"),
               remote_revision_count=resp.get("revision_count"))
-        path.write_text(page_to_markdown(page), encoding="utf-8")
+        atomic_write_text(path, page_to_markdown(page))
         _persist_page(root, page)
     elif action == "create":
         if _artifact_scan(path, page.body, "", result, root, on_event=on_event):
@@ -947,7 +948,7 @@ def _apply(  # noqa: PLR0913
         page.priority = rec.get("priority")
         stamp(page, now=now, remote_updated_at=rec.get("updated_at"),
               remote_revision_count=rec.get("revision_count"))
-        path.write_text(page_to_markdown(page), encoding="utf-8")
+        atomic_write_text(path, page_to_markdown(page))
         _persist_page(root, page)  # page_id is born above — file and store land together
 
 

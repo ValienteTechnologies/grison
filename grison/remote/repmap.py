@@ -13,13 +13,14 @@ base is the section's markdown, which is a stable fixed point across md→html�
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
+from grison import hashing
+from grison.markdown import frontmatter as fm
 from grison.markdown.converter import html_to_md, md_to_html
 from grison.sinks.file_sink import slugify
 
@@ -47,7 +48,7 @@ class ReportDoc:
 
 
 def section_hash(md: str) -> str:
-    return "sha256:" + hashlib.sha256(md.strip().encode()).hexdigest()
+    return hashing.digest_text(md.strip())
 
 
 def html_section_to_md(html: str, *, on_loss: Callable[[str], None] | None = None) -> str:
@@ -111,12 +112,12 @@ def meta_to_yaml(doc: ReportDoc) -> str:
     ``narrative/``, and section merge bases live in the private state store
     (``.grison/state/report/<id>.json``), keyed by report_id — a git checkout of this
     file can never resurrect a stale base."""
-    fm = {
+    meta = {
         "grison": {"kind": "report", "gw": {"report_id": doc.report_id}},
         "title": doc.title,
         **doc.meta,
     }
-    return yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)
+    return fm.dump_yaml(meta)
 
 
 def read_local_meta(report_dir: Path) -> int | None:
@@ -126,8 +127,8 @@ def read_local_meta(report_dir: Path) -> int | None:
     path = report_dir / REPORT_META
     if not path.exists():
         return None
-    fm = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    gw = (fm.get("grison") or {}).get("gw") or {}
+    meta = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    gw = (meta.get("grison") or {}).get("gw") or {}
     return gw.get("report_id")
 
 
@@ -278,40 +279,32 @@ def note_to_md(note_rec: dict) -> tuple[str, str]:
     slug = slugify(" ".join(words[:6])) if words else "note"
     filename = f"{note_id}-{slug}.md"
 
-    fm: dict = {
+    meta: dict = {
         "grison": {
             "kind": "note",
             "gw": {"note_id": note_id, "project_id": note_rec.get("projectId")},
         },
     }
     if author:
-        fm["author"] = author
+        meta["author"] = author
     if note_rec.get("timestamp"):
-        fm["timestamp"] = note_rec["timestamp"]
-    fm_yaml = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip()
-    content = f"---\n{fm_yaml}\n---\n\n{body}\n" if body else f"---\n{fm_yaml}\n---\n"
+        meta["timestamp"] = note_rec["timestamp"]
+    content = fm.dump(meta, body)
     return filename, content
 
 
 def read_local_note(path: Path) -> tuple[int | None, str]:
     """Parse a ``notes/`` file: returns ``(note_id, body_markdown)``. ``note_id`` is
-    ``None`` when the file has no frontmatter, unparseable frontmatter, or no
-    ``grison.gw.note_id`` — i.e. a fresh, locally-authored note not yet pushed to
-    Ghostwriter (the note-push scan's candidate set)."""
+    ``None`` when the file has no frontmatter at all — a fresh, locally-authored note
+    not yet pushed to Ghostwriter (the note-push scan's candidate set; see the
+    ``CLAUDE.md`` note-authoring convention). A file that DOES start with a
+    frontmatter fence but fails to parse (unterminated fence, invalid YAML,
+    non-mapping frontmatter) raises :class:`~grison.markdown.frontmatter.DocumentError`
+    instead of silently reading as a fresh note — a broken *existing* note must never
+    be pushed to Ghostwriter as if it were brand new. Callers isolate this per file."""
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---"):
         return None, text.strip()
-    lines = text.splitlines()
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            raw = "\n".join(lines[1:i])
-            body = "\n".join(lines[i + 1 :]).strip()
-            try:
-                fm = yaml.safe_load(raw) or {}
-            except yaml.YAMLError:
-                return None, text.strip()
-            if not isinstance(fm, dict):
-                return None, body
-            note_id = ((fm.get("grison") or {}).get("gw") or {}).get("note_id")
-            return note_id, body
-    return None, text.strip()  # unterminated fence — treat the whole file as body
+    meta, body = fm.split(text)
+    note_id = ((meta.get("grison") or {}).get("gw") or {}).get("note_id")
+    return note_id, body.strip()

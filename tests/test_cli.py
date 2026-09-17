@@ -47,7 +47,7 @@ def _rev_count(path: Path) -> str:
 
 
 def _set_fake_ghostwriter_creds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GRISON_GW_URL", "http://gw.test")
+    monkeypatch.setenv("GRISON_GW_URL", "https://gw.test")
     monkeypatch.setenv("GRISON_GW_TOKEN", "tok")
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
@@ -118,7 +118,7 @@ def test_sync_exit_code_reflects_result_errors(
     from grison.remote.sync import SyncResult
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GRISON_GW_URL", "http://gw.test")
+    monkeypatch.setenv("GRISON_GW_URL", "https://gw.test")
     monkeypatch.setenv("GRISON_GW_TOKEN", "tok")
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
@@ -151,7 +151,7 @@ def test_sync_warnings_alone_do_not_flip_exit_code(
     from grison.remote.sync import SyncResult
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GRISON_GW_URL", "http://gw.test")
+    monkeypatch.setenv("GRISON_GW_URL", "https://gw.test")
     monkeypatch.setenv("GRISON_GW_TOKEN", "tok")
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")

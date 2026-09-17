@@ -353,7 +353,9 @@ def test_mirror_first_materialization_has_readonly_header(tmp_path: Path) -> Non
     assert text.startswith("# READ-ONLY mirror")
     data = json.loads(mirrors_path(tmp_path).read_text())
     key = "methodology/library/empty-book/.book.yml"
-    assert data[key] == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    # grison.hashing prefixes every hash it computes (see its module docstring) —
+    # mirrors.json now records "sha256:<hex>", not a bare hex digest.
+    assert data[key] == "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def test_mirror_regenerates_when_untouched(tmp_path: Path) -> None:
@@ -368,6 +370,30 @@ def test_mirror_regenerates_when_untouched(tmp_path: Path) -> None:
     assert "new desc" in mirror.read_text()
     assert not mirror.with_suffix(".remote.yml").exists()
     assert not r.errors
+
+
+def test_mirror_legacy_unprefixed_hash_does_not_false_positive_hand_edit(tmp_path: Path) -> None:
+    """Proof for grison.hashing.normalize(): a mirrors.json entry written before
+    _mirror_hash gained its 'sha256:' prefix is un-prefixed on disk. The mirror
+    itself is untouched, so the next sync must still regenerate it cleanly — not
+    wrongly detect a hand-edit, which is what a raw string compare of an
+    un-prefixed recorded hash against a freshly (prefixed) computed one would do."""
+    fake = FakeBS()
+    fake.books.append({"id": 30, "slug": "empty-book", "name": "Empty Book",
+                       "description": "original"})
+    sync_methodology(tmp_path, fake)
+
+    mpath = mirrors_path(tmp_path)
+    mirrors = json.loads(mpath.read_text())
+    key = "methodology/library/empty-book/.book.yml"
+    assert mirrors[key].startswith("sha256:")
+    mirrors[key] = mirrors[key].removeprefix("sha256:")  # simulate a pre-upgrade entry
+    mpath.write_text(json.dumps(mirrors))
+
+    r = sync_methodology(tmp_path, fake)  # mirror file itself untouched, remote unchanged
+    mirror = tmp_path / "methodology" / "library" / "empty-book" / ".book.yml"
+    assert not mirror.with_suffix(".remote.yml").exists()
+    assert not any("read-only" in e for e in r.errors)
 
 
 def test_mirror_hand_edit_detected_and_preserved(tmp_path: Path) -> None:

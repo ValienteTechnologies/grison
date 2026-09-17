@@ -7,31 +7,46 @@ BookStack's own token auth (see :mod:`grison.remote.creds`).
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
+
 import httpx
 
 from grison.errors import GrisonError
 from grison.remote.creds import Creds
+from grison.remote.http import BaseHttpClient
 
-_LIST_COUNT = 1000
+# BookStack's own documented per-request maximum for a list endpoint's `count` param.
+_LIST_COUNT = 500
 
 
 class BookStackError(GrisonError, RuntimeError):
     """Raised on a non-2xx HTTP response from the BookStack API."""
 
 
-class BookStackClient:
+class BookStackClient(BaseHttpClient):
     """Thin wrapper over BookStack's REST API."""
 
-    def __init__(self, creds: Creds, *, timeout: float = 30.0, transport=None) -> None:
-        headers = {
-            "Authorization": f"Token {creds.bs_token_id}:{creds.bs_token_secret}",
-            **creds.cf_headers(),
-        }
-        self._client = httpx.Client(
+    def __init__(
+        self,
+        creds: Creds,
+        *,
+        timeout: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
+        max_attempts: int = 4,
+        base_delay: float = 0.5,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        super().__init__(
+            creds,
             base_url=creds.bs_url,
-            headers=headers,
+            url_setting_name="GRISON_BS_URL",
+            headers={"Authorization": f"Token {creds.bs_token_id}:{creds.bs_token_secret}"},
             timeout=timeout,
             transport=transport,
+            max_attempts=max_attempts,
+            base_delay=base_delay,
+            sleep=sleep,
         )
 
     def _request(
@@ -41,8 +56,12 @@ class BookStackClient:
         *,
         params: dict | None = None,
         json: dict | None = None,
+        idempotent: bool | None = None,
     ) -> dict | None:
-        resp = self._client.request(method, path, params=params, json=json)
+        """GET/PUT/POST/DELETE all funnel through here. ``idempotent`` defaults to
+        "GET only" (see :mod:`grison.remote.http`) — a PUT/POST/DELETE call site
+        that's provably safe to retry (none are, today) would pass it explicitly."""
+        resp = self._send(method, path, params=params, json=json, idempotent=idempotent)
         if not resp.is_success:
             raise BookStackError(
                 f"BookStack request failed: {method} {path} -> "
@@ -145,12 +164,3 @@ class BookStackClient:
 
     def delete_page(self, page_id: int) -> None:
         self._request("DELETE", f"/api/pages/{page_id}")
-
-    def close(self) -> None:
-        self._client.close()
-
-    def __enter__(self) -> BookStackClient:
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()

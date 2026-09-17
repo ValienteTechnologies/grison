@@ -26,6 +26,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from grison.fsio import atomic_write_text
+from grison.markdown.frontmatter import DocumentError
 from grison.remote.repmap import (
     NARRATIVE_DIR,
     NOTES_DIR,
@@ -266,8 +268,7 @@ def _plan_report(
 
 
 def _write_section(path: Path, body: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body.strip() + "\n" if body.strip() else "", encoding="utf-8")
+    atomic_write_text(path, body.strip() + "\n" if body.strip() else "")
 
 
 def _fetch_report_extra_fields(client: GhostwriterClient, report_id: int) -> dict | None:
@@ -431,8 +432,7 @@ def _apply_report(
         meta_path = rdir / REPORT_META
         text = meta_to_yaml(doc)
         if not meta_path.exists() or meta_path.read_text(encoding="utf-8") != text:
-            meta_path.parent.mkdir(parents=True, exist_ok=True)
-            meta_path.write_text(text, encoding="utf-8")
+            atomic_write_text(meta_path, text)
             result.materialized.append(meta_path)
             _emit(on_event, f"report meta {_rel(root, meta_path)}")
 
@@ -492,8 +492,7 @@ def _sync_project_context(
     if not dry_run:
         text = project_context_to_md(project)
         if not ctx_path.exists() or ctx_path.read_text(encoding="utf-8") != text:
-            ctx_path.parent.mkdir(parents=True, exist_ok=True)
-            ctx_path.write_text(text, encoding="utf-8")
+            atomic_write_text(ctx_path, text)
             result.materialized.append(ctx_path)
             _emit(on_event, f"project context {_rel(root, ctx_path)}")
 
@@ -505,15 +504,21 @@ def _sync_project_context(
             filename, content = note_to_md(note_rec)
             npath = ndir / filename
             if not npath.exists() or npath.read_text(encoding="utf-8") != content:
-                npath.parent.mkdir(parents=True, exist_ok=True)
-                npath.write_text(content, encoding="utf-8")
+                atomic_write_text(npath, content)
                 result.materialized.append(npath)
                 _emit(on_event, f"note {_rel(root, npath)}")
 
     if not ndir.exists():
         return
     for f in sorted(ndir.glob("*.md")):
-        note_id, body = read_local_note(f)
+        try:
+            note_id, body = read_local_note(f)
+        except DocumentError as e:
+            # isolate this file — a corrupt note must never be pushed as if it were
+            # a fresh, unstamped one (see grison.remote.repmap.read_local_note)
+            result.errors.append(f"{f}: {e}")
+            _emit(on_event, f"error {_rel(root, f)}: {e}")
+            continue
         if note_id is not None or not body.strip():
             continue  # already an id-stamped mirror, or an empty file — nothing to push
         if dry_run:
@@ -533,7 +538,7 @@ def _sync_project_context(
         }
         filename, content = note_to_md(note_rec)
         new_path = ndir / filename
-        new_path.write_text(content, encoding="utf-8")
+        atomic_write_text(new_path, content)
         if new_path != f:
             f.unlink()
         result.notes_pushed.append(new_path)

@@ -122,9 +122,11 @@ class LoggedOperation:
 
 @dataclass
 class _Injected:
-    kind: str  # "http500" | "timeout" | "graphql_error"
+    kind: str  # "http500" | "timeout" | "graphql_error" | "http_status"
     op: str | None = None  # only for graphql_error: the root field name to hit
     message: str = ""
+    status: int = 500  # only for http_status: the response code to return (e.g. 429/503)
+    retry_after: str | None = None  # only for http_status: sent as the Retry-After header
 
 
 def _matches_where(row: dict, where: dict | None) -> bool:
@@ -402,11 +404,20 @@ class FakeGhostwriter:
         return httpx.MockTransport(self.handle)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
-        injected = self._pop_injection(kind="http500") or self._pop_injection(kind="timeout")
+        injected = (
+            self._pop_injection(kind="http500")
+            or self._pop_injection(kind="timeout")
+            or self._pop_injection(kind="http_status")
+        )
         if injected is not None and injected.kind == "timeout":
             raise httpx.TimeoutException("fake_gw: injected timeout", request=request)
         if injected is not None and injected.kind == "http500":
             return httpx.Response(500, text="fake_gw: injected internal server error")
+        if injected is not None and injected.kind == "http_status":
+            headers = {"Retry-After": injected.retry_after} if injected.retry_after else {}
+            return httpx.Response(
+                injected.status, text=f"fake_gw: injected {injected.status}", headers=headers
+            )
 
         auth = request.headers.get("authorization", "")
         if auth != f"Bearer {self.token}":
@@ -673,6 +684,15 @@ class FakeGhostwriter:
         being processed."""
         for _ in range(times):
             self._pending.append(_Injected("timeout"))
+
+    def inject_http_status(
+        self, status: int, *, times: int = 1, retry_after: str | None = None
+    ) -> None:
+        """The next ``times`` requests get HTTP ``status`` (e.g. 429 or 503) instead
+        of being processed; ``retry_after``, if given, is sent as the response's
+        ``Retry-After`` header."""
+        for _ in range(times):
+            self._pending.append(_Injected("http_status", status=status, retry_after=retry_after))
 
     def inject_graphql_error(self, operation: str, message: str, *, times: int = 1) -> None:
         """The next ``times`` requests whose root selection is ``operation`` (e.g.

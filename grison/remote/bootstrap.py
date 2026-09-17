@@ -9,10 +9,10 @@ everywhere. ``parse`` is fully offline; ``sync`` additionally requires the creds
 
 from __future__ import annotations
 
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from grison.fsio import atomic_write_text, ensure_private_dir
 from grison.remote.creds import load_settings
 from grison.workspace import bootstrap_tree
 
@@ -116,13 +116,12 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
     created_dirs = bootstrap_tree(root)
 
     grison_dir = root / ".grison"
-    grison_dir.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(grison_dir)
 
     env_path = grison_dir / "env"
     env_created = False
     if not env_path.exists():
-        env_path.write_text(_ENV_TEMPLATE, encoding="utf-8")
-        env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600 — creds are secret
+        atomic_write_text(env_path, _ENV_TEMPLATE, private=True)  # creds are secret
         env_created = True
 
     _ensure_gitignored(root, ".grison/")
@@ -131,7 +130,7 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
     claude_md_path = root / "CLAUDE.md"
     claude_md_created = False
     if settings.claude_md_enabled and not claude_md_path.exists():
-        claude_md_path.write_text(_CLAUDE_MD_TEMPLATE, encoding="utf-8")
+        atomic_write_text(claude_md_path, _CLAUDE_MD_TEMPLATE)  # tracked, not private
         claude_md_created = True
 
     return BootstrapResult(

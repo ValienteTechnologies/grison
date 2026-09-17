@@ -267,11 +267,11 @@ def test_push_base_lands_in_store_not_report_yml_and_reclassifies_clean(tmp_path
 
 
 def _set_gw_and_bs_creds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GRISON_GW_URL", "http://gw.test")
+    monkeypatch.setenv("GRISON_GW_URL", "https://gw.test")
     monkeypatch.setenv("GRISON_GW_TOKEN", "tok")
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
-    monkeypatch.setenv("GRISON_BS_URL", "http://bs.test")
+    monkeypatch.setenv("GRISON_BS_URL", "https://bs.test")
     monkeypatch.setenv("GRISON_BS_TOKEN_ID", "bsid")
     monkeypatch.setenv("GRISON_BS_TOKEN_SECRET", "bssecret")
 

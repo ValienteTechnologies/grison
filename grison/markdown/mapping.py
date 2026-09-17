@@ -25,7 +25,7 @@ from pydantic import ValidationError
 from grison.markdown.converter import ConverterError, html_to_md
 from grison.model import Cvss, Finding, FindingType, Severity
 from grison.model.cwe import is_known_cwe, normalize_cwe
-from grison.scanners.ir import Finding as IRFinding
+from grison.scanners.ir import ScanFinding
 
 # Scanners don't emit a finding type; pick a sensible default by tool.
 _DEFAULT_FINDING_TYPE: dict[str, FindingType] = {
@@ -95,7 +95,7 @@ def _prose_to_md(html: str, field: str, warnings: list[str]) -> str:
 
 
 def ir_to_finding(
-    ir: IRFinding,
+    ir: ScanFinding,
     *,
     finding_type: FindingType,
     tier: str = "instance",
