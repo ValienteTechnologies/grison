@@ -1,0 +1,16 @@
+title: Acme Corp — External Pentest
+project:
+  id: 88
+  client:
+    id: 4
+    name: Acme Corp
+    short_name: acme
+  start_date: '2026-08-01'
+  end_date: '2026-08-14'
+status:
+  complete: false
+  archived: false
+  delivered: false
+dates:
+  creation: '2026-08-01T00:00:00Z'
+  last_update: '2026-08-10T00:00:00Z'

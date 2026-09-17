@@ -1,0 +1,85 @@
+{
+  "records": {
+    "findings/library/weak-tls-config.md": {
+      "id": 101,
+      "kind": "gw.finding"
+    },
+    "findings/reports/14-acme-corp": {
+      "id": 14,
+      "kind": "gw.report"
+    },
+    "findings/reports/14-acme-corp/evidence/bypass-attempt.png": {
+      "id": 303,
+      "kind": "gw.evidence"
+    },
+    "findings/reports/14-acme-corp/evidence/raw-request.txt": {
+      "id": 302,
+      "kind": "gw.evidence"
+    },
+    "findings/reports/14-acme-corp/evidence/xss-alert.png": {
+      "id": 301,
+      "kind": "gw.evidence"
+    },
+    "findings/reports/14-acme-corp/notes/8-client-note.md": {
+      "id": 8,
+      "kind": "gw.projectNote"
+    },
+    "findings/reports/14-acme-corp/reflected-xss.md": {
+      "id": 201,
+      "kind": "gw.reportedFinding"
+    },
+    "findings/reports/14-acme-corp/sql-injection.md": {
+      "id": 202,
+      "kind": "gw.reportedFinding"
+    },
+    "findings/reports/globex": {
+      "id": 27,
+      "kind": "gw.report"
+    },
+    "findings/reports/globex/broken-auth.md": {
+      "id": 401,
+      "kind": "gw.reportedFinding"
+    },
+    "findings/reports/globex/evidence/auth-bypass.png": {
+      "id": 501,
+      "kind": "gw.evidence"
+    },
+    "methodology/library/.shelves/pentest-methodologies.yml": {
+      "id": 51,
+      "kind": "bs.shelf"
+    },
+    "methodology/library/network-testing": {
+      "id": 3,
+      "kind": "bs.book"
+    },
+    "methodology/library/network-testing/images/topology.png": {
+      "id": 41,
+      "kind": "bs.image"
+    },
+    "methodology/library/network-testing/overview.md": {
+      "id": 31,
+      "kind": "bs.page"
+    },
+    "methodology/library/web-application-testing": {
+      "id": 1,
+      "kind": "bs.book"
+    },
+    "methodology/library/web-application-testing/images/recon-diagram.png": {
+      "id": 21,
+      "kind": "bs.image"
+    },
+    "methodology/library/web-application-testing/recon.md": {
+      "id": 11,
+      "kind": "bs.page"
+    },
+    "methodology/library/web-application-testing/reconnaissance": {
+      "id": 2,
+      "kind": "bs.chapter"
+    },
+    "methodology/library/web-application-testing/reconnaissance/subdomain-enum.md": {
+      "id": 12,
+      "kind": "bs.page"
+    }
+  },
+  "version": 1
+}

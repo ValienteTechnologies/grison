@@ -111,3 +111,24 @@ def test_bootstrap_skips_claude_md_when_disabled(
     result = bootstrap_workspace(tmp_path)
     assert not result.claude_md_created
     assert not (tmp_path / "CLAUDE.md").exists()
+
+
+def test_bootstrap_tightens_existing_grison_permissions(tmp_path: Path) -> None:
+    """A hand-created (or copied-in) .grison/ with wide permissions must be tightened
+    on every bootstrap run, not just the first time the directory is created — proves
+    the fix: recursive=True walks and fixes files/dirs that already existed."""
+    grison_dir = tmp_path / ".grison"
+    grison_dir.mkdir(mode=0o755)
+    env = grison_dir / "env"
+    env.write_text("GRISON_GW_TOKEN=preexisting\n")
+    env.chmod(0o664)  # group/other-readable — must not survive bootstrap
+    state_dir = grison_dir / "state"
+    state_dir.mkdir(mode=0o755)
+
+    bootstrap_workspace(tmp_path)
+
+    assert stat.S_IMODE(grison_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(env.stat().st_mode) == 0o600
+    assert stat.S_IMODE(state_dir.stat().st_mode) == 0o700
+    # content untouched — only permissions changed
+    assert env.read_text() == "GRISON_GW_TOKEN=preexisting\n"

@@ -9,6 +9,8 @@ and methodology with BookStack (push/pull/collision derived per record).
 from __future__ import annotations
 
 import fcntl
+import functools
+import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,6 +19,7 @@ from typing import Annotated, TypeVar
 import typer
 
 from grison import gitdrive
+from grison.errors import GrisonError
 from grison.fsio import ensure_private_dir, open_private
 from grison.model import FindingType
 from grison.remote.bookstack import BookStackClient
@@ -30,6 +33,7 @@ from grison.remote.sync import SyncResult
 from grison.remote.sync import sync as run_sync
 from grison.sinks import ParseSummary, run_parse
 from grison.validate import validate_file
+from grison.validator import find_workspace_root, validate_workspace
 from grison.workspace import bootstrap_tree, inbox_dir
 
 app = typer.Typer(
@@ -58,6 +62,30 @@ def _print_version(value: bool) -> None:
         raise typer.Exit()
 
 
+_T2 = TypeVar("_T2")
+
+
+def _guarded(fn: Callable[..., _T2]) -> Callable[..., _T2]:
+    """Wrap a command so any :class:`GrisonError` reaching here prints one plain
+    ``error: …`` line to stderr and exits 1, instead of an uncaught traceback (today
+    e.g. ``GRISON_GW_URL=http://…`` raises ``HttpConfigError`` straight through
+    typer's own rich-traceback handler). A command's own ``typer.Exit`` (its normal
+    exit-code signaling) passes through untouched — this only catches what nothing
+    else already handled."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: object, **kwargs: object) -> _T2:
+        try:
+            return fn(*args, **kwargs)
+        except typer.Exit:
+            raise
+        except GrisonError as e:
+            typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from None
+
+    return wrapper
+
+
 @app.callback()
 def _root(
     version: Annotated[
@@ -70,6 +98,7 @@ def _root(
 
 
 @app.command()
+@_guarded
 def parse(
     paths: Annotated[list[Path], typer.Argument(help="Scanner export file(s) or dir(s).")],
     scanner: Annotated[
@@ -113,6 +142,7 @@ def parse(
 
 
 @app.command()
+@_guarded
 def status(
     paths: Annotated[list[Path], typer.Argument(help="Finding markdown file(s) or dir(s).")],
 ) -> None:
@@ -142,6 +172,69 @@ def status(
 
 
 @app.command()
+@_guarded
+def validate(
+    paths: Annotated[
+        list[Path] | None,
+        typer.Argument(help="Only these files/dirs (plus the cross-file rules they touch) — "
+                       "default: the whole workspace."),
+    ] = None,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Emit a stable, machine-readable JSON array instead."),
+    ] = False,
+    deleted_ok: Annotated[
+        bool,
+        typer.Option("--deleted-ok", help="A given path that no longer exists still validates "
+                     "its containing directory's cross-file rules (for a post-edit hook running "
+                     "after a delete), instead of failing with 'no such path'."),
+    ] = False,
+) -> None:
+    """Validate the workspace against format v2 — offline, no credentials, no network.
+
+    Runs from anywhere inside the workspace (walks up to find ``.grison/``, like
+    ``git`` finds ``.git/``); ``PATHS`` are resolved relative to the current
+    directory, then expressed relative to the workspace root. Quiet on success. One
+    line per failure: ``path:line: RULE-ID message — fix``.
+
+    Exit code: ``0`` the workspace is clean; ``1`` the validator ran fine and found
+    one or more real document problems; ``2`` the validator itself could not run at
+    all (a usage error — including a given path that doesn't exist, is outside the
+    workspace, or isn't a validated location — or an unexpected internal failure) —
+    so a pre-commit hook or CI step can tell "your documents are invalid" (1, fix the
+    documents) apart from "validate itself is broken" (2, fix grison / the
+    invocation), instead of both looking like the same failure. A ``PATHS`` entry
+    that matches nothing NEVER silently exits 0 — see §9 of the workspace-format spec.
+    """
+    try:
+        root = find_workspace_root(Path.cwd())
+        failures = validate_workspace(root, paths=paths, deleted_ok=deleted_ok)
+    except GrisonError as e:
+        typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from None
+    except Exception as e:  # noqa: BLE001 — "could not run" must never look like "passed"
+        typer.secho(f"error: validator failed to run: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from None
+    if json_output:
+        typer.echo(json.dumps(
+            [
+                {
+                    "rule_id": f.rule_id, "path": f.path, "line": f.line,
+                    "message": f.message, "fix": f.fix,
+                }
+                for f in failures
+            ],
+            indent=2,
+        ))
+    else:
+        for f in failures:
+            loc = f"{f.path}:{f.line}" if f.line is not None else f.path
+            typer.echo(f"{loc}: {f.rule_id} {f.message} — {f.fix}")
+    if failures:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+@_guarded
 def sync(
     dry_run: Annotated[
         bool,

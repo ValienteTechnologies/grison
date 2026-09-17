@@ -1,0 +1,16 @@
+title: Globex — Web Application Assessment
+project:
+  id: 91
+  client:
+    id: 7
+    name: Globex Corporation
+    short_name: globex
+  start_date: '2026-08-15'
+  end_date: '2026-08-22'
+status:
+  complete: false
+  archived: false
+  delivered: false
+dates:
+  creation: '2026-08-15T00:00:00Z'
+  last_update: '2026-08-16T00:00:00Z'
