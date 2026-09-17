@@ -41,6 +41,17 @@ class LoggedOperation:
     variables: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class LoggedRequest:
+    """One HTTP request the fake handled (read or write), in call order — used to
+    assert a sync's skip-detail-fetch fast path really skipped a GET, not just that
+    it didn't write anything."""
+
+    method: str
+    path: str
+    params: dict[str, Any]
+
+
 @dataclass
 class _Injected:
     kind: str  # "http500" | "timeout"
@@ -327,6 +338,9 @@ class FakeBookStack:
         self.token_id = token_id
         self.token_secret = token_secret
         self._pending: list[_Injected] = []
+        self.request_log: list[LoggedRequest] = []  # every request, read or write
+        self._call_counts: dict[tuple[str, str], int] = {}
+        self._hooks: dict[tuple[str, str], list[tuple[int, Any]]] = {}
 
     @property
     def transport(self) -> httpx.MockTransport:
@@ -335,6 +349,17 @@ class FakeBookStack:
     @property
     def operation_log(self) -> list[LoggedOperation]:
         return self.store.operation_log
+
+    def on_request(
+        self, method: str, path: str, callback: Any, *, call_number: int = 1
+    ) -> None:
+        """Run ``callback()`` immediately before the ``call_number``-th request whose
+        method equals ``method`` and whose path fullmatches the ``path`` regex is
+        routed — for simulating a concurrent BookStack edit (a page flipping to
+        wysiwyg, a rename/retag/reprioritize) landing between two calls within the
+        same sync run (mirrors ``tests/test_methodology_guards.py``'s
+        ``_mutate_after_first_fetch``, generalized to any method/path)."""
+        self._hooks.setdefault((method.upper(), path), []).append((call_number, callback))
 
     def inject_http_500(
         self, times: int = 1, *, method: str | None = None, path: str | None = None
@@ -385,6 +410,17 @@ class FakeBookStack:
         method = request.method
         path = request.url.path
         params = dict(request.url.params)
+
+        for (hook_method, hook_path), hooks in self._hooks.items():
+            if hook_method != method or not re.fullmatch(hook_path, path):
+                continue
+            key = (hook_method, hook_path)
+            count = self._call_counts[key] = self._call_counts.get(key, 0) + 1
+            for call_number, callback in hooks:
+                if call_number == count:
+                    callback()
+
+        self.request_log.append(LoggedRequest(method, path, dict(params)))
         try:
             return self._route(method, path, params, request)
         except BookStackFakeError as e:

@@ -376,6 +376,24 @@ class FakeGhostwriter:
         self.token = token
         self._schema = load_schema()
         self._pending: list[_Injected] = []
+        self.request_log: list[LoggedOperation] = []  # every operation, query or mutation
+        self._call_counts: dict[str, int] = {}
+        self._hooks: dict[str, list[tuple[int, Any]]] = {}
+
+    def on_request(self, operation: str, callback: Any, *, call_number: int = 1) -> None:
+        """Run ``callback()`` immediately before ``operation``'s ``call_number``-th
+        invocation this fake's lifetime is resolved — for simulating a concurrent
+        remote edit landing between two calls within the same sync run (e.g. between
+        the top-of-run ``fetch_reports()`` snapshot and a report's own pre-push
+        refetch). Mirrors the project's own ``FakeGW.on_fetch`` pattern used in
+        ``tests/test_reports_guards.py``, generalized to any operation."""
+        self._hooks.setdefault(operation, []).append((call_number, callback))
+
+    def call_count(self, operation: str) -> int:
+        """How many times ``operation`` (a root field name, e.g. ``"report"``) has
+        been resolved so far — the baseline :meth:`on_request` callers use to target
+        a call relative to "now" instead of hardcoding an absolute lifetime count."""
+        return self._call_counts.get(operation, 0)
 
     # --- transport -------------------------------------------------------------
 
@@ -421,8 +439,14 @@ class FakeGhostwriter:
                 200, json={"errors": [{"message": graphql_error_injection.message}]}
             )
 
-        if is_mutation and root_field is not None:
-            self.store._log(root_field, variables)
+        if root_field is not None:
+            count = self._call_counts[root_field] = self._call_counts.get(root_field, 0) + 1
+            for call_number, callback in self._hooks.get(root_field, []):
+                if call_number == count:
+                    callback()
+            self.request_log.append(LoggedOperation(root_field, dict(variables)))
+            if is_mutation:
+                self.store._log(root_field, variables)
 
         result = execute_sync(
             self._schema,

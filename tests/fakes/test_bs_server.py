@@ -232,3 +232,32 @@ def test_fidelity_book_list_row_field_set_matches_lab_capture() -> None:
     bs.store.seed_book(name="x")  # only the field SET is being compared, not values
     got = _client(bs).fetch_books()[0]
     assert set(got) == set(sample)
+
+
+def test_on_request_hook_fires_before_the_nth_matching_request_is_routed() -> None:
+    bs = FakeBookStack()
+    book = bs.store.seed_book(name="Book")
+    page = bs.store.seed_page(book_id=book["id"], name="Page")
+    c = _client(bs)
+
+    def mutate() -> None:
+        bs.store.page(page["id"])["name"] = "Mutated"
+
+    bs.on_request("GET", r"/api/pages/\d+", mutate, call_number=2)
+    first = c.fetch_page(page["id"])["name"]
+    second = c.fetch_page(page["id"])["name"]
+
+    assert first == "Page"
+    assert second == "Mutated"
+
+
+def test_request_log_records_reads_and_writes() -> None:
+    bs = FakeBookStack()
+    book = bs.store.seed_book(name="Book")
+    c = _client(bs)
+    c.fetch_books()
+    c.create_page(name="X", markdown="x", book_id=book["id"])
+
+    kinds = [(r.method, r.path) for r in bs.request_log]
+    assert ("GET", "/api/books") in kinds
+    assert ("POST", "/api/pages") in kinds

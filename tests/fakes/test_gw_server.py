@@ -282,3 +282,33 @@ def test_operation_log_records_mutations_in_order_with_variables() -> None:
     names = [op.name for op in gw.operation_log]
     assert names == ["insert_finding_one", "setTags"]
     assert gw.operation_log[1].variables == {"id": 1000, "model": "finding", "tags": ["x"]}
+
+
+def test_on_request_hook_fires_before_the_nth_call_is_resolved() -> None:
+    gw = FakeGhostwriter()
+    gw.store.seed_report(id=1, title="R")
+    c = _client(gw)
+
+    def mutate() -> None:
+        gw.store.reports[0]["title"] = "Mutated"
+
+    gw.on_request("report", mutate, call_number=2)
+    first = c.fetch_reports()[0]["title"]
+    second = c.fetch_reports()[0]["title"]
+
+    assert first == "R"  # untouched before the hook's target call
+    assert second == "Mutated"  # mutated immediately before the 2nd call resolved
+
+
+def test_request_log_records_every_operation_not_just_mutations() -> None:
+    gw = FakeGhostwriter()
+    gw.store.seed_finding(id=1)
+    c = _client(gw)
+    c.fetch_findings()
+    c.set_tags(1, "finding", ["x"])
+
+    names = [r.name for r in gw.request_log]
+    assert names == ["finding", "setTags"]
+    assert gw.call_count("finding") == 1
+    assert gw.call_count("setTags") == 1
+    assert gw.call_count("nonexistent-op") == 0

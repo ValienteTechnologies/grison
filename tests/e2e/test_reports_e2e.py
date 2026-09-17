@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 REPORT_SCOPES = [{"name": "Internal range", "scope": "10.0.0.0/24", "description": "",
                    "disallowed": False, "requiresCaution": False}]
 
@@ -291,3 +293,438 @@ def test_malformed_local_file_report_isolated_from_other_reports(run_grison, gw_
 
     assert (_rdir(8, "good-report") / "narrative" / "executive_summary.md").exists()
     assert "could not resolve ghostwriter user id" in result.output.lower()
+
+
+# --- narrative: sections appearing/disappearing, headings -----------------------
+
+
+def test_new_section_appears_remotely_on_second_sync(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["extraFields"]["methodology"] = "<p>Newly defined section.</p>"
+
+    result = run_grison("sync")
+
+    assert "reports: pull 1, push 0  (1 clean, 0 repaired)" in result.output
+    new_section = _rdir(7, "report-a") / "narrative" / "methodology.md"
+    assert new_section.read_text(encoding="utf-8").strip() == "Newly defined section."
+
+
+def test_section_removed_remotely_kept_locally_persists_across_two_syncs(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A",
+        extraFields={"executive_summary": "<p>s</p>", "methodology": "<p>m</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    del report["extraFields"]["methodology"]
+    meth_section = _rdir(7, "report-a") / "narrative" / "methodology.md"
+
+    r1 = run_grison("sync")
+    assert "remote section gone — kept locally" in r1.output
+    assert meth_section.read_text(encoding="utf-8").strip() == "m"
+
+    r2 = run_grison("sync")  # a second consecutive sync — must not degrade to "unknown field"
+    assert "remote section gone — kept locally" in r2.output
+    assert "unknown report field" not in r2.output
+
+
+def test_section_deleted_locally_is_silently_repulled(run_grison, gw_server):
+    """Current behavior, no delete-sync feature for narrative sections either
+    (mirrors the same "deleting a tracked local file doesn't delete anything remote"
+    doctrine as findings evidence and methodology pages): the file just comes back."""
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={"executive_summary": "<p>s</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    section = _rdir(7, "report-a") / "narrative" / "executive_summary.md"
+    section.unlink()
+
+    result = run_grison("sync")
+
+    assert "reports: pull 1, push 0" in result.output
+    assert section.exists()
+
+
+def test_heading_levels_round_trip_pull_and_push(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A",
+        extraFields={"executive_summary": "<h2>Overview</h2><h3>Detail</h3><p>Body.</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    section = _rdir(7, "report-a") / "narrative" / "executive_summary.md"
+    pulled = section.read_text(encoding="utf-8")
+    assert "## Overview" in pulled
+    assert "### Detail" in pulled
+
+    section.write_text("## New Heading\n\nNew body.\n", encoding="utf-8")
+    run_grison("sync")
+
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    assert "<h2>New Heading</h2>" in report["extraFields"]["executive_summary"]
+
+
+# --- project.md / .report.yml: regeneration + hand-edit handling ----------------
+
+
+def test_project_md_regenerates_when_remote_project_data_changes(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={},
+        project={"codename": "OP-OLD", "scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    ctx = _rdir(7, "report-a") / "project.md"
+    assert "OP-OLD" in ctx.read_text(encoding="utf-8")
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["project"]["codename"] = "OP-NEW"
+
+    run_grison("sync")
+
+    assert "OP-NEW" in ctx.read_text(encoding="utf-8")
+
+
+def test_project_md_hand_edit_is_silently_overwritten_today(run_grison, gw_server):
+    """Current behavior — project.md is a plain "regenerate if different" mirror with
+    no hand-edit detection (unlike methodology's book/chapter mirrors, which DO detect
+    and preserve a hand-edit via a sidecar). D11/validator work is what turns this into
+    a loud validation failure instead of a silent overwrite; see the strict-xfail twin
+    below for the decided behavior."""
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={},
+        project={"codename": "OP-A", "scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    ctx = _rdir(7, "report-a") / "project.md"
+    ctx.write_text(ctx.read_text(encoding="utf-8") + "\n\nHand-added note.\n",
+                    encoding="utf-8")
+
+    run_grison("sync")  # remote project data hasn't changed at all
+
+    assert "Hand-added note." not in ctx.read_text(encoding="utf-8")  # silently clobbered
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="D11/engine: read-only regenerated mirrors must detect a hand-edit and "
+    "refuse (validation failure), not silently overwrite it — project.md/.report.yml "
+    "currently have no hand-edit detection at all, unlike methodology's book/chapter "
+    "mirrors",
+)
+def test_project_md_hand_edit_is_rejected_by_validation_once_decided(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={},
+        project={"codename": "OP-A", "scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    ctx = _rdir(7, "report-a") / "project.md"
+    ctx.write_text(ctx.read_text(encoding="utf-8") + "\n\nHand-added note.\n",
+                    encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert result.exit_code != 0
+    assert "Hand-added note." in ctx.read_text(encoding="utf-8")  # never clobbered
+
+
+def test_report_yml_hand_edit_is_silently_overwritten_today(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    meta = _rdir(7, "report-a") / ".report.yml"
+    edited = meta.read_text(encoding="utf-8").replace("title: Report A", "title: HAND-EDITED")
+    meta.write_text(edited, encoding="utf-8")
+
+    run_grison("sync")
+
+    assert "HAND-EDITED" not in meta.read_text(encoding="utf-8")  # silently clobbered
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="D11/engine: same decided hand-edit-detection behavior as project.md above, "
+    "applied to .report.yml",
+)
+def test_report_yml_hand_edit_is_rejected_by_validation_once_decided(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    meta = _rdir(7, "report-a") / ".report.yml"
+    edited = meta.read_text(encoding="utf-8").replace("title: Report A", "title: HAND-EDITED")
+    meta.write_text(edited, encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert result.exit_code != 0
+    assert "HAND-EDITED" in meta.read_text(encoding="utf-8")
+
+
+# --- notes: never updated/deleted, a remote edit produces an orphaned extra mirror --
+
+
+def test_existing_note_mirror_is_never_updated_when_the_remote_note_is_edited(
+    run_grison, gw_server
+):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={},
+        project={
+            "id": 55, "scopes": REPORT_SCOPES,
+            "comments": [{"id": 10, "note": "<p>Original text</p>", "timestamp": "2026-01-02",
+                          "operatorId": 1, "user": {"name": "Lab Admin", "username": "lab"}}],
+        },
+    )
+    run_grison("sync")
+    ndir = _rdir(7, "report-a") / "notes"
+    original_files = sorted(ndir.glob("*.md"))
+    assert len(original_files) == 1
+    original_content = original_files[0].read_text(encoding="utf-8")
+    assert "Original text" in original_content
+
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["project"]["comments"][0]["note"] = "<p>Edited remotely</p>"
+    run_grison("sync")
+
+    after_files = sorted(ndir.glob("*.md"))
+    assert len(after_files) == 2  # the edit produced a NEW mirror, old one untouched
+    assert original_files[0] in after_files
+    assert original_files[0].read_text(encoding="utf-8") == original_content  # never updated
+    new_file = [f for f in after_files if f != original_files[0]][0]
+    assert "Edited remotely" in new_file.read_text(encoding="utf-8")
+
+
+# --- missing-scope lint does not block a sibling report -------------------------
+
+
+def test_missing_scope_lint_does_not_block_a_sibling_report(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=5, title="No Scope", extraFields={"executive_summary": "<p>a</p>"},
+        project={"codename": "OP-NOSCOPE", "scopes": []},
+    )
+    gw_server.store.seed_report(
+        id=6, title="Has Scope", extraFields={"executive_summary": "<p>b</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+
+    result = run_grison("sync")
+
+    assert "report 5 (OP-NOSCOPE): project has no scope defined" in result.output
+    assert (_rdir(5, "no-scope") / "narrative" / "executive_summary.md").exists()
+    assert (_rdir(6, "has-scope") / "narrative" / "executive_summary.md").exists()
+
+
+# --- stale-push guard (_guard_stale_push), via the fake's request hook ----------
+
+
+def test_stale_push_guard_aborts_push_as_collision_on_concurrent_edit(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A",
+        extraFields={"executive_summary": "<p>old summary</p>", "methodology": "<p>m1</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    es = _rdir(7, "report-a") / "narrative" / "executive_summary.md"
+    meth = _rdir(7, "report-a") / "narrative" / "methodology.md"
+    es.write_text("new summary\n", encoding="utf-8")  # local edit, this section alone would push
+
+    def concurrent_edit() -> None:
+        report = next(r for r in gw_server.store.reports if r["id"] == 7)
+        report["extraFields"]["methodology"] = "<p>m2 concurrent</p>"
+
+    # The guard's pre-push refetch is the 3rd "report" call THIS sync makes
+    # (findings phase's own fetch_reports, this phase's top-of-run snapshot, then
+    # the guard's refetch) — targeted relative to the baseline already spent by
+    # the first sync above, rather than a hardcoded absolute count.
+    baseline = gw_server.call_count("report")
+    gw_server.on_request("report", concurrent_edit, call_number=baseline + 3)
+
+    result = run_grison("sync")
+
+    assert "push withheld" in result.output
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    assert report["extraFields"]["executive_summary"] == "<p>old summary</p>"  # withheld
+    assert es.read_text(encoding="utf-8").strip() == "new summary"  # local edit survives, unsent
+    assert "collision" in result.output
+    assert meth.with_name("methodology.remote.md").read_text(encoding="utf-8").strip() \
+        == "m2 concurrent"
+
+
+def test_stale_push_guard_withholds_push_when_report_vanishes_mid_run(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={"executive_summary": "<p>old</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    es = _rdir(7, "report-a") / "narrative" / "executive_summary.md"
+    es.write_text("new\n", encoding="utf-8")
+
+    def vanish() -> None:
+        gw_server.store.reports[:] = [r for r in gw_server.store.reports if r["id"] != 7]
+
+    baseline = gw_server.call_count("report")  # see call-count note above
+    gw_server.on_request("report", vanish, call_number=baseline + 3)
+
+    result = run_grison("sync")
+
+    assert "no longer exists remotely" in result.output
+
+
+# --- closing gaps vs. tests/test_reports.py / test_reports_guards.py -----------
+
+
+def test_unknown_local_narrative_key_is_skipped_not_pushed(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={"executive_summary": "<p>s</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    rogue = _rdir(7, "report-a") / "narrative" / "made_up_section.md"
+    rogue.write_text("invented\n", encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert "unknown report field" in result.output
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    assert "made_up_section" not in report["extraFields"]  # never created remotely
+
+
+def test_pull_surfaces_a_dropped_styling_construct_as_a_warning_once(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A",
+        extraFields={
+            "executive_summary": (
+                '<p><span data-color="#ff0000" style="color: #ff0000;">urgent</span></p>'
+            ),
+        },
+        project={"scopes": REPORT_SCOPES},
+    )
+    r1 = run_grison("sync")
+    assert "styling span dropped" in r1.output
+
+    r2 = run_grison("sync")  # nothing changed — must not re-warn every routine sync
+    assert "styling span dropped" not in r2.output
+
+
+def test_project_md_renders_excluded_and_caution_scope_flags(run_grison, gw_server):
+    scopes = [
+        {"name": "Internal", "scope": "10.0.0.0/8", "description": "", "disallowed": False,
+         "requiresCaution": True},
+        {"name": "Excluded hosts", "scope": "10.9.9.9", "description": "", "disallowed": True,
+         "requiresCaution": False},
+    ]
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": scopes},
+    )
+
+    run_grison("sync")
+
+    text = (_rdir(7, "report-a") / "project.md").read_text(encoding="utf-8")
+    assert "### Internal (CAUTION)" in text
+    assert "### Excluded hosts (EXCLUDED)" in text
+
+
+def test_note_push_dry_run_inserts_nothing_and_leaves_the_file_untouched(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"id": 55, "scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    notes_dir = _rdir(7, "report-a") / "notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    new_note = notes_dir / "idea.md"
+    new_note.write_text("A dry-run idea\n", encoding="utf-8")
+
+    result = run_grison("sync", "--dry-run")
+
+    assert "would push note" in result.output
+    assert gw_server.store.project_notes == []
+    assert new_note.read_text(encoding="utf-8") == "A dry-run idea\n"
+
+
+def test_bad_narrative_html_is_isolated_other_reports_still_sync(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=5, title="Broken", extraFields={"scope_text": "<table><tr><td>x</td></tr></table>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_report(
+        id=6, title="Good", extraFields={"executive_summary": "<p>fine</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+
+    result = run_grison("sync")
+
+    assert "5" in result.output
+    good = _rdir(6, "good") / "narrative" / "executive_summary.md"
+    assert good.exists()
+    assert not list((Path.cwd() / "findings" / "reports").glob("5-*"))  # never materialized
+
+
+def test_push_merges_over_a_fresh_fetch_not_the_stale_top_of_run_snapshot(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={"executive_summary": "<p>old</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    es = _rdir(7, "report-a") / "narrative" / "executive_summary.md"
+    es.write_text("new\n", encoding="utf-8")
+
+    def add_brand_new_field() -> None:
+        report = next(r for r in gw_server.store.reports if r["id"] == 7)
+        report["extraFields"]["new_field"] = "<p>brand new</p>"
+
+    baseline = gw_server.call_count("report")
+    gw_server.on_request("report", add_brand_new_field, call_number=baseline + 3)
+
+    result = run_grison("sync")
+
+    # the merge happens silently inside the single write — new_field never appears as
+    # its own "pull" (it's merged over, not reconciled as a section of its own yet)
+    assert "reports: pull 0, push 1" in result.output
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    assert report["extraFields"]["executive_summary"] == "<p>new</p>"
+    assert report["extraFields"]["new_field"] == "<p>brand new</p>"  # never wiped by the push
+
+
+def test_removed_remotely_marker_clears_once_the_local_file_is_deleted(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A",
+        extraFields={"executive_summary": "<p>v1</p>", "methodology": "<p>m</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    meth = _rdir(7, "report-a") / "narrative" / "methodology.md"
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    del report["extraFields"]["methodology"]
+    run_grison("sync")
+    assert "remote section gone" in run_grison("sync").output
+
+    meth.unlink()
+    result = run_grison("sync")
+
+    assert "remote section gone" not in result.output
+
+
+def test_collision_persists_unresolved_across_a_second_sync(run_grison, gw_server):
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={"executive_summary": "<p>base</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+    run_grison("sync")
+    es = _rdir(7, "report-a") / "narrative" / "executive_summary.md"
+    es.write_text("LOCAL\n", encoding="utf-8")
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["extraFields"]["executive_summary"] = "<p>REMOTE</p>"
+    run_grison("sync")  # first collision
+
+    result = run_grison("sync")  # still unresolved — must keep surfacing, not silently drop it
+
+    assert "collision" in result.output
+    assert es.read_text(encoding="utf-8") == "LOCAL\n"
+    assert es.with_name("executive_summary.remote.md").read_text(encoding="utf-8").strip() \
+        == "REMOTE"
