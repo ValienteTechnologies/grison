@@ -63,8 +63,13 @@ def test_exit_code_is_always_1_today_but_each_failure_class_reports_honestly(
         page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
         run_grison("sync")
         path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-        path.write_text(path.read_text(encoding="utf-8") + "\n\nlocal change", encoding="utf-8")
-        bs_server.store.page(page["id"])["markdown"] = "# N\n\nremote change"
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\nlocal change\n", encoding="utf-8"
+        )
+        # a real BookStack write bumps updated_at/revision_count too (see
+        # BSStore.edit_page's own docstring for why a bare dict mutation would not
+        # be detected by the skip-detail-fetch fast path)
+        bs_server.store.edit_page(page["id"], markdown="# N\n\nremote change")
         marker = "collision"
     elif case_name == "reports_scope_failure":
         gw_server.store.seed_report(
@@ -73,13 +78,20 @@ def test_exit_code_is_always_1_today_but_each_failure_class_reports_honestly(
         )
         marker = "no scope defined"
     else:
+        # the engine's change guard (ENGINE.md) covers bulk PULLs too, unlike the old
+        # module (which only ever guarded push/create) — so 6 brand-new remote pages
+        # pulled in ONE sync would itself trip the guard and withhold the pull. Seed
+        # and pull in two batches (5, then 1 more) so every page actually lands on
+        # disk before the test edits all 6 locally to trip the PUSH side instead.
         book = bs_server.store.seed_book(name="Playbook")
-        for i in range(6):
+        for i in range(5):
             bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"# {i}")
+        run_grison("sync")
+        bs_server.store.seed_page(book_id=book["id"], name="Page 5", markdown="# 5")
         run_grison("sync")
         for i in range(6):
             p = Path.cwd() / "methodology" / "library" / "playbook" / f"page-{i}.md"
-            p.write_text(p.read_text(encoding="utf-8") + "\n\nedit", encoding="utf-8")
+            p.write_text(p.read_text(encoding="utf-8") + "\nedit\n", encoding="utf-8")
         marker = "MASS-CHANGE GUARD"
 
     result = run_grison("sync")
@@ -89,8 +101,11 @@ def test_exit_code_is_always_1_today_but_each_failure_class_reports_honestly(
 
 
 def test_a_lone_skip_does_not_by_itself_change_the_exit_code(run_grison, bs_server) -> None:
-    """A skip (wysiwyg page, orphaned record, …) is not, on its own, a failure —
-    it doesn't appear in any of the three `bad` predicates transcribed above."""
+    """A skip (wysiwyg page, orphaned record, …) is not, on its own, a failure — SKIP
+    is not in ``grison.engine.model.PROBLEM_OUTCOMES`` (tests changed on purpose: the
+    wiki phase's own summary line is now the engine's ``wiki (bs.page): ...`` counts
+    line, not the old ``methodology: pull/push/create (... clean, ... repaired)`` — see
+    ``grison.cli._print_wiki_summary``)."""
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(
         book_id=book["id"], name="WYSIWYG", editor="wysiwyg", markdown="",
@@ -100,10 +115,11 @@ def test_a_lone_skip_does_not_by_itself_change_the_exit_code(run_grison, bs_serv
     result = run_grison("sync")
 
     assert "wysiwyg" in result.output.lower()
-    # methodology's own line shows nothing blocked — 0 collisions/drift/artifacts, and
-    # methodology never appears in phase_errors; only the ever-present findings-phase
-    # break makes the overall exit code 1 (see the module note above).
-    assert "methodology: pull 0, push 0, create 0  (0 clean, 0 repaired)" in result.output
+    # the wiki phase's own summary shows nothing blocked — a lone skip, no collision/
+    # invalid/failed/withheld; only the ever-present findings-phase break (the
+    # evidence-query production bug tracked in test_findings_e2e.py) makes the
+    # overall exit code 1 (see the module note above).
+    assert "wiki (bs.page): skip 1" in result.output
 
 
 # ---------------------------------------------------------------------------

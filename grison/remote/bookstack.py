@@ -97,6 +97,33 @@ class BookStackClient(BaseHttpClient):
     def fetch_shelf(self, shelf_id: int) -> dict:
         return self._request("GET", f"/api/shelves/{shelf_id}")
 
+    def fetch_book(self, book_id: int) -> dict:
+        return self._request("GET", f"/api/books/{book_id}")
+
+    def create_book(self, *, name: str, description: str = "") -> dict:
+        body: dict = {"name": name}
+        if description:
+            body["description"] = description
+        return self._request("POST", "/api/books", json=body)
+
+    def fetch_chapter(self, chapter_id: int) -> dict:
+        return self._request("GET", f"/api/chapters/{chapter_id}")
+
+    def create_chapter(self, *, book_id: int, name: str, description: str = "") -> dict:
+        body: dict = {"book_id": book_id, "name": name}
+        if description:
+            body["description"] = description
+        return self._request("POST", "/api/chapters", json=body)
+
+    def delete_chapter(self, chapter_id: int) -> None:
+        self._request("DELETE", f"/api/chapters/{chapter_id}")
+
+    def delete_book(self, book_id: int) -> None:
+        self._request("DELETE", f"/api/books/{book_id}")
+
+    def fetch_recycle_bin(self) -> list[dict]:
+        return self._list("/api/recycle-bin")
+
     def fetch_pages(self) -> list[dict]:
         return self._list("/api/pages")
 

@@ -3,8 +3,11 @@
 The golden-value tests below reconstruct the pre-refactor formula independently
 (inline ``json.dumps``/``hashlib``, never calling into ``grison.hashing`` itself) and
 assert it against the real call sites' live output — the proof that routing
-``gwmap.content_hash``/``bsmap.bs_content_hash``/``repmap.section_hash`` through
-``grison.hashing`` did not change a single persisted byte.
+``gwmap.content_hash``/``repmap.section_hash`` through ``grison.hashing`` did not
+change a single persisted byte. (``bsmap.bs_content_hash``'s own golden test was
+removed with ``grison/remote/bsmap.py`` — the wiki moved onto the sync engine, whose
+own state layer always writes fresh ``grison.hashing.digest`` values, so there is no
+v1-persisted byte left to stay compatible with.)
 """
 
 from __future__ import annotations
@@ -14,7 +17,6 @@ import json
 
 from grison import hashing
 from grison.model.finding import Cvss, EvidenceGwRef, EvidenceItem, Finding, GrisonMeta, GwRef
-from grison.remote.bsmap import MethPage, bs_content_hash
 from grison.remote.gwmap import content_hash, evidence_meta_hash
 from grison.remote.repmap import section_hash
 
@@ -107,23 +109,6 @@ def test_gwmap_content_hash_matches_pre_refactor_formula() -> None:
         "evidence": [],
     }
     assert content_hash(f) == _legacy_dict_hash(expected_payload)
-
-
-def test_bsmap_bs_content_hash_matches_pre_refactor_formula() -> None:
-    page = MethPage(
-        page_id=5, book_id=1, book="methodology", title="Recon",
-        body="# Recon\n\nsteps", chapter="network", priority=3,
-        tags=[{"name": "phase", "value": "1"}],
-    )
-    expected_payload = {
-        "title": page.title,
-        "book": page.book,
-        "chapter": page.chapter or "",
-        "priority": page.priority,
-        "tags": page.tags,
-        "body": page.body,
-    }
-    assert bs_content_hash(page) == _legacy_dict_hash(expected_payload)
 
 
 def test_repmap_section_hash_matches_pre_refactor_formula() -> None:

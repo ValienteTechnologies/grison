@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from grison import manifest as manifest_mod
 from grison.remote.bootstrap import bootstrap_workspace
 from grison.remote.creds import MissingCreds, load
 
@@ -65,23 +66,35 @@ def test_half_set_cf_pair_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_bootstrap_scaffolds_tree_env_and_gitignore(tmp_path: Path) -> None:
+    # tests changed on purpose (workspace-format v2, BRIEF "Workspace format v2 —
+    # layout and ownership": ".gitignore must NOT ignore `.grison/` wholesale (the v1
+    # scaffold did; the migration rewrites that line)") — a FRESH bootstrap now writes
+    # format v2 straight away: .grison/.gitignore is the private-file allow-list, the
+    # workspace root's own .gitignore is untouched by bootstrap, and manifest.yml/
+    # index.json (both tracked) exist from the first run.
     result = bootstrap_workspace(tmp_path)
     assert (tmp_path / "findings" / "library").is_dir()
     assert (tmp_path / "methodology" / "checklists").is_dir()
     env = tmp_path / ".grison" / "env"
     assert env.exists() and result.env_created
     assert stat.S_IMODE(env.stat().st_mode) == 0o600  # creds are secret
-    assert ".grison/" in (tmp_path / ".gitignore").read_text()
+    assert not (tmp_path / ".gitignore").exists()  # bootstrap no longer touches it
+    grison_gitignore = (tmp_path / ".grison" / ".gitignore").read_text()
+    assert "!manifest.yml" in grison_gitignore and "!index.json" in grison_gitignore
+    assert manifest_mod.read(tmp_path).format == manifest_mod.CURRENT_FORMAT
+    assert (tmp_path / ".grison" / "index.json").exists()
 
 
 def test_bootstrap_is_idempotent(tmp_path: Path) -> None:
     bootstrap_workspace(tmp_path)
     (tmp_path / ".grison" / "env").write_text("GRISON_GW_TOKEN=filled\n")  # user filled it
+    (tmp_path / ".grison" / "index.json").write_text('{"version": 1, "records": {}}\n')
     second = bootstrap_workspace(tmp_path)
     assert not second.env_created  # template not overwritten
     assert (tmp_path / ".grison" / "env").read_text() == "GRISON_GW_TOKEN=filled\n"
-    # gitignore entry not duplicated
-    assert (tmp_path / ".gitignore").read_text().count(".grison/") == 1
+    # manifest/index from the first run are not clobbered by a second bootstrap
+    assert manifest_mod.read(tmp_path).format == manifest_mod.CURRENT_FORMAT
+    assert (tmp_path / ".grison" / "index.json").read_text() == '{"version": 1, "records": {}}\n'
 
 
 def test_bootstrap_scaffolds_claude_md_by_default(

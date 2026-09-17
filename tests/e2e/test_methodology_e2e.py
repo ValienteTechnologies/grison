@@ -1,16 +1,69 @@
-"""End-to-end methodology (BookStack) sync scenarios — CLI + on-disk files +
-``bs_server``'s inspection API only. No import from ``grison.remote.methodology``/
-``state``, no assertion on private state-file contents.
+"""End-to-end wiki (BookStack) sync scenarios, on the sync engine (ENGINE.md) —
+CLI + on-disk files + ``bs_server``'s inspection API only. No import from
+``grison.engine``/``grison.adapters`` internals, no assertion on private state-file
+contents (only ``.grison/index.json``, which is tracked, not private).
+
+Format v2 (BRIEF D3/D4): a page file carries NO machine fields at all — no id, no
+``grison:`` block, no ``book``/``chapter`` frontmatter keys. Identity lives in
+``.grison/index.json``; a page's book/chapter come from its directory only.
 
 Every ``run_grison("sync")`` here also runs the findings phase, which today fails
 unconditionally (see ``tests/e2e/test_findings_e2e.py`` — ``GhostwriterClient
 .fetch_evidence`` selects a field the real 7.2.6 schema rejects, regardless of
 data). That failure is isolated per phase (``grison.cli._run_phase``) and always
 makes the *overall* process exit 1 and print "findings sync failed: …", even when
-methodology itself is perfectly clean — so these tests assert methodology's own
-success signals (its own summary line, the BookStack operation log, the files on
+the wiki phase itself is perfectly clean — so these tests assert the wiki phase's
+own success signals (its own summary line, the BookStack operation log, the files on
 disk) rather than the overall exit code. This is today's real, documented
 cross-phase coupling, not a gap in the fakes.
+
+Tests changed on purpose (BRIEF D3/D6/D7, ENGINE.md "Identity"/"classification
+table"/apply loop §8) vs. the module this replaces (``grison/remote/methodology.py``,
+tested by the pre-engine version of this file):
+
+- No ids/``grison:`` block, no ``book``/``chapter`` keys in the document — D3/D4.
+  Identity is ``.grison/index.json`` only.
+- A local delete of a synced, clean page now DELETES it remotely, under the change
+  guard (classify.py row 6) — was "re-pulled" (the old module never offered a
+  delete-remote path at all).
+- A remote-gone page with a clean local copy is now DELETED locally (classify.py row
+  8) — was "orphan skip".
+- Copying a file can no longer produce a "duplicate identity" (there is no id in the
+  file to duplicate) — a copy is an ordinary CREATE (ENGINE.md "Identity").
+- A rename/move is resolved by content-identity pairing (ENGINE.md "Identity"), not
+  by "directory is book identity, page is content" doctrine — a moved-and-unedited
+  file is a pure index move (no write), a moved-and-edited file is MOVE+EDIT (same
+  remote record, updated in place, reparented); there is no more "structure-drift"
+  trip-wire or book-rename block — a moved file (even across books) simply reparents.
+- A remote-side parent change (chapter/book move made on BookStack) now RELOCATES the
+  local file automatically on pull (the PULL-side counterpart of a local move) —
+  there is no more "structure-drift, converges only once the user moves the file by
+  hand" state.
+- A collision resolved by ``--force-remote``/``--force-local`` now clears the
+  ``.remote.md`` sidecar (ENGINE.md §8) — was left stale.
+- A page/chapter missing from the live lists but present in ``/api/recycle-bin`` is a
+  SKIP ("in the BookStack recycle bin, recoverable there"), never a delete/orphan —
+  BRIEF B.
+- The literal-artifact "corruption" scan and its pre-existing-cruft grandfathering are
+  REMOVED by construction (BRIEF D5/D6) — page-body hygiene now lives entirely in the
+  validator (WIKI-…); a page that fails a WIKI rule is INVALID locally (never pushed);
+  a bad REMOTE page still pulls (the gate blocks pushes, not pulls) and then shows up
+  invalid in ``grison validate``.
+- The mass-change guard now covers bulk PULLs too, not just push/create (ENGINE.md
+  "change guard": "D = planned local overwrites... same rule independently for D").
+- A too-deeply-nested local file (book/chapter/sub/x.md) is no longer a sync-time
+  trip-wire message — the adapter simply never scans past chapter depth (BookStack
+  itself has no deeper nesting); the file's presence is instead a validator failure
+  (WS-003, "unexpected entry directly inside a chapter directory") ``grison validate``
+  reports.
+- A remote-side move onto an already-occupied local path is now a genuine tripwire at
+  apply time too (never a silent overwrite) — kept, adapted to the new relocation
+  mechanism.
+- BRIEF's wiki-location section decides "new book/chapter directories ARE allowed" —
+  a new page inside a not-yet-existing chapter directory (under a KNOWN book) now
+  auto-creates the chapter (see ``test_new_local_chapter_directory_creates_the_
+  chapter_on_bookstack``), replacing the old module's "unknown chapter dir errors
+  loudly" trip-wire, which the new create-on-demand behavior makes obsolete/wrong.
 """
 
 from __future__ import annotations
@@ -18,6 +71,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+
+from grison.index import Index
 
 
 def _read_fm(path: Path) -> tuple[dict, str]:
@@ -31,16 +86,11 @@ def _read_fm(path: Path) -> tuple[dict, str]:
 
 
 def _write_page_file(
-    path: Path, *, page_id: int | None, title: str, book: str, body: str,
-    chapter: str | None = None, priority: int | None = None, tags: list | None = None,
+    path: Path, *, title: str, body: str, priority: int | None = None, tags: list | None = None,
 ) -> None:
-    fm: dict = {"grison": {"kind": "methodology", "bs": {}}}
-    if page_id is not None:
-        fm["grison"]["bs"]["page_id"] = page_id
-    fm["title"] = title
-    fm["book"] = book
-    if chapter:
-        fm["chapter"] = chapter
+    """Author (or hand-edit) a format-v2 page file — title/priority/tags only, no
+    machine fields; book/chapter come from ``path``'s own directory (D4)."""
+    fm: dict = {"title": title}
     if priority is not None:
         fm["priority"] = priority
     if tags:
@@ -52,15 +102,15 @@ def _write_page_file(
     )
 
 
-def _touch_remote_page(bs_server, page_id: int, **fields) -> None:
-    """Simulate an out-of-band edit made directly on BookStack (e.g. through the web
-    UI) — bumps ``updated_at``/``revision_count`` like a real ``update_page`` would,
-    so grison's skip-detail-fetch fast path (keyed on those markers) doesn't mistake
-    the change for "nothing happened"."""
-    page = bs_server.store.page(page_id)
-    page.update(fields)
-    page["revision_count"] += 1
-    page["updated_at"] = "2099-01-01T00:00:00.000000Z"
+def _indexed_id(workspace: Path, rel: str) -> int:
+    rec = Index.load(workspace).get(rel)
+    assert rec is not None, f"{rel} is not indexed"
+    return rec.id
+
+
+# ---------------------------------------------------------------------------
+# Basic pull / push / clean
+# ---------------------------------------------------------------------------
 
 
 def test_first_sync_pulls_everything(run_grison, bs_server):
@@ -73,18 +123,17 @@ def test_first_sync_pulls_everything(run_grison, bs_server):
 
     result = run_grison("sync")
 
-    assert "methodology: pull 1, push 0, create 0  (0 clean, 0 repaired)" in result.output
+    assert "wiki (bs.page): pull_new 1" in result.output
     page_path = Path.cwd() / "methodology/library/playbook/recon/getting-started.md"
     assert page_path.exists()
     fm, body = _read_fm(page_path)
-    assert fm["grison"]["bs"]["page_id"] == page["id"]
-    assert fm["title"] == "Getting Started"
-    assert fm["book"] == "playbook"
-    assert fm["chapter"] == "recon"
+    assert fm == {"title": "Getting Started", "priority": 1}  # priority defaults to 1 on the fake
     assert body == "# Getting Started\n\nHello."
     assert (page_path.parent.parent / ".book.yml").exists()
     assert (page_path.parent / ".chapter.yml").exists()
     assert bs_server.operation_log == []  # pull never mutates BookStack
+    assert _indexed_id(Path.cwd(), "methodology/library/playbook/recon/getting-started.md") \
+        == page["id"]
 
 
 def test_second_sync_is_a_noop(run_grison, bs_server):
@@ -97,7 +146,7 @@ def test_second_sync_is_a_noop(run_grison, bs_server):
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 0, create 0  (1 clean, 0 repaired)" in result.output
+    assert "wiki (bs.page): clean 1" in result.output
     assert page_path.read_text(encoding="utf-8") == before
     assert page_path.stat().st_mtime_ns == before_mtime
     assert bs_server.operation_log == []  # zero mutations on the fake, both syncs
@@ -108,13 +157,11 @@ def test_local_edit_pushes(run_grison, bs_server):
     page = bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
     run_grison("sync")
     page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
-    fm, _ = _read_fm(page_path)
-    _write_page_file(page_path, page_id=page["id"], title="Getting Started", book="playbook",
-                      body="# Hi\n\nEdited by hand.")
+    _write_page_file(page_path, title="Getting Started", body="# Hi\n\nEdited by hand.")
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
+    assert "wiki (bs.page): push 1" in result.output
     assert bs_server.store.page(page["id"])["markdown"] == "# Hi\n\nEdited by hand."
     names = [o.name for o in bs_server.operation_log]
     assert names == ["update_page"]
@@ -124,11 +171,11 @@ def test_remote_edit_pulls(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
     run_grison("sync")
-    _touch_remote_page(bs_server, page["id"], markdown="# Hi\n\nChanged on BookStack.")
+    bs_server.store.edit_page(page["id"], markdown="# Hi\n\nChanged on BookStack.")
 
     result = run_grison("sync")
 
-    assert "methodology: pull 1, push 0, create 0" in result.output
+    assert "wiki (bs.page): pull 1" in result.output
     page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
     _, body = _read_fm(page_path)
     assert body == "# Hi\n\nChanged on BookStack."
@@ -140,9 +187,8 @@ def test_collision_surfaced_never_overwritten_then_force_flags(run_grison, bs_se
     page = bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
     run_grison("sync")
     page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
-    _write_page_file(page_path, page_id=page["id"], title="Getting Started", book="playbook",
-                      body="# Hi\n\nLocal change.")
-    _touch_remote_page(bs_server, page["id"], markdown="# Hi\n\nRemote change.")
+    _write_page_file(page_path, title="Getting Started", body="# Hi\n\nLocal change.")
+    bs_server.store.edit_page(page["id"], markdown="# Hi\n\nRemote change.")
 
     result = run_grison("sync")
 
@@ -155,79 +201,97 @@ def test_collision_surfaced_never_overwritten_then_force_flags(run_grison, bs_se
     assert "Remote change." in sidecar.read_text(encoding="utf-8")
 
     result_force_local = run_grison("sync", "--force-local", str(page_path))
-    assert "methodology: pull 0, push 1, create 0" in result_force_local.output
+    assert "wiki (bs.page): push 1" in result_force_local.output
     assert bs_server.store.page(page["id"])["markdown"] == "# Hi\n\nLocal change."
+    # tests changed on purpose: stale collision sidecars are cleared (ENGINE.md §8)
+    assert not sidecar.exists()
 
 
 def test_force_remote_resolves_collision(run_grison, bs_server):
-    """Current behavior — NOT yet what D6 promises ("one collision-sidecar policy,
-    stale sidecars cleared everywhere"): unlike the findings phase (sync.py's
-    ``_clear_sidecar``, called after every forced push/pull), methodology's ``_apply``
-    "pull" branch never removes the ``.remote.md`` sidecar. ``--force-remote`` still
-    correctly resolves the collision on the tracked file — the stale sidecar left
-    behind is the documented gap the engine rewrite (D6) is meant to close."""
+    """tests changed on purpose (ENGINE.md §8, D6 'one collision-sidecar policy,
+    stale sidecars cleared everywhere'): the old module left the ``.remote.md``
+    sidecar behind after a forced resolution; the engine clears it as soon as the
+    record is no longer in collision."""
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
     run_grison("sync")
     page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
-    _write_page_file(page_path, page_id=page["id"], title="Getting Started", book="playbook",
-                      body="# Hi\n\nLocal change.")
-    _touch_remote_page(bs_server, page["id"], markdown="# Hi\n\nRemote change.")
+    _write_page_file(page_path, title="Getting Started", body="# Hi\n\nLocal change.")
+    bs_server.store.edit_page(page["id"], markdown="# Hi\n\nRemote change.")
     run_grison("sync")  # first surfaces the collision + sidecar
 
     result = run_grison("sync", "--force-remote", str(page_path))
 
-    assert "methodology: pull 1, push 0, create 0" in result.output
+    assert "wiki (bs.page): pull 1" in result.output
     _, body = _read_fm(page_path)
     assert body == "# Hi\n\nRemote change."  # the tracked file itself IS resolved
-    assert page_path.with_suffix(".remote.md").exists()  # but the sidecar is left stale (see above)
+    assert not page_path.with_suffix(".remote.md").exists()  # sidecar cleared, not left stale
 
 
 def test_new_local_page_creates(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     page_path = Path.cwd() / "methodology" / "library" / "playbook" / "new-page.md"
-    _write_page_file(page_path, page_id=None, title="New Page", book="playbook", body="# New Page")
+    _write_page_file(page_path, title="New Page", body="New page body text.")
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 0, create 1" in result.output
+    assert "wiki (bs.page): create 1" in result.output
     fm, body = _read_fm(page_path)
-    assert isinstance(fm["grison"]["bs"]["page_id"], int)
-    assert body == "# New Page"
+    assert fm == {"title": "New Page", "priority": 1}  # priority assigned by BookStack on create
+    assert body == "New page body text."
     created = [p for p in bs_server.store.pages if p["book_id"] == book["id"]]
     assert len(created) == 1
-    assert created[0]["markdown"] == "# New Page"
+    assert created[0]["markdown"] == "New page body text."
+    assert _indexed_id(Path.cwd(), "methodology/library/playbook/new-page.md") == created[0]["id"]
 
 
-def test_local_delete_is_repulled_not_deleted_remotely(run_grison, bs_server):
-    """Current behavior, not (yet) a delete-sync feature: deleting a tracked local
-    file does not delete the remote page — the next sync just re-creates the local
-    file from the still-live remote record (the identity/base lives in
-    ``.grison/state``, keyed by page_id, which the deleted file never touched)."""
+def test_copying_a_synced_page_creates_a_new_remote_page(run_grison, bs_server):
+    """tests changed on purpose (D3): there is no id in the document any more, so
+    copying a file can no longer collide on identity — it is an ordinary CREATE."""
     book = bs_server.store.seed_book(name="Playbook")
-    bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
+    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    path = Path.cwd() / "methodology/library/playbook/notes.md"
+    copy = path.parent / "notes-copy.md"
+    copy.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert "wiki (bs.page): clean 1, create 1" in result.output
+    assert len(bs_server.store.pages) == 2
+
+
+def test_local_delete_of_a_clean_page_deletes_it_remotely(run_grison, bs_server):
+    """tests changed on purpose (classify.py row 6): a local delete of a clean,
+    indexed page now deletes the remote page too (was: silently re-pulled — the old
+    module had no delete-remote path at all)."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
     run_grison("sync")
     page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
     page_path.unlink()
 
     result = run_grison("sync")
 
-    assert "methodology: pull 1, push 0, create 0" in result.output
-    assert page_path.exists()
-    assert bs_server.operation_log == []  # nothing was ever deleted on BookStack
+    assert "wiki (bs.page): delete_remote 1" in result.output
+    assert bs_server.store.page(page["id"]) is None
+    assert any(d["deletable_id"] == page["id"] for d in bs_server.store.recycle_bin)
 
 
-def test_remote_delete_is_an_orphan_skip(run_grison, bs_server):
+def test_remote_delete_of_a_clean_page_deletes_it_locally(run_grison, bs_server):
+    """tests changed on purpose (classify.py row 8): a remote-gone page with a clean
+    local copy is now deleted locally (was: 'orphan skip', left on disk forever)."""
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
     run_grison("sync")
-    bs_server.store.pages.remove(bs_server.store.page(page["id"]))
+    bs_server.store.pages.remove(bs_server.store.page(page["id"]))  # gone, not recycled
 
     result = run_grison("sync")
 
-    assert "remote page gone (orphan)" in result.output
+    assert "wiki (bs.page): delete_local 1" in result.output
     page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
-    assert page_path.exists()  # the local file is left alone, not deleted
+    assert not page_path.exists()
+    assert Index.load(Path.cwd()).get("methodology/library/playbook/getting-started.md") is None
 
 
 def test_dry_run_writes_nothing(run_grison, bs_server, tmp_path):
@@ -236,7 +300,7 @@ def test_dry_run_writes_nothing(run_grison, bs_server, tmp_path):
 
     result = run_grison("sync", "--dry-run")
 
-    assert "would pull" in result.output.lower() or "pull 1" in result.output
+    assert "pull" in result.output.lower()
     lib = Path.cwd() / "methodology" / "library"
     assert not any(lib.rglob("*.md"))  # nothing landed on disk
     assert bs_server.operation_log == []
@@ -247,15 +311,15 @@ def test_malformed_local_file_does_not_stop_others(run_grison, bs_server):
     good = bs_server.store.seed_page(book_id=book["id"], name="Good Page", markdown="# Good")
     run_grison("sync")
     good_path = Path.cwd() / "methodology/library/playbook/good-page.md"
-    _write_page_file(good_path, page_id=good["id"], title="Good Page", book="playbook",
-                      body="# Good\n\nEdited.")
+    _write_page_file(good_path, title="Good Page", body="# Good\n\nEdited.")
     broken_path = Path.cwd() / "methodology" / "library" / "playbook" / "broken.md"
     broken_path.write_text("not frontmatter at all", encoding="utf-8")
 
     result = run_grison("sync")
 
     assert bs_server.store.page(good["id"])["markdown"] == "# Good\n\nEdited."
-    assert str(broken_path) in result.output or "broken.md" in result.output
+    assert "broken.md" in result.output
+    assert "invalid" in result.output.lower()  # WIKI-014 (bad frontmatter) via the validation gate
 
 
 def test_server_failure_on_one_page_does_not_stop_the_other(run_grison, bs_server):
@@ -265,10 +329,8 @@ def test_server_failure_on_one_page_does_not_stop_the_other(run_grison, bs_serve
     run_grison("sync")
     path1 = Path.cwd() / "methodology/library/playbook/page-one.md"
     path2 = Path.cwd() / "methodology/library/playbook/page-two.md"
-    _write_page_file(path1, page_id=p1["id"], title="Page One", book="playbook",
-                      body="# One\n\nEdited.")
-    _write_page_file(path2, page_id=p2["id"], title="Page Two", book="playbook",
-                      body="# Two\n\nEdited.")
+    _write_page_file(path1, title="Page One", body="# One\n\nEdited.")
+    _write_page_file(path2, title="Page Two", body="# Two\n\nEdited.")
     bs_server.inject_http_500(times=1, method="PUT")  # only a page update fails, not the reads
 
     result = run_grison("sync")
@@ -276,25 +338,51 @@ def test_server_failure_on_one_page_does_not_stop_the_other(run_grison, bs_serve
     succeeded = [p for p in (p1, p2)
                  if bs_server.store.page(p["id"])["markdown"].endswith("Edited.")]
     assert len(succeeded) == 1  # exactly one push got through; the other was isolated
-    assert "error" in result.output.lower()
+    assert "failed" in result.output.lower()
 
 
-def test_mass_change_guard_withholds_and_announces_it(run_grison, bs_server):
+def test_mass_change_guard_withholds_pushes_and_announces_it(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
+    # a 6-page first sync is fine (PULL_NEW never trips the guard — see
+    # test_mass_change_guard_withholds_pulls_too's own note); editing all 6 locally
+    # then trips the PUSH (W) side.
     pages = [
-        bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"# {i}")
+        bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"Body {i}.")
         for i in range(6)
     ]
     run_grison("sync")
-    for i, p in enumerate(pages):
+    for i, _p in enumerate(pages):
         path = Path.cwd() / "methodology" / "library" / "playbook" / f"page-{i}.md"
-        _write_page_file(path, page_id=p["id"], title=f"Page {i}", book="playbook",
-                          body=f"# {i}\n\nEdited.")
+        _write_page_file(path, title=f"Page {i}", body=f"Body {i}.\n\nEdited.")
 
     result = run_grison("sync")
 
-    assert "MASS-CHANGE GUARD tripped on methodology — writes withheld." in result.output
+    assert "MASS-CHANGE GUARD tripped on bs.page — writes withheld." in result.output
     assert bs_server.operation_log == []  # every push was withheld, none reached BookStack
+
+
+def test_mass_change_guard_withholds_pulls_too(run_grison, bs_server):
+    """tests changed on purpose (ENGINE.md change guard applies to D = pulls too, not
+    just W = remote writes — the old module only ever guarded push/create). D only
+    covers PULL/DELETE_LOCAL (an OVERWRITE/removal of something already local) —
+    PULL_NEW deliberately does not count (nothing local to lose), so a first sync of
+    a brand-new, arbitrarily large wiki is never itself withheld; six pages already
+    pulled and then all edited remotely is what actually trips the D side."""
+    book = bs_server.store.seed_book(name="Playbook")
+    pages = [
+        bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"Body {i}.")
+        for i in range(6)
+    ]
+    run_grison("sync")  # a 6-page first sync is NOT withheld (all PULL_NEW)
+    for i, pg in enumerate(pages):
+        bs_server.store.edit_page(pg["id"], markdown=f"Body {i} changed on BookStack.")
+
+    result = run_grison("sync")
+
+    assert "MASS-CHANGE GUARD tripped on bs.page — writes withheld." in result.output
+    for i in range(6):
+        path = Path.cwd() / "methodology" / "library" / "playbook" / f"page-{i}.md"
+        assert "changed on BookStack" not in path.read_text(encoding="utf-8")
 
 
 def test_wysiwyg_page_is_skipped_not_mirrored(run_grison, bs_server):
@@ -306,9 +394,20 @@ def test_wysiwyg_page_is_skipped_not_mirrored(run_grison, bs_server):
 
     result = run_grison("sync")
 
-    assert "wysiwyg page" in result.output
+    assert "wysiwyg" in result.output.lower()
     lib = Path.cwd() / "methodology" / "library"
     assert not list(lib.rglob("wysiwyg-page.md"))
+
+
+def test_draft_page_is_skipped(run_grison, bs_server):
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Draft Page", markdown="# D", draft=True)
+
+    result = run_grison("sync")
+
+    assert "draft" in result.output.lower()
+    lib = Path.cwd() / "methodology" / "library"
+    assert not list(lib.rglob("draft-page.md"))
 
 
 # --- structure: chapter/book moves, renames, chapter creation -------------------
@@ -319,7 +418,7 @@ def test_page_moved_to_another_chapter_locally_pushes(run_grison, bs_server):
     chap_a = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     chap_b = bs_server.store.seed_chapter(book_id=book["id"], name="Exploitation")
     page = bs_server.store.seed_page(
-        book_id=book["id"], chapter_id=chap_a["id"], name="Notes", markdown="# Notes",
+        book_id=book["id"], chapter_id=chap_a["id"], name="Notes", markdown="Notes body.",
     )
     run_grison("sync")
     old_path = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
@@ -329,11 +428,17 @@ def test_page_moved_to_another_chapter_locally_pushes(run_grison, bs_server):
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
+    assert "move" in result.output
     assert bs_server.store.page(page["id"])["chapter_id"] == chap_b["id"]
+    assert Index.load(Path.cwd()).get(
+        "methodology/library/playbook/exploitation/notes.md"
+    ).id == page["id"]
 
 
 def test_page_moved_between_chapters_remotely_relocates_local_file(run_grison, bs_server):
+    """tests changed on purpose: a remote-side parent change now relocates the local
+    file automatically on pull (the PULL-side counterpart of a local move) — there is
+    no more 'structure-drift, converges only once the user moves the file by hand'."""
     book = bs_server.store.seed_book(name="Playbook")
     chap_a = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     chap_b = bs_server.store.seed_chapter(book_id=book["id"], name="Exploitation")
@@ -343,87 +448,78 @@ def test_page_moved_between_chapters_remotely_relocates_local_file(run_grison, b
     run_grison("sync")
     old_path = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
     new_path = Path.cwd() / "methodology" / "library" / "playbook" / "exploitation" / "notes.md"
-    _touch_remote_page(bs_server, page["id"], chapter_id=chap_b["id"])
+    bs_server.store.edit_page(page["id"], chapter_id=chap_b["id"])
 
     result = run_grison("sync")
 
-    assert "move" in result.output
+    assert "pull" in result.output
     assert not old_path.exists()
     assert new_path.exists()
+    assert Index.load(Path.cwd()).get(
+        "methodology/library/playbook/exploitation/notes.md"
+    ).id == page["id"]
 
 
-def test_page_moved_to_book_root_locally_pushes(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook")
-    chap = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
-    page = bs_server.store.seed_page(
-        book_id=book["id"], chapter_id=chap["id"], name="Notes", markdown="# Notes",
-    )
+def test_remote_book_move_relocates_the_local_file(run_grison, bs_server):
+    """tests changed on purpose: replaces the old 'book-rename tripwire'/'structure-
+    drift' pair — a remote book move is just another relocation on pull, same as a
+    chapter move; there is no more drift state or book-rename block."""
+    book_a = bs_server.store.seed_book(name="Playbook")
+    book_b = bs_server.store.seed_book(name="Web")
+    page = bs_server.store.seed_page(book_id=book_a["id"], name="Notes", markdown="# N")
     run_grison("sync")
-    old_path = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
-    new_path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    old_path.rename(new_path)
+    bs_server.store.edit_page(page["id"], book_id=book_b["id"], chapter_id=0)
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
-    assert bs_server.store.page(page["id"])["chapter_id"] == 0
-
-
-def test_book_renamed_remotely_is_blocked_not_silently_reparented(run_grison, bs_server):
-    """Current trip-wire (bs-structure F7): a remote book RENAME looks, from a single
-    page's point of view, exactly like a page move onto a different, already-existing
-    book directory once the old book's own directory is gone too — grison has no
-    update_book call, so it refuses rather than silently reparenting onto whatever
-    book now owns that slug."""
-    book = bs_server.store.seed_book(name="Playbook")
-    other = bs_server.store.seed_book(name="Unrelated")
-    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Notes")
-    run_grison("sync")
-    import shutil
-
-    old_dir = Path.cwd() / "methodology" / "library" / "playbook"
-    new_dir = Path.cwd() / "methodology" / "library" / "unrelated"
-    (old_dir / "notes.md").rename(new_dir / "notes.md")  # the one page moves into the other book
-    shutil.rmtree(old_dir)  # ...and the old book's dir is genuinely gone (a real `mv`)
-
-    result = run_grison("sync")
-
-    assert "book rename" in result.output
-    assert "playbook" in result.output and "unrelated" in result.output
-    assert bs_server.store.page(bs_server.store.pages[0]["id"])["book_id"] == book["id"]
-    del other  # only needed so "unrelated" already exists as a real, different book
+    assert "pull" in result.output
+    assert not (Path.cwd() / "methodology/library/playbook/notes.md").exists()
+    assert (Path.cwd() / "methodology/library/web/notes.md").exists()
 
 
 def test_new_page_in_an_existing_chapter_dir_creates(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     chap = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     run_grison("sync")  # materializes playbook/recon/
-    newp = (
-        Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "new-notes.md"
-    )
-    _write_page_file(newp, page_id=None, title="New Notes", book="playbook", chapter="recon",
-                      body="# New Notes")
+    newp = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "new-notes.md"
+    _write_page_file(newp, title="New Notes", body="New notes body text.")
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 0, create 1" in result.output
+    assert "wiki (bs.page): create 1" in result.output
     created = [p for p in bs_server.store.pages if p["chapter_id"] == chap["id"]]
     assert len(created) == 1
 
 
-def test_new_page_in_unknown_chapter_dir_errors_loudly(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook")
-    newp = (
-        Path.cwd() / "methodology" / "library" / "playbook" / "no-such-chapter" / "new.md"
-    )
-    _write_page_file(newp, page_id=None, title="New", book="playbook", chapter="no-such-chapter",
-                      body="# New")
+def test_new_local_book_directory_creates_the_book_on_bookstack(run_grison, bs_server):
+    newp = Path.cwd() / "methodology" / "library" / "new-book" / "first-page.md"
+    _write_page_file(newp, title="First Page", body="First page body text.")
 
     result = run_grison("sync")
 
-    assert "unknown chapter 'no-such-chapter'" in result.output
-    assert bs_server.store.pages == []
-    del book
+    assert "create book new-book" in result.output
+    book = next(b for b in bs_server.store.books if b["slug"] == "new-book")
+    created = [p for p in bs_server.store.pages if p["book_id"] == book["id"]]
+    assert len(created) == 1
+    assert created[0]["name"] == "First Page"
+
+
+def test_new_local_chapter_directory_creates_the_chapter_on_bookstack(run_grison, bs_server):
+    bs_server.store.seed_book(name="Playbook")
+    run_grison("sync")
+    newp = (
+        Path.cwd() / "methodology" / "library" / "playbook" / "new-chapter" / "first-page.md"
+    )
+    _write_page_file(newp, title="First Page", body="First page body text.")
+
+    result = run_grison("sync")
+
+    assert "create chapter methodology/library/playbook/new-chapter" in result.output
+    book = next(b for b in bs_server.store.books if b["slug"] == "playbook")
+    chapter = next(c for c in bs_server.store.chapters if c["slug"] == "new-chapter")
+    assert chapter["book_id"] == book["id"]
+    created = [p for p in bs_server.store.pages if p["chapter_id"] == chapter["id"]]
+    assert len(created) == 1
 
 
 # --- priority / tags / title, both directions ------------------------------------
@@ -433,11 +529,11 @@ def test_priority_pulls_from_remote(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N", priority=1)
     run_grison("sync")
-    _touch_remote_page(bs_server, page["id"], priority=7)
+    bs_server.store.edit_page(page["id"], priority=7)
 
     result = run_grison("sync")
 
-    assert "methodology: pull 1, push 0, create 0" in result.output
+    assert "wiki (bs.page): pull 1" in result.output
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     fm, _ = _read_fm(path)
     assert fm["priority"] == 7
@@ -448,24 +544,26 @@ def test_priority_pushes_from_local(run_grison, bs_server):
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N", priority=1)
     run_grison("sync")
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    _write_page_file(path, page_id=page["id"], title="Notes", book="playbook", body="# N",
-                      priority=9)
+    _write_page_file(path, title="Notes", body="# N", priority=9)
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
+    assert "wiki (bs.page): push 1" in result.output
     assert bs_server.store.page(page["id"])["priority"] == 9
 
 
 def test_valued_tags_pull_from_remote(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
-    bs_server.store.page(page["id"])["tags"] = [{"name": "owasp", "value": "A01"}]
+    bs_server.store.edit_page(page["id"], tags=[{"name": "owasp", "value": "A01"}])
     run_grison("sync")
 
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     fm, _ = _read_fm(path)
-    assert fm["tags"] == [{"name": "owasp", "value": "A01"}]
+    # v2 tags are plain strings (no name/value structure in the frontmatter model) —
+    # a valued BookStack tag round-trips as "name:value" (bs_pages.py's own
+    # documented convention).
+    assert fm["tags"] == ["owasp:A01"]
 
 
 def test_valued_tags_push_from_local(run_grison, bs_server):
@@ -473,12 +571,11 @@ def test_valued_tags_push_from_local(run_grison, bs_server):
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
     run_grison("sync")
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    _write_page_file(path, page_id=page["id"], title="Notes", book="playbook", body="# N",
-                      tags=[{"name": "owasp", "value": "A02"}])
+    _write_page_file(path, title="Notes", body="# N", tags=["owasp:A02"])
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
+    assert "wiki (bs.page): push 1" in result.output
     assert bs_server.store.page(page["id"])["tags"] == [{"name": "owasp", "value": "A02"}]
 
 
@@ -486,14 +583,16 @@ def test_title_change_pulls_from_remote(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
     run_grison("sync")
-    _touch_remote_page(bs_server, page["id"], name="Renamed On BookStack")
+    bs_server.store.edit_page(page["id"], name="Renamed On BookStack")
 
     result = run_grison("sync")
 
-    assert "methodology: pull 1, push 0, create 0" in result.output
+    assert "wiki (bs.page): pull 1" in result.output
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     fm, _ = _read_fm(path)
     assert fm["title"] == "Renamed On BookStack"
+    # D4/the brief's "names are stable handles": a title change never renames the file
+    assert path.exists()
 
 
 def test_title_change_pushes_from_local(run_grison, bs_server):
@@ -501,18 +600,41 @@ def test_title_change_pushes_from_local(run_grison, bs_server):
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
     run_grison("sync")
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    _write_page_file(path, page_id=page["id"], title="Renamed By Hand", book="playbook", body="# N")
+    _write_page_file(path, title="Renamed By Hand", body="# N")
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
+    assert "wiki (bs.page): push 1" in result.output
     assert bs_server.store.page(page["id"])["name"] == "Renamed By Hand"
+    assert path.exists()  # the file itself never gets renamed
 
 
-# --- remote-gone / duplicate-identity / corrupt-file -----------------------------
+def test_renaming_the_local_file_is_a_pure_move_no_write(run_grison, bs_server):
+    """A file rename with unchanged content is an index-only bookkeeping move — no
+    remote write at all (ENGINE.md 'MOVE': never a no-op PUT)."""
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    old_path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    new_path = old_path.parent / "renamed-file.md"
+    old_path.rename(new_path)
+
+    result = run_grison("sync")
+
+    assert "move" in result.output
+    assert bs_server.operation_log == []  # pure rename: zero BookStack writes
+    assert new_path.exists() and not old_path.exists()
 
 
-def test_remote_delete_lands_in_the_recycle_bin_and_is_an_orphan_skip(run_grison, bs_server):
+# --- remote-gone / recycle-bin / corrupt-file ------------------------------------
+
+
+def test_remote_delete_lands_in_the_recycle_bin_and_is_skipped_not_deleted(run_grison, bs_server):
+    """tests changed on purpose (BRIEF B, recycle-bin awareness): a page missing
+    from the live lists but present in /api/recycle-bin is a SKIP, recoverable —
+    never treated as gone (the old module's 'orphan skip' had the right verb but the
+    wrong reason; the new engine's delete_local path, proven above, is what a
+    TRULY-gone page gets instead)."""
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
     run_grison("sync")
@@ -527,26 +649,11 @@ def test_remote_delete_lands_in_the_recycle_bin_and_is_an_orphan_skip(run_grison
 
     result = run_grison("sync")
 
-    assert "remote page gone (orphan)" in result.output
+    assert "recycle bin" in result.output
     assert bs_server.store.page(page["id"]) is None
     assert any(d["deletable_id"] == page["id"] for d in bs_server.store.recycle_bin)
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     assert path.exists()  # the local file is left alone, not deleted
-
-
-def test_duplicate_page_id_both_files_skipped_and_untouched(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook")
-    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
-    run_grison("sync")
-    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    dup = path.parent / "notes-copy.md"
-    dup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-
-    result = run_grison("sync")
-
-    assert "duplicate page_id" in result.output
-    assert "methodology: pull 0, push 0, create 0" in result.output
-    assert bs_server.store.page(page["id"])["markdown"] == "# N"  # remote untouched
 
 
 def test_corrupt_local_page_file_is_an_error_isolated_from_others(run_grison, bs_server):
@@ -554,22 +661,61 @@ def test_corrupt_local_page_file_is_an_error_isolated_from_others(run_grison, bs
     good = bs_server.store.seed_page(book_id=book["id"], name="Good", markdown="# Good")
     run_grison("sync")
     good_path = Path.cwd() / "methodology" / "library" / "playbook" / "good.md"
-    _write_page_file(good_path, page_id=good["id"], title="Good", book="playbook",
-                      body="# Good\n\nEdited.")
+    _write_page_file(good_path, title="Good", body="Good body.\n\nEdited.")
     broken_path = Path.cwd() / "methodology" / "library" / "playbook" / "broken.md"
     broken_path.write_text("no frontmatter fence at all", encoding="utf-8")
 
     result = run_grison("sync")
 
     assert "broken.md" in result.output
-    assert bs_server.store.page(good["id"])["markdown"] == "# Good\n\nEdited."
+    assert bs_server.store.page(good["id"])["markdown"] == "Good body.\n\nEdited."
+
+
+def test_too_deeply_nested_local_file_is_never_scanned_but_validate_flags_it(
+    run_grison, bs_server,
+):
+    """tests changed on purpose: BookStack has no deeper nesting than book/chapter/
+    page, so the adapter simply never looks past chapter depth (not a sync-time
+    trip-wire message any more) — the file's presence under an extra directory is a
+    validator failure (WS-003) instead."""
+    bs_server.store.seed_book(name="Playbook")
+    deep = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "extra" / "x.md"
+    _write_page_file(deep, title="X", body="x")
+
+    result = run_grison("sync")
+
+    assert bs_server.store.pages == []  # never scanned, never created
+
+    validate_result = run_grison("validate")
+    assert "WS-003" in validate_result.output
+    del result
+
+
+def test_remote_relocation_onto_an_occupied_local_path_is_tripwired(run_grison, bs_server):
+    book = bs_server.store.seed_book(name="Playbook")
+    chap = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    # will try to relocate here
+    bs_server.store.edit_page(page["id"], chapter_id=chap["id"])
+    blocker = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
+    blocker.parent.mkdir(parents=True, exist_ok=True)
+    blocker.write_text("unrelated local file already here", encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert "failed" in result.output.lower()
+    old_path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    assert old_path.exists()
+    assert blocker.read_text(encoding="utf-8") == "unrelated local file already here"
 
 
 # --- structure mirrors: content, regeneration, hand-edit preservation -----------
 
 
 def test_book_and_chapter_mirror_content_after_first_sync(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook", description="Playbook description")
+    book = bs_server.store.seed_book(name="Playbook", description="Playbook description",
+                                     tags=[{"name": "topic", "value": "network"}])
     chap = bs_server.store.seed_chapter(book_id=book["id"], name="Recon", priority=2,
                                         description="Recon phase")
     run_grison("sync")
@@ -577,89 +723,53 @@ def test_book_and_chapter_mirror_content_after_first_sync(run_grison, bs_server)
     book_mirror = yaml.safe_load(
         (Path.cwd() / "methodology" / "library" / "playbook" / ".book.yml").read_text()
     )
-    assert book_mirror["grison"]["bs"]["book_id"] == book["id"]
     assert book_mirror["name"] == "Playbook"
+    assert book_mirror["slug"] == "playbook"
     assert book_mirror["description"] == "Playbook description"
+    assert book_mirror["tags"] == ["topic:network"]
 
     chap_mirror = yaml.safe_load(
         (Path.cwd() / "methodology" / "library" / "playbook" / "recon" / ".chapter.yml")
         .read_text()
     )
-    assert chap_mirror["grison"]["bs"] == {"chapter_id": chap["id"], "book_id": book["id"]}
     assert chap_mirror["name"] == "Recon"
     assert chap_mirror["priority"] == 2
     assert chap_mirror["description"] == "Recon phase"
+    assert _indexed_id(Path.cwd(), "methodology/library/playbook") == book["id"]
+    assert _indexed_id(Path.cwd(), "methodology/library/playbook/recon") == chap["id"]
 
 
 def test_mirror_regenerates_after_remote_structure_change(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook", description="old description")
     run_grison("sync")
     mirror = Path.cwd() / "methodology" / "library" / "playbook" / ".book.yml"
-    book["description"] = "new description"  # changed directly on BookStack
+    book["description"] = "new description"
+    book["updated_at"] = "2099-01-01T00:00:00.000000Z"  # a real edit bumps this too
 
-    result = run_grison("sync")
+    run_grison("sync")
 
     assert "new description" in mirror.read_text(encoding="utf-8")
     assert not mirror.with_suffix(".remote.yml").exists()
-    del result
 
 
-def test_mirror_hand_edit_is_preserved_with_sidecar_and_error(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook", description="original")
+def test_mirror_hand_edit_is_preserved_and_flagged_invalid(run_grison, bs_server):
+    """tests changed on purpose (D6/ENGINE.md read-only record types): a hand-edited
+    mirror is now a `grison validate` failure (WS-009), never silently overwritten
+    and never sidecar'ed — 'read-only types take PULL only when locally unedited'."""
+    bs_server.store.seed_book(name="Playbook", description="original")
     run_grison("sync")
     mirror = Path.cwd() / "methodology" / "library" / "playbook" / ".book.yml"
     edited = mirror.read_text(encoding="utf-8").replace("original", "hand-edited by user")
     mirror.write_text(edited, encoding="utf-8")
 
-    result = run_grison("sync")  # remote unchanged
+    run_grison("sync")  # remote unchanged
 
     assert mirror.read_text(encoding="utf-8") == edited  # never silently overwritten
-    sidecar = mirror.with_suffix(".remote.yml")
-    assert sidecar.exists()
-    assert "original" in sidecar.read_text(encoding="utf-8")
-    assert "read-only" in result.output
-    del book
+    assert not mirror.with_suffix(".remote.yml").exists()  # no sidecar mechanism for mirrors
 
-
-# --- artifact/corruption guardrail: blocks NEW, grandfathers PRE-EXISTING -------
-
-
-def test_new_corruption_artifact_blocks_the_push(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook")
-    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Notes\n\nclean")
-    run_grison("sync")
-    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    corrupted = path.read_text(encoding="utf-8").replace(
-        "clean", 'leaked <span class="citation-1">x</span>'
-    )
-    path.write_text(corrupted, encoding="utf-8")
-
-    result = run_grison("sync")
-
-    assert "artifact" in result.output.lower()
-    assert "refused" in result.output.lower()
-    assert bs_server.store.page(page["id"])["markdown"] == "# Notes\n\nclean"  # never pushed
-
-
-def test_preexisting_corruption_artifact_is_grandfathered_not_blocking(run_grison, bs_server):
-    """The artifact scan flags pre-existing corruption (surfaced in the output) but
-    does not refuse an otherwise-unrelated edit — only a NEWLY introduced artifact
-    blocks the push."""
-    book = bs_server.store.seed_book(name="Playbook")
-    page = bs_server.store.seed_page(
-        book_id=book["id"], name="Notes",
-        markdown='# Notes\n\nleaked <span class="citation-1">x</span> already here',
-    )
-    run_grison("sync")  # pulls the pre-existing corruption as-is, unvalidated
-    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    edited = path.read_text(encoding="utf-8") + "\n\nAn unrelated addition."
-    path.write_text(edited, encoding="utf-8")
-
-    result = run_grison("sync")
-
-    assert "artifact" in result.output.lower()  # still surfaced...
-    assert "methodology: pull 0, push 1, create 0" in result.output  # ...but not blocked
-    assert "An unrelated addition." in bs_server.store.page(page["id"])["markdown"]
+    validate_result = run_grison("validate")
+    assert "WS-009" in validate_result.output
+    assert "git checkout" in validate_result.output
 
 
 # --- concurrent-drift guards, using the fake's request hooks --------------------
@@ -670,15 +780,18 @@ def test_wysiwyg_guard_is_rechecked_immediately_before_the_push(run_grison, bs_s
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
     run_grison("sync")
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    _write_page_file(path, page_id=page["id"], title="Notes", book="playbook",
-                      body="# Edited by human")
+    _write_page_file(path, title="Notes", body="# Edited by human")
 
     def flip_to_wysiwyg() -> None:
         row = bs_server.store.page(page["id"])
         row["editor"] = "wysiwyg"
         row["raw_html"] = "<p>rich content authored on BookStack</p>"
 
-    bs_server.on_request("GET", r"/api/pages/\d+", flip_to_wysiwyg, call_number=2)
+    # tests changed on purpose: with the skip-detail-fetch fast path, classify never
+    # issues its own detail GET when the witness is unchanged (proven separately by
+    # test_second_sync_skips_page_detail_fetch_for_clean_pages) — the ONE real detail
+    # GET this run makes is the pre-write re-fetch guard itself, call_number=1.
+    bs_server.on_request("GET", r"/api/pages/\d+", flip_to_wysiwyg, call_number=1)
 
     result = run_grison("sync")
 
@@ -707,13 +820,15 @@ def test_remote_drift_during_push_is_a_collision_not_an_overwrite(run_grison, bs
     page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
     run_grison("sync")
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    _write_page_file(path, page_id=page["id"], title="Notes", book="playbook",
-                      body="# Edited by human")
+    _write_page_file(path, title="Notes", body="# Edited by human")
 
     def rename_on_bookstack() -> None:
         bs_server.store.page(page["id"])["name"] = "Renamed Concurrently"
 
-    bs_server.on_request("GET", r"/api/pages/\d+", rename_on_bookstack, call_number=2)
+    # tests changed on purpose: see test_wysiwyg_guard_is_rechecked's own note —
+    # the skip-detail-fetch fast path means the pre-write re-fetch is the only
+    # detail GET this run makes.
+    bs_server.on_request("GET", r"/api/pages/\d+", rename_on_bookstack, call_number=1)
 
     result = run_grison("sync")
 
@@ -721,6 +836,24 @@ def test_remote_drift_during_push_is_a_collision_not_an_overwrite(run_grison, bs
     assert bs_server.store.page(page["id"])["markdown"] == "# Original"  # push refused entirely
     assert bs_server.store.page(page["id"])["name"] == "Renamed Concurrently"  # preserved
     assert "Edited by human" in path.read_text(encoding="utf-8")  # local edit not lost
+
+
+def test_force_local_bypasses_the_concurrent_drift_guard(run_grison, bs_server):
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# Edited by human")
+
+    def rename_on_bookstack() -> None:
+        bs_server.store.page(page["id"])["name"] = "Renamed Concurrently"
+
+    bs_server.on_request("GET", r"/api/pages/\d+", rename_on_bookstack, call_number=2)
+
+    result = run_grison("sync", "--force-local", str(path))
+
+    assert "wiki (bs.page): push 1" in result.output
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited by human"
 
 
 # --- closing gaps vs. tests/test_methodology.py / test_methodology_guards.py -----
@@ -739,37 +872,9 @@ def test_local_move_to_a_different_book_pushes_with_the_new_book_id(run_grison, 
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
-    assert not result.output.count("structure-drift")
+    assert "move" in result.output
     assert bs_server.store.page(page["id"])["book_id"] == book_b["id"]
     assert bs_server.store.page(other["id"])["book_id"] == book_a["id"]  # sibling untouched
-
-
-def test_remote_book_move_drifts_then_follows_and_repairs(run_grison, bs_server):
-    """Distinct from the book-RENAME tripwire (old dir gone): here both books still
-    exist and only the ONE page moved remotely — drift, no writes, until the user
-    moves the file to match; then it converges with no ping-pong."""
-    book_a = bs_server.store.seed_book(name="Playbook")
-    book_b = bs_server.store.seed_book(name="Web")
-    page = bs_server.store.seed_page(book_id=book_a["id"], name="Notes", markdown="# N")
-    run_grison("sync")
-    _touch_remote_page(bs_server, page["id"], book_id=book_b["id"])  # moved on BookStack only
-
-    r1 = run_grison("sync")
-    old_path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    assert "structure-drift" in r1.output
-    assert old_path.exists()  # nothing pulled/pushed while it's drifting
-
-    new_path = Path.cwd() / "methodology" / "library" / "web" / "notes.md"
-    new_path.parent.mkdir(parents=True, exist_ok=True)
-    old_path.rename(new_path)
-    r2 = run_grison("sync")
-    assert "structure-drift" not in r2.output
-    assert "methodology: pull 0, push 0, create 0" in r2.output  # a pure restamp, not a push
-
-    r3 = run_grison("sync")  # converged — no ping-pong
-    assert "structure-drift" not in r3.output
-    assert bs_server.store.page(page["id"])["book_id"] == book_b["id"]
 
 
 def test_shelf_mirror_content_and_book_membership(run_grison, bs_server):
@@ -793,12 +898,9 @@ def test_shelf_mirror_content_and_book_membership(run_grison, bs_server):
 def test_checklists_directory_is_never_synced(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
-    checklist = (
-        Path.cwd() / "methodology" / "checklists" / "acme-engagement" / "notes.md"
-    )
+    checklist = Path.cwd() / "methodology" / "checklists" / "acme-engagement" / "notes.md"
     checklist.parent.mkdir(parents=True, exist_ok=True)
-    _write_page_file(checklist, page_id=None, title="Notes", book="playbook",
-                      body="engagement-local working copy")
+    _write_page_file(checklist, title="Notes", body="engagement-local working copy")
 
     run_grison("sync")
 
@@ -814,66 +916,15 @@ def test_bare_content_push_does_not_eject_a_chaptered_page(run_grison, bs_server
     )
     run_grison("sync")
     path = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
-    path.write_text(path.read_text(encoding="utf-8") + "\n\nMore detail.", encoding="utf-8")
+    path.write_text(path.read_text(encoding="utf-8") + "\nMore detail.\n", encoding="utf-8")
 
     result = run_grison("sync")
 
-    assert "methodology: pull 0, push 1, create 0" in result.output
+    assert "wiki (bs.page): push 1" in result.output
     assert bs_server.store.page(page["id"])["chapter_id"] == chap["id"]  # still in its chapter
 
 
-def test_nested_too_deep_local_file_is_tripwired(run_grison, bs_server):
-    bs_server.store.seed_book(name="Playbook")
-    deep = (
-        Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "extra" / "x.md"
-    )
-    _write_page_file(deep, page_id=None, title="X", book="playbook", body="x")
-
-    result = run_grison("sync")
-
-    assert "too deep" in result.output
-    assert bs_server.store.pages == []
-
-
-def test_pull_relocation_onto_an_occupied_path_is_tripwired(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook")
-    chap = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
-    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
-    run_grison("sync")
-    # will try to relocate here
-    _touch_remote_page(bs_server, page["id"], chapter_id=chap["id"])
-    blocker = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
-    blocker.parent.mkdir(parents=True, exist_ok=True)
-    blocker.write_text("unrelated local file already here", encoding="utf-8")
-
-    result = run_grison("sync")
-
-    assert "relocation target exists" in result.output
-    old_path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    assert old_path.exists()
-    assert blocker.read_text(encoding="utf-8") == "unrelated local file already here"
-
-
-def test_force_local_bypasses_the_concurrent_drift_guard(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook")
-    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
-    run_grison("sync")
-    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-    _write_page_file(path, page_id=page["id"], title="Notes", book="playbook",
-                      body="# Edited by human")
-
-    def rename_on_bookstack() -> None:
-        bs_server.store.page(page["id"])["name"] = "Renamed Concurrently"
-
-    bs_server.on_request("GET", r"/api/pages/\d+", rename_on_bookstack, call_number=2)
-
-    result = run_grison("sync", "--force-local", str(path))
-
-    assert "methodology: pull 0, push 1, create 0" in result.output
-    assert bs_server.store.page(page["id"])["markdown"] == "# Edited by human"
-
-
-def test_mirror_first_materialization_has_the_readonly_header(run_grison, bs_server):
+def test_mirror_first_materialization_has_the_generated_header(run_grison, bs_server):
     bs_server.store.seed_book(name="Playbook", description="d")
 
     run_grison("sync")
@@ -881,4 +932,64 @@ def test_mirror_first_materialization_has_the_readonly_header(run_grison, bs_ser
     text = (Path.cwd() / "methodology" / "library" / "playbook" / ".book.yml").read_text(
         encoding="utf-8"
     )
-    assert text.startswith("# READ-ONLY mirror")
+    assert text.startswith("# generated by grison")
+
+
+def test_undo_restores_a_deleted_page(run_grison, bs_server):
+    """Proves a real bug found via the lab proof: DELETE_REMOTE's forward direction
+    never touches the local file (it was already missing — that's what made it
+    DELETE_REMOTE), so undoing it must restore the local mirror too, or the very
+    next ordinary sync would see "missing, indexed" again and immediately re-delete
+    (or collide on) the record undo just brought back."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    path.unlink()
+    run_grison("sync")  # deletes it remotely (and snapshots the pre-image)
+    assert bs_server.store.page(page["id"]) is None
+    assert not path.exists()
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 0, result.output
+    restored = [p for p in bs_server.store.pages if p["name"] == "Notes"]
+    assert len(restored) == 1
+    assert restored[0]["markdown"] == "# N"
+    assert path.exists()  # the local mirror comes back too, not just the remote record
+    assert path.read_text(encoding="utf-8").strip().endswith("# N")
+
+    # the very next ordinary sync must stay clean — no re-delete, no collision
+    result2 = run_grison("sync")
+    assert "wiki (bs.page): clean 1" in result2.output
+    assert bs_server.store.page(restored[0]["id"]) is not None
+
+
+def test_undo_reverts_a_push(run_grison, bs_server):
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# Edited")
+    run_grison("sync")
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited"
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 0, result.output
+    assert bs_server.store.page(page["id"])["markdown"] == "# Original"
+
+
+def test_undo_list_shows_snapshots_newest_first(run_grison, bs_server):
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# N\n\nedit 1")
+    run_grison("sync")
+
+    result = run_grison("undo", "--list")
+
+    lines = [ln for ln in result.output.splitlines() if ln.strip()]
+    assert lines == sorted(lines, reverse=True)
+    assert len(lines) >= 1

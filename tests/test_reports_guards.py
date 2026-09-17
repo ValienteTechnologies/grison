@@ -11,8 +11,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
+from grison.cli import WikiPhaseResult
 from grison.remote import snapshot as snapshot_mod
-from grison.remote.methodology import MethResult
 from grison.remote.repmap import section_hash
 from grison.remote.reports import ReportResult, sync_reports
 from grison.remote.sync import SyncResult
@@ -276,7 +276,13 @@ def _set_gw_and_bs_creds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GRISON_BS_TOKEN_SECRET", "bssecret")
 
 
-def test_cli_isolates_findings_phase_crash_reports_and_methodology_still_run(
+# tests changed on purpose: the third sync phase is now "wiki" (engine-managed,
+# BsPageAdapter — task step 1's C), not "methodology"/sync_methodology — the CLI
+# phase-isolation mechanism (_run_phase) and its printed "<name> sync failed" wording
+# are unchanged, only the phase's own name/callable moved (cli_mod._run_wiki_phase).
+
+
+def test_cli_isolates_findings_phase_crash_reports_and_wiki_still_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import grison.cli as cli_mod
@@ -296,23 +302,22 @@ def test_cli_isolates_findings_phase_crash_reports_and_methodology_still_run(
         calls.append("report")
         return ReportResult()
 
-    def ok_sync_methodology(root, bs, *, dry_run=False, force_local=None, force_remote=None,
-                             on_event=None):
-        calls.append("methodology")
-        return MethResult()
+    def ok_run_wiki_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        calls.append("wiki")
+        return WikiPhaseResult()
 
     monkeypatch.setattr(cli_mod, "run_sync", boom_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", ok_sync_reports)
-    monkeypatch.setattr(cli_mod, "sync_methodology", ok_sync_methodology)
+    monkeypatch.setattr(cli_mod, "_run_wiki_phase", ok_run_wiki_phase)
 
     r = CliRunner().invoke(cli_mod.app, ["sync"])
 
-    assert calls == ["findings", "report", "methodology"]  # later phases ran despite the crash
+    assert calls == ["findings", "report", "wiki"]  # later phases ran despite the crash
     assert r.exit_code == 1
     assert "findings sync failed" in r.output and "findings blew up" in r.output
 
 
-def test_cli_isolates_methodology_phase_crash_after_clean_findings_and_reports(
+def test_cli_isolates_wiki_phase_crash_after_clean_findings_and_reports(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import grison.cli as cli_mod
@@ -328,27 +333,26 @@ def test_cli_isolates_methodology_phase_crash_after_clean_findings_and_reports(
                          on_event=None):
         return ReportResult()
 
-    def boom_sync_methodology(root, bs, *, dry_run=False, force_local=None, force_remote=None,
-                               on_event=None):
-        raise RuntimeError("methodology blew up")
+    def boom_run_wiki_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        raise RuntimeError("wiki blew up")
 
     monkeypatch.setattr(cli_mod, "run_sync", ok_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", ok_sync_reports)
-    monkeypatch.setattr(cli_mod, "sync_methodology", boom_sync_methodology)
+    monkeypatch.setattr(cli_mod, "_run_wiki_phase", boom_run_wiki_phase)
 
     r = CliRunner().invoke(cli_mod.app, ["sync"])
 
-    # a clean findings+reports run must not mask the methodology-phase crash
+    # a clean findings+reports run must not mask the wiki-phase crash
     assert r.exit_code == 1
-    assert "methodology sync failed" in r.output and "methodology blew up" in r.output
+    assert "wiki sync failed" in r.output and "wiki blew up" in r.output
 
 
 def test_cli_exits_nonzero_on_report_scope_failures_without_aborting_other_phases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The missing-scope trip-wire is a lint, not a crash: it must still fail the run
-    (same mechanism as collisions/errors) while letting findings and methodology run
-    to completion normally."""
+    (same mechanism as collisions/errors) while letting findings and the wiki phase
+    run to completion normally."""
     import grison.cli as cli_mod
 
     monkeypatch.chdir(tmp_path)
@@ -368,17 +372,16 @@ def test_cli_exits_nonzero_on_report_scope_failures_without_aborting_other_phase
             scope_failures=["report 5 (NoScope): project has no scope defined"]
         )
 
-    def ok_sync_methodology(root, bs, *, dry_run=False, force_local=None, force_remote=None,
-                             on_event=None):
-        calls.append("methodology")
-        return MethResult()
+    def ok_run_wiki_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        calls.append("wiki")
+        return WikiPhaseResult()
 
     monkeypatch.setattr(cli_mod, "run_sync", ok_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", scope_failing_sync_reports)
-    monkeypatch.setattr(cli_mod, "sync_methodology", ok_sync_methodology)
+    monkeypatch.setattr(cli_mod, "_run_wiki_phase", ok_run_wiki_phase)
 
     r = CliRunner().invoke(cli_mod.app, ["sync"])
 
-    assert calls == ["findings", "report", "methodology"]  # methodology still ran
+    assert calls == ["findings", "report", "wiki"]  # wiki phase still ran
     assert r.exit_code == 1
     assert "no scope defined" in r.output

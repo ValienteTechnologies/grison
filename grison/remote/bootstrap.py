@@ -12,7 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from grison import manifest as manifest_mod
 from grison.fsio import atomic_write_text, ensure_private_dir
+from grison.index import Index
 from grison.remote.creds import load_settings
 from grison.workspace import bootstrap_tree
 
@@ -128,7 +130,32 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
         atomic_write_text(env_path, _ENV_TEMPLATE, private=True)  # creds are secret
         env_created = True
 
-    _ensure_gitignored(root, ".grison/")
+    # A brand-new workspace (never had v1 content) starts at the CURRENT format —
+    # manifest.read() would otherwise read it as v1 the moment .grison/env exists
+    # (v1 predates manifest.yml entirely; see manifest.py's own docstring), sending
+    # a workspace that never had any v1 data through the "needs migration" path on
+    # its very first sync. This isn't only the freshly-generated-env case: a
+    # workspace whose .grison/env was created by hand or copied in (a scripted
+    # deployment, a credential rotation, this very repo's own lab proof) never sets
+    # env_created either, so the real signal is "is there any actual v1 CONTENT
+    # anywhere" (findings/ or methodology/ has at least one real file already) —
+    # only THAT means a real pre-v2 workspace whose format the later migration step
+    # must convert, not this bootstrap. Format v2's own .gitignore rule (D13/
+    # "Workspace format v2"): .grison/.gitignore is the private-file allow-list; the
+    # workspace root's OWN .gitignore must NOT blanket-ignore .grison/ (that was the
+    # v1 scaffold's shape) since manifest.yml/index.json must stay tracked.
+    manifest_path = root / ".grison" / "manifest.yml"
+    has_v1_content = any(
+        d.is_dir() and any(p.is_file() for p in d.rglob("*"))
+        for d in (root / "findings", root / "methodology")
+        if d.is_dir()
+    )
+    if not manifest_path.exists() and not has_v1_content:
+        manifest_mod.write(root)
+        manifest_mod.write_gitignore(root)
+        index_path = root / ".grison" / "index.json"
+        if not index_path.exists():
+            Index(root=root).save()
 
     settings = load_settings(root)
     claude_md_path = root / "CLAUDE.md"
