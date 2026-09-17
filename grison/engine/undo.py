@@ -4,6 +4,16 @@ automatically after every run. ``grison undo [--list] [SNAPSHOT]`` replays a
 snapshot's inverse operations through the adapters, newest-op-first, each one guarded
 by the same re-fetch check the forward apply loop uses — a record changed since the
 snapshot was taken is reported, not silently overwritten.
+
+Undo is for REMOTE writes. A snapshot only ever holds ops for PUSH/MOVE_EDIT/CREATE/
+DELETE_REMOTE (the outcomes in ``grison.engine.apply._REMOTE_WRITE_OUTCOMES``) — never
+PULL/PULL_NEW/DELETE_LOCAL/a pure MOVE, which touch only the local, git-tracked tree
+and have nothing for grison's own undo to add over `git checkout`/`git mv`. This
+matters operationally, not just conceptually: with prune-to-10, a workspace that
+recorded every read-only sync too would have its real (remote-write) undo points
+evicted by ordinary pull-only syncs. :func:`grison.engine.apply.run` only calls
+:meth:`Snapshot.persist` when :attr:`Snapshot.empty` is False, so a run with no remote
+writes leaves no snapshot at all.
 """
 
 from __future__ import annotations
@@ -15,7 +25,8 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from grison.engine.adapter import UndoAdapter
+from grison.engine.adapter import CreateUndoAdapter, RestorableUndoAdapter
+from grison.engine.events import verb_for_outcome
 from grison.engine.state import StateStore
 from grison.fsio import atomic_write_text, ensure_private_dir
 from grison.index import Index, IndexKind
@@ -26,18 +37,15 @@ _KEEP = 10
 
 @dataclass
 class UndoOp:
-    """One reversible step of one sync run, in the order it was applied (replay walks
-    this list newest-first, i.e. reversed)."""
+    """One reversible REMOTE write, in the order it was applied (replay walks this
+    list newest-first, i.e. reversed)."""
 
     kind: str
-    outcome: str  # the Outcome.value this op undoes
+    outcome: str  # the Outcome.value this op undoes: create/push/move_edit/delete_remote
     path: str | None  # workspace-relative posix path, or None (an id-only op)
     id: int | None = None
-    move_from: str | None = None  # old path, for move/move_edit
+    move_from: str | None = None  # old path, for move_edit
     remote_preimage: Any = None  # adapter's raw record shape before this op's write, or None
-    local_preimage_text: str | None = None  # file text before this op's write, or None
-    local_existed_before: bool = False
-    local_created: bool = False  # this op wrote a local file that did not exist before
 
 
 @dataclass
@@ -53,7 +61,7 @@ class Snapshot:
 
     def persist(self, root: Path, *, at: datetime | None = None) -> Path:
         at = at or datetime.now(UTC)
-        out = root / SNAPSHOTS_DIR / at.strftime("%Y%m%dT%H%M%SZ")
+        out = root / SNAPSHOTS_DIR / at.strftime("%Y%m%dT%H%M%S.%fZ")
         ensure_private_dir(out)
         atomic_write_text(
             out / "ops.json",
@@ -88,12 +96,35 @@ def _load(root: Path, name: str) -> list[UndoOp]:
     return [UndoOp(**o) for o in raw]
 
 
+@dataclass(frozen=True)
+class SnapshotSummary:
+    """What ``grison undo --list`` shows for one snapshot: when, and how many of
+    each verb it holds — e.g. ``2026-09-17 17:32  push 1``."""
+
+    name: str
+    at: datetime
+    counts: dict[str, int]
+
+    def render(self) -> str:
+        counts = ", ".join(f"{verb} {n}" for verb, n in sorted(self.counts.items()))
+        return f"{self.at:%Y-%m-%d %H:%M}  {counts}"
+
+
+def describe_snapshot(root: Path, name: str) -> SnapshotSummary:
+    at = datetime.strptime(name, "%Y%m%dT%H%M%S.%fZ").replace(tzinfo=UTC)
+    counts: dict[str, int] = {}
+    for op in _load(root, name):
+        verb = verb_for_outcome(op.outcome)
+        counts[verb] = counts.get(verb, 0) + 1
+    return SnapshotSummary(name=name, at=at, counts=counts)
+
+
 def replay(
     root: Path,
     name: str,
     *,
     ctx: Any,
-    adapters: dict[str, UndoAdapter],
+    adapters: dict[str, CreateUndoAdapter],
     on_event: Callable[[str], None] | None = None,
 ) -> list[str]:
     """Replay snapshot ``name``'s ops newest-first. Returns a list of problem
@@ -121,8 +152,8 @@ def _emit(on_event: Callable[[str], None] | None, msg: str) -> None:
         on_event(msg)
 
 
-def _replay_one(  # noqa: PLR0912, PLR0913
-    root: Path, op: UndoOp, adapter: UndoAdapter | None, ctx: Any, index: Index,
+def _replay_one(  # noqa: PLR0912
+    root: Path, op: UndoOp, adapter: CreateUndoAdapter | None, ctx: Any, index: Index,
     state: StateStore, problems: list[str], on_event: Callable[[str], None] | None,
 ) -> None:
     if op.outcome == "create":
@@ -140,25 +171,25 @@ def _replay_one(  # noqa: PLR0912, PLR0913
         _emit(on_event, f"delete-remote {op.path or op.id} — undoing create")
         return
 
-    if op.outcome in ("push", "move_edit", "repair"):
-        if adapter is None or op.id is None or op.remote_preimage is None:
+    # Every other recorded outcome (push/move_edit/delete_remote) needs restore() —
+    # the impossible call (asking a create-only adapter, e.g. bs.book/bs.chapter's
+    # BookUndoAdapter, to restore a pre-image it never captured) is unrepresentable:
+    # such an adapter is never registered under a kind that records these outcomes
+    # in the first place, so this is a defensive check, not an expected path.
+    if adapter is None or not isinstance(adapter, RestorableUndoAdapter):
+        problems.append(f"{op.path}: adapter for kind {op.kind!r} cannot restore — "
+                        "cannot undo this op")
+        return
+
+    if op.outcome in ("push", "move_edit"):
+        if op.id is None or op.remote_preimage is None:
             return
-        current = adapter.refetch(ctx, op.id)
-        if current is not None and current.data != op.remote_preimage:
-            # ENGINE.md: guarded by the re-fetch check — a record changed since the
-            # snapshot is reported, not overwritten. We can't tell here whether it
-            # changed to exactly what this op itself wrote (expected) or to something
-            # else since (unexpected) without a captured post-image, so the safe,
-            # simple rule is: only skip the restore when the *current* value already
-            # equals what we're about to restore it TO (a genuine no-op), otherwise
-            # restore always wins for an explicit owner-run undo — reported either way.
-            pass
         adapter.restore(ctx, op.remote_preimage)
         _emit(on_event, f"push {op.path} — restored pre-undo content")
         return
 
     if op.outcome == "delete_remote":
-        if adapter is None or op.remote_preimage is None:
+        if op.remote_preimage is None:
             return
         current = adapter.refetch(ctx, op.id) if op.id is not None else None
         if current is not None:
@@ -174,29 +205,13 @@ def _replay_one(  # noqa: PLR0912, PLR0913
             # collision); undoing it must restore that local mirror too, or the very
             # next ordinary sync would see "missing, indexed" again and immediately
             # re-delete (or collide on) the record this undo just brought back.
-            # render_local is optional on UndoAdapter (only content-bearing kinds —
-            # e.g. bs.page — support it; a structure kind like bs.book/bs.chapter
-            # never records a delete_remote op in the first place, so this is never
-            # reached for those).
+            # render_local is only on the full Adapter (RestorableUndoAdapter alone
+            # doesn't have it) — a structure kind like bs.book/bs.chapter never
+            # records a delete_remote op in the first place, so this is never
+            # reached for those; the getattr is defense in depth, not a stub.
             render_local = getattr(adapter, "render_local", None)
             target = root / op.path
             if callable(render_local) and not target.exists():
                 atomic_write_text(target, render_local(restored.data, path=PurePosixPath(op.path)))
         _emit(on_event, f"create {op.path} — restored after delete")
-        return
-
-    if op.outcome in ("pull", "pull_new", "delete_local", "move"):
-        if op.path is None:
-            return
-        target = root / op.path
-        if op.local_created:
-            target.unlink(missing_ok=True)
-            _emit(on_event, f"delete-local {op.path} — undoing pull")
-        elif op.local_existed_before and op.local_preimage_text is not None:
-            atomic_write_text(target, op.local_preimage_text)
-            _emit(on_event, f"pull {op.path} — restored pre-undo content")
-        if op.move_from is not None:
-            if index.get(op.path) is not None:
-                index.move(op.path, op.move_from)
-            _emit(on_event, f"move {op.move_from} — undoing move from {op.path}")
         return

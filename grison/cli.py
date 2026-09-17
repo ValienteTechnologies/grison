@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Annotated, TypeVar
+from typing import Annotated, Any, TypeVar
 
 import typer
 
@@ -25,12 +25,14 @@ from grison.adapters import bs_structure
 from grison.adapters._bs_common import build_context
 from grison.adapters.bs_pages import BsPageAdapter
 from grison.engine import events as engine_events
-from grison.engine.adapter import UndoAdapter
+from grison.engine.adapter import CreateUndoAdapter
 from grison.engine.apply import RunOptions
 from grison.engine.apply import run as engine_run
-from grison.engine.model import PROBLEM_OUTCOMES, Event, KindSummary, Plan
+from grison.engine.model import Event, KindSummary, Plan
+from grison.engine.offline_status import StatusEntry, compute_offline_status
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
+from grison.engine.undo import describe_snapshot as engine_describe_snapshot
 from grison.engine.undo import list_snapshots as engine_list_snapshots
 from grison.engine.undo import replay as engine_undo_replay
 from grison.errors import GrisonError
@@ -165,18 +167,27 @@ def status(
     ] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Whole-workspace overview: counts per area, only non-clean paths listed.
+    """Whole-workspace overview: per-area counts, only non-clean paths listed.
 
-    Offline by default (the index, private state, and ``grison validate``'s own
-    checks — no credentials, no network). ``--remote`` additionally contacts
-    BookStack and runs the engine's classify step in dry-run mode for the wiki, so
-    the report also shows what the next ``grison sync`` would actually do there.
-    Findings/reports are not yet engine-managed (a later step); this command reports
-    plain, validation-free file counts for them and says so.
+    Offline by default — the index, private state, and ``grison validate``'s own
+    checks, no credentials, no network: ``methodology/`` (on the sync engine) gets a
+    real per-record breakdown (clean/edited/new/deleted/moved/invalid/unknown, plus
+    any live collision sidecar) computed from the index and state alone, the same way
+    ``grison sync`` would classify locally. ``findings/``/``reports/`` are not yet
+    engine-managed (a later step) and say so, same as before. ``--remote``
+    additionally contacts BookStack and runs the engine's classify step in dry-run
+    mode for the wiki, so the report also shows what the next ``grison sync`` would
+    actually do there (will-pull, collision, remote-deleted, …).
 
-    Exit code: 0 clean, 1 something needs attention (matches ``grison validate``'s
-    own policy — see ``grison sync``'s result/exit-code policy in ENGINE.md §10),
-    2 could not run (no workspace).
+    "last sync" is read per PHASE from ``.grison/state/last-sync.json`` (each phase —
+    findings/report/wiki — records its own outcome there, including a failure), so
+    a phase that has never run, or last failed, is never reported as if it were fine.
+
+    Exit code: 0 clean, 1 something needs attention — an invalid record, an unknown
+    one (no recorded base to compare against), or a live collision sidecar; an
+    ordinary pending edit/new/deleted/moved record is not itself a problem (matches
+    ``grison validate``'s own policy — see ``grison sync``'s result/exit-code policy
+    in ENGINE.md §10) — 2 could not run (no workspace).
     """
     try:
         root = find_workspace_root(Path.cwd())
@@ -187,6 +198,7 @@ def status(
     failures = validate_workspace(root)
     state = StateStore(root)
     last_sync = state.load_last_sync()
+    phases = last_sync.get("phases", {}) if last_sync else {}
 
     findings_lib = root / "findings" / "library"
     findings_reports = root / "findings" / "reports"
@@ -195,9 +207,8 @@ def status(
         if findings_reports.is_dir() else []
 
     index = Index.load(root)
-    page_paths = sorted(p for p, r in index.records.items() if r.kind.value == "bs.page")
     wiki_failures = [f for f in failures if f.path.startswith("methodology")]
-    wiki_problem_paths = sorted({f.path for f in wiki_failures})
+    offline = compute_offline_status(root, BsPageAdapter(), index, state, wiki_failures)
 
     remote_summary: KindSummary | None = None
     remote_error: str | None = None
@@ -221,7 +232,10 @@ def status(
         else:
             remote_error = "BookStack credentials not configured"
 
-    problems = bool(wiki_failures) or (
+    offline_problems = bool(
+        offline.counts["invalid"] or offline.counts["unknown"] or offline.collision_sidecars
+    )
+    problems = offline_problems or (
         remote_summary is not None
         and any(k in remote_summary.counts for k in ("collision", "invalid", "failed", "withheld"))
     )
@@ -231,14 +245,16 @@ def status(
             "findings": {"managed": False, "library_files": lib_count,
                         "report_dirs": len(report_dirs)},
             "methodology": {
-                "managed": True, "pages_tracked": len(page_paths),
-                "invalid": len(wiki_problem_paths), "problem_paths": wiki_problem_paths,
+                "managed": True, "counts": offline.counts,
+                "non_clean": [_entry_json(e) for e in offline.non_clean],
+                "collision_sidecars": [str(p) for p in offline.collision_sidecars],
             },
             "remote": (
                 {"counts": remote_summary.counts, "problem_paths": remote_summary.problem_paths}
                 if remote_summary is not None else remote_error
             ),
-            "last_sync": last_sync,
+            "last_sync": {"findings": phases.get("findings"), "report": phases.get("report"),
+                         "wiki": phases.get("wiki")},
         }
         typer.echo(json.dumps(payload, indent=2))
         if problems:
@@ -249,24 +265,47 @@ def status(
         f"findings: {lib_count} library file(s), {len(report_dirs)} report dir(s) "
         "— not yet engine-managed"
     )
-    tag = "clean" if not wiki_problem_paths else f"{len(wiki_problem_paths)} invalid"
-    typer.echo(f"methodology: {len(page_paths)} page(s) tracked ({tag})")
-    for p in wiki_problem_paths:
-        typer.secho(f"  ! {p}", fg=typer.colors.RED)
+    counts_line = ", ".join(f"{b} {n}" for b, n in offline.counts.items() if n)
+    typer.echo(f"methodology: {counts_line or 'clean'}")
+    if offline.collision_sidecars:
+        typer.echo(f"methodology: {len(offline.collision_sidecars)} collision-sidecar(s) pending")
+        for sidecar in offline.collision_sidecars:
+            typer.secho(f"  ! {sidecar}: unresolved collision — run `grison sync "
+                       "--force-local`/`--force-remote`", fg=typer.colors.RED)
+    for entry in offline.non_clean:
+        color = typer.colors.RED if entry.bucket in ("invalid", "unknown") else None
+        detail = ""
+        if entry.bucket == "invalid":
+            detail = f" ({', '.join(entry.reasons)})"
+        elif entry.bucket == "moved":
+            detail = f" (from {entry.moved_from})"
+        elif entry.bucket == "unknown":
+            detail = " (no recorded base — never synced through this state store)"
+        typer.secho(f"  {entry.bucket:8} {entry.path}{detail}", fg=color, dim=color is None)
     if remote_summary is not None:
         counts = ", ".join(f"{k} {v}" for k, v in sorted(remote_summary.counts.items()))
         typer.echo(f"remote (--remote, dry-run): {counts}")
-        for p in remote_summary.problem_paths:
-            typer.secho(f"  ! {p}", fg=typer.colors.RED)
+        for problem_path in remote_summary.problem_paths:
+            typer.secho(f"  ! {problem_path}", fg=typer.colors.RED)
     elif remote_error is not None:
         typer.secho(f"remote: {remote_error}", fg=typer.colors.YELLOW)
-    if last_sync is not None:
-        typer.echo(f"last sync: {last_sync.get('at', '?')}")
-    else:
-        typer.echo("last sync: never")
+    for phase in ("findings", "report", "wiki"):
+        info = phases.get(phase)
+        if info is None:
+            typer.echo(f"last {phase} sync: never")
+        else:
+            tag = "ok" if info.get("ok") else f"FAILED — {info.get('error', 'see prior output')}"
+            typer.echo(f"last {phase} sync: {info.get('at', '?')} ({tag})")
 
     if problems:
         raise typer.Exit(code=1)
+
+
+def _entry_json(e: StatusEntry) -> dict[str, Any]:
+    return {
+        "path": str(e.path), "bucket": e.bucket, "reasons": list(e.reasons),
+        "moved_from": str(e.moved_from) if e.moved_from is not None else None,
+    }
 
 
 @app.command()
@@ -356,6 +395,12 @@ def sync(
                      "per event plus a final summary object). The findings/report phases are "
                      "not yet engine-managed and keep their existing text output either way."),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", help="Also show INFO-severity skips (drafts, templates, a "
+                     "wysiwyg page grison has never managed) — hidden by default since there is "
+                     "nothing to do about them; always present in --json regardless."),
+    ] = False,
 ) -> None:
     """Reconcile the workspace with Ghostwriter + BookStack — push/pull/collision
     derived per record.
@@ -410,16 +455,15 @@ def sync(
             _print_sync_summary(result, dry_run=dry_run)
         if rep is not None:
             _print_report_summary(rep, dry_run=dry_run)
-        bad = bool(phase_errors)
-        if result is not None:
-            bad = bad or bool(
-                result.collisions or result.invalid or result.corrupt
-                or result.mass_change_blocked or result.errors
-            )
-        if rep is not None:
-            bad = bad or bool(
-                rep.collisions or rep.mass_change_blocked or rep.errors or rep.scope_failures
-            )
+        findings_ok = result is not None and not bool(
+            result.collisions or result.invalid or result.corrupt
+            or result.mass_change_blocked or result.errors
+        )
+        report_ok = rep is not None and not bool(
+            rep.collisions or rep.mass_change_blocked or rep.errors or rep.scope_failures
+        )
+        bad = bool(phase_errors) or (result is not None and not findings_ok) \
+            or (rep is not None and not report_ok)
 
         if creds.bs_url and creds.bs_token_id and creds.bs_token_secret:
             def _do_wiki() -> WikiPhaseResult:
@@ -433,31 +477,90 @@ def sync(
                 if json_output:
                     typer.echo(_wiki_json(wiki))
                 else:
-                    _print_wiki_summary(wiki, dry_run=dry_run)
+                    _print_wiki_summary(wiki, dry_run=dry_run, verbose=verbose)
                 bad = bad or wiki.exit_code != 0
         bad = bad or bool(phase_errors)  # catches a wiki-phase failure too
 
         if not dry_run:  # capturing state is the point, even (especially) after failures
             _git_commit_or_warn(root, settings, _git_sync_message(bad, result, rep, wiki))
-            if wiki is not None:
-                _save_last_sync(root, wiki, bad=bad)
+            # item 6 shim: every phase that actually RAN records its own outcome in
+            # last-sync.json, including a failing one — `grison status` reads this to
+            # say when each phase last ran and whether it succeeded, which was
+            # previously true only for wiki (the only phase that wrote here at all).
+            if result is not None or _phase_error(phase_errors, "findings") is not None:
+                _record_phase_last_sync(
+                    root, "findings", ok=findings_ok,
+                    error=_phase_error(phase_errors, "findings"),
+                    summary=_findings_last_sync_summary(result) if result is not None else None,
+                )
+            if rep is not None or _phase_error(phase_errors, "report") is not None:
+                _record_phase_last_sync(
+                    root, "report", ok=report_ok, error=_phase_error(phase_errors, "report"),
+                    summary=_report_last_sync_summary(rep) if rep is not None else None,
+                )
+            if wiki is not None or _phase_error(phase_errors, "wiki") is not None:
+                _record_phase_last_sync(
+                    root, "wiki", ok=wiki is not None and wiki.exit_code == 0,
+                    error=_phase_error(phase_errors, "wiki"),
+                    summary=_wiki_last_sync_summary(wiki) if wiki is not None else None,
+                )
 
     if bad:
         raise typer.Exit(code=1)
 
 
-def _save_last_sync(root: Path, wiki: WikiPhaseResult, *, bad: bool) -> None:
-    """``.grison/state/last-sync.json`` (ENGINE.md 'State') — read by ``grison
-    status``. Wiki-only today (the findings/report phases aren't engine-managed yet);
-    a later step folds their own summaries in here too."""
-    payload = {
-        "at": datetime.now(UTC).isoformat(),
-        "ok": not bad,
+def _phase_error(phase_errors: list[str], name: str) -> str | None:
+    prefix = f"{name} sync failed: "
+    return next((m[len(prefix) :] for m in phase_errors if m.startswith(prefix)), None)
+
+
+def _findings_last_sync_summary(result: SyncResult) -> dict[str, Any]:
+    return {
+        "pulled": len(result.pulled), "pushed": len(result.pushed),
+        "inserted": len(result.inserted), "repaired": len(result.repaired),
+        "collisions": len(result.collisions), "invalid": len(result.invalid),
+        "corrupt": len(result.corrupt), "errors": len(result.errors),
+    }
+
+
+def _report_last_sync_summary(rep: ReportResult) -> dict[str, Any]:
+    return {
+        "pulled": len(rep.pulled), "pushed": len(rep.pushed),
+        "collisions": len(rep.collisions), "scope_failures": len(rep.scope_failures),
+        "errors": len(rep.errors),
+    }
+
+
+def _wiki_last_sync_summary(wiki: WikiPhaseResult) -> dict[str, Any]:
+    return {
         "kinds": {k: {"counts": s.counts, "problem_paths": s.problem_paths}
                  for k, s in wiki.summaries.items()},
         "snapshot_dir": str(wiki.snapshot_dir) if wiki.snapshot_dir else None,
     }
-    StateStore(root).save_last_sync(payload)
+
+
+def _record_phase_last_sync(
+    root: Path, phase: str, *, ok: bool, error: str | None, summary: dict[str, Any] | None,
+) -> None:
+    """``.grison/state/last-sync.json`` (ENGINE.md 'State') — read by ``grison
+    status``: ``{"phases": {"findings": {...}, "report": {...}, "wiki": {...}}}``, one
+    entry per phase that has ever run, each independently updated so one phase's
+    outcome never clobbers another's. A failing phase (``error`` set, ``summary``
+    ``None``) still gets an entry — `grison status`'s "last sync" line must never say
+    a broken phase looks fine just because it never wrote anything."""
+    state = StateStore(root)
+    payload = state.load_last_sync() or {}
+    phases = payload.get("phases")
+    if not isinstance(phases, dict):
+        phases = {}
+    entry: dict[str, Any] = {"at": datetime.now(UTC).isoformat(), "ok": ok}
+    if error is not None:
+        entry["error"] = error
+    if summary is not None:
+        entry["summary"] = summary
+    phases[phase] = entry
+    payload["phases"] = phases
+    state.save_last_sync(payload)
 
 
 @dataclass
@@ -475,7 +578,7 @@ class WikiPhaseResult:
 
     @property
     def exit_code(self) -> int:
-        if any(p.outcome in PROBLEM_OUTCOMES for p in self.plans) or self.structure.errors:
+        if any(p.is_problem for p in self.plans) or self.structure.errors:
             return 1
         return 0
 
@@ -506,6 +609,9 @@ def _run_wiki_phase(
     state = StateStore(root)
     snapshot = Snapshot()
     ctx = build_context(client, state)
+    ctx.indexed_page_ids = frozenset(
+        rec.id for rec in index.records.values() if rec.kind.value == BsPageAdapter.kind
+    )
 
     all_failures = validate_workspace(root, paths=[root / "methodology"])
     wiki_failures = [f for f in all_failures if f.path.startswith("methodology")]
@@ -554,8 +660,8 @@ def _wiki_json(wiki: WikiPhaseResult) -> str:
     return engine_events.render_json(wiki.events, summary=summary)
 
 
-def _print_wiki_summary(wiki: WikiPhaseResult, *, dry_run: bool) -> None:
-    for line in engine_events.render_text_lines(wiki.events):
+def _print_wiki_summary(wiki: WikiPhaseResult, *, dry_run: bool, verbose: bool = False) -> None:
+    for line in engine_events.render_text_lines(wiki.events, verbose=verbose):
         color = None
         if line.startswith(("collision", "invalid", "failed", "withheld")):
             color = typer.colors.RED
@@ -610,7 +716,7 @@ def undo(
         if not names:
             typer.echo("no snapshots")
         for n in names:
-            typer.echo(n)
+            typer.echo(engine_describe_snapshot(root, n).render())
         return
     if not names:
         typer.secho("no snapshots to undo", fg=typer.colors.YELLOW)
@@ -624,7 +730,7 @@ def undo(
     creds.require_bookstack()
     with _make_bs_client(creds) as client:
         ctx = build_context(client, StateStore(root))
-        adapters: dict[str, UndoAdapter] = {
+        adapters: dict[str, CreateUndoAdapter] = {
             BsPageAdapter.kind: BsPageAdapter(),
             bs_structure.BookUndoAdapter.kind: bs_structure.BookUndoAdapter(client),
             bs_structure.ChapterUndoAdapter.kind: bs_structure.ChapterUndoAdapter(client),

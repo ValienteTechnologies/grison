@@ -37,7 +37,14 @@ def classify(  # noqa: PLR0911, PLR0913
     ``force_local``/``force_remote`` resolve a COLLISION (including its DELETE_LOCAL/
     DELETE_REMOTE flavors) the way ``--force-local PATH``/``--force-remote PATH``
     do (ENGINE.md): local wins -> push/re-create/delete-remote; remote wins ->
-    pull/restore-locally/delete-local. They have no effect outside a collision.
+    pull/restore-locally/delete-local. They have no effect outside a collision —
+    in particular, a PULL_NEW slot (remote-only, never indexed: there is nothing
+    local to prefer and nothing to overwrite) ignores both flags by construction.
+    This is a known, accepted limitation (coordinator feedback item 8c): naming a
+    not-yet-pulled remote path on ``--force-local``/``--force-remote`` is simply a
+    no-op for that path, not an error — it is indistinguishable from any other path
+    that isn't currently a collision, and every other non-collision outcome (CLEAN,
+    PUSH, PULL, CREATE, MOVE, …) is silently un-forceable the same way.
     """
     if append_only:
         outcome = _classify_append_only(indexed=indexed, local_present=local_present)

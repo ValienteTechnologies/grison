@@ -19,7 +19,7 @@ from typing import Any
 
 from grison.adapters._bs_common import BSContext, slugify
 from grison.engine.adapter import AdapterMode
-from grison.engine.model import Canonical, LocalDoc, RemoteRecord
+from grison.engine.model import Canonical, LocalDoc, RemoteRecord, Veto, VetoSeverity
 from grison.formats import wiki as wiki_fmt
 from grison.formats.common import FormatError
 from grison.remote.bookstack import BookStackError
@@ -141,15 +141,24 @@ class BsPageAdapter:
             detail = ctx.client.fetch_page(pid)
             out[pid] = RemoteRecord(id=pid, data=_normalize(detail, books_by_id, chapters_by_id),
                                     witness=witness)
+        # Recycle-bin awareness (BRIEF B) is scoped to records grison already knows
+        # about — an indexed id whose remote copy is now in the bin gets the SKIP
+        # below; a binned page grison has never indexed (someone else's housekeeping,
+        # or one this workspace never pulled) is none of grison's business and must
+        # be ignored entirely: not fetched into a Plan, not counted, no event, not
+        # even on every sync forever (the bug this guard closes).
+        indexed_ids = ctx.indexed_page_ids
         for entry in ctx.client.fetch_recycle_bin():
             if entry.get("deletable_type") != "page":
                 continue
             rid = entry.get("deletable_id")
-            if rid is None or rid in out:
+            if rid is None or rid in out or rid not in indexed_ids:
                 continue
             deletable = entry.get("deletable") or {}
-            out[rid] = RemoteRecord(id=rid, data={"_recycled": True,
-                                                   "name": deletable.get("name", "")}, witness={})
+            out[rid] = RemoteRecord(
+                id=rid, data={"_recycled": True, "id": rid, "name": deletable.get("name", "")},
+                witness={},
+            )
         return out
 
     def refetch(self, ctx: BSContext, id: int) -> RemoteRecord | None:
@@ -271,19 +280,36 @@ class BsPageAdapter:
                             witness={"updated_at": rec.get("updated_at"),
                                     "revision_count": rec.get("revision_count")})
 
-    def veto(self, local: Any | None, remote: Any | None) -> str | None:
-        del local
+    def veto(self, local: Any | None, remote: Any | None) -> Veto | None:
         if not isinstance(remote, dict):
             return None
         if remote.get("_recycled"):
-            return _RECYCLE_REASON
+            # only ever reached for an INDEXED id (fetch_remote already filtered
+            # unknown binned pages out entirely) — grison was tracking this record,
+            # so its disappearance is worth the user's attention.
+            return Veto(_RECYCLE_REASON, VetoSeverity.ATTENTION)
         if remote.get("_skipped"):
             return None
         editor = remote.get("editor")
         if editor and editor != "markdown":
-            return "remote page is not markdown-native (wysiwyg) — convert it in BookStack first"
+            # a wysiwyg page grison has never managed (no local copy) is expected and
+            # inert — nothing lost, nothing to do. One that blocks a pending local
+            # edit (local is not None) is the case the user actually needs to see.
+            severity = VetoSeverity.ATTENTION if local is not None else VetoSeverity.INFO
+            return Veto(
+                "remote page is not markdown-native (wysiwyg) — convert it in BookStack first",
+                severity,
+            )
         if remote.get("draft"):
-            return "remote page is a draft — grison never syncs drafts"
+            return Veto("remote page is a draft — grison never syncs drafts", VetoSeverity.INFO)
         if remote.get("template"):
-            return "remote page is a template — grison never syncs templates"
+            return Veto("remote page is a template — grison never syncs templates",
+                        VetoSeverity.INFO)
         return None
+
+    def remote_label(self, data: Any) -> str:
+        if not isinstance(data, dict):
+            return str(data)
+        name = data.get("name") or "(untitled)"
+        rid = data.get("id")
+        return f'"{name}" (page {rid})' if rid is not None else f'"{name}"'

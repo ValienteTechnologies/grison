@@ -112,7 +112,10 @@ def test_a_lone_skip_does_not_by_itself_change_the_exit_code(run_grison, bs_serv
         raw_html="<p>rich</p>",
     )
 
-    result = run_grison("sync")
+    # a wysiwyg page grison has never managed is INFO-severity (nothing lost, nothing
+    # to do) — hidden from plain text by design (VetoSeverity); --verbose to see the
+    # line and prove it's still just a skip, never a "problem" outcome.
+    result = run_grison("sync", "--verbose")
 
     assert "wysiwyg" in result.output.lower()
     # the wiki phase's own summary shows nothing blocked — a lone skip, no collision/
