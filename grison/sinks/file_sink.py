@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from grison.fsio import atomic_write_text
 from grison.markdown import finding_to_markdown
 from grison.model import Finding
 
@@ -74,7 +75,7 @@ def _stems(findings: list[Finding], keys: list[str] | None) -> list[str]:
 
 
 class FileSink:
-    """Writes findings to ``out_dir`` as ``<stem>.md`` (implements the Sink port)."""
+    """Writes findings to ``out_dir`` as ``<stem>.md``."""
 
     def __init__(self, out_dir: Path) -> None:
         self.out_dir = out_dir
@@ -96,8 +97,7 @@ class FileSink:
                     result.unchanged.append(path)
                     continue
                 if not dry_run:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(content, encoding="utf-8")
+                    atomic_write_text(path, content)
                 result.written.append(path)
             except Exception as e:  # noqa: BLE001 — isolate one finding, keep the batch
                 result.errors.append(f"{path}: {e}")

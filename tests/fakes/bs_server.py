@@ -54,9 +54,11 @@ class LoggedRequest:
 
 @dataclass
 class _Injected:
-    kind: str  # "http500" | "timeout"
+    kind: str  # "http500" | "timeout" | "http_status"
     method: str | None = None
     path: str | None = None
+    status: int = 500  # only for http_status: the response code to return (e.g. 429/503)
+    retry_after: str | None = None  # only for http_status: sent as the Retry-After header
 
     def matches(self, method: str, path: str) -> bool:
         if self.method is not None and self.method.upper() != method.upper():
@@ -379,6 +381,25 @@ class FakeBookStack:
         for _ in range(times):
             self._pending.append(_Injected("timeout", method=method, path=path))
 
+    def inject_http_status(
+        self,
+        status: int,
+        *,
+        times: int = 1,
+        method: str | None = None,
+        path: str | None = None,
+        retry_after: str | None = None,
+    ) -> None:
+        """Same targeting as :meth:`inject_http_500`, but returns HTTP ``status``
+        (e.g. 429 or 503), optionally with a ``Retry-After`` response header."""
+        for _ in range(times):
+            self._pending.append(
+                _Injected(
+                    "http_status", method=method, path=path, status=status,
+                    retry_after=retry_after,
+                )
+            )
+
     def _pop_injection(self, method: str, path: str) -> _Injected | None:
         for i, item in enumerate(self._pending):
             if item.matches(method, path):
@@ -393,6 +414,11 @@ class FakeBookStack:
             raise httpx.TimeoutException("fake_bs: injected timeout", request=request)
         if injected is not None and injected.kind == "http500":
             return httpx.Response(500, text="fake_bs: injected internal server error")
+        if injected is not None and injected.kind == "http_status":
+            headers = {"Retry-After": injected.retry_after} if injected.retry_after else {}
+            return httpx.Response(
+                injected.status, text=f"fake_bs: injected {injected.status}", headers=headers
+            )
 
         expected_auth = f"Token {self.token_id}:{self.token_secret}"
         if request.headers.get("authorization") != expected_auth:

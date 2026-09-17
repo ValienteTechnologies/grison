@@ -4,7 +4,7 @@ import re
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -13,15 +13,15 @@ class NmapScanner(Scanner):
     name = "nmap"
     label = "Nmap"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         findings = self._parse_grepable(data) if opts.fmt == "grepable" else self._parse_xml(data)
         # Every finding here is INFO (open-port reporting has no other severity),
         # but --min-severity should still be able to suppress it like other scanners.
         return [f for f in findings if self._severity_allowed(f.severity, opts)]
 
-    def _parse_xml(self, data: bytes) -> list[Finding]:
+    def _parse_xml(self, data: bytes) -> list[ScanFinding]:
         root = ET.fromstring(data)
-        findings: list[Finding] = []
+        findings: list[ScanFinding] = []
 
         for host in root.findall(".//host"):
             if host.find("status[@state='up']") is None:
@@ -71,8 +71,8 @@ class NmapScanner(Scanner):
 
         return findings
 
-    def _parse_grepable(self, data: bytes) -> list[Finding]:
-        findings: list[Finding] = []
+    def _parse_grepable(self, data: bytes) -> list[ScanFinding]:
+        findings: list[ScanFinding] = []
         text = data.decode("utf-8", errors="replace")
 
         for line in text.splitlines():
@@ -117,7 +117,7 @@ class NmapScanner(Scanner):
 
     def _build_finding(
         self, label: str, ip: str, hostname: str, ports: list[dict]
-    ) -> Finding:
+    ) -> ScanFinding:
         rows = "".join(
             f"<tr><td>{p['port']}/{p['protocol']}</td>"
             f"<td>{p['service']}</td>"
@@ -133,7 +133,7 @@ class NmapScanner(Scanner):
         )
         components = [f"{p['port']}/{p['protocol']} ({p['service']})" for p in ports if p["port"]]
 
-        return Finding(
+        return ScanFinding(
             title=f"Open Ports – {label}",
             plugin_id=f"nmap-{ip or label}",
             severity=Severity.INFO,

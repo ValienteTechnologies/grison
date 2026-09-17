@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, cvss_to_severity
+from grison.scanners.ir import ScanFinding, cvss_to_severity
 from grison.scanners.ir.cvss2 import cvss2_to_cvss3
 
 from .base import ImportOptions, Scanner
@@ -21,7 +21,7 @@ class OpenVASScanner(Scanner):
     name = "openvas"
     label = "OpenVAS"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
 
         # Handle the get_reports_response wrapper: pick the first non-empty <results>
@@ -107,7 +107,7 @@ class OpenVASScanner(Scanner):
                 if component and component not in aggregated[oid]["affected"]:
                     aggregated[oid]["affected"].append(component)
 
-        findings: list[Finding] = []
+        findings: list[ScanFinding] = []
         for oid, meta in aggregated.items():
             refs_html = (
                 "<ul>"
@@ -117,7 +117,7 @@ class OpenVASScanner(Scanner):
                 else ""
             )
             findings.append(
-                Finding(
+                ScanFinding(
                     title=meta["title"],
                     plugin_id=oid,
                     severity=meta["severity"],

@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from grison.fsio import atomic_write_text, ensure_private_dir
+
 if TYPE_CHECKING:
     from grison.remote.ghostwriter import GhostwriterClient
 
@@ -118,14 +120,17 @@ class Snapshot:
                 client.set_tags(u.id, fields.get("table"), fields.get("tags") or [])
 
     def persist(self, when: str) -> Path:
-        """Write ``undo.json`` + a runnable ``rollback.py`` under a per-batch dir."""
+        """Write ``undo.json`` + a runnable ``rollback.py`` under a per-batch dir.
+        Both are private (0600 in a 0700 dir): ``undo.json`` can carry sensitive
+        pre-image content (including raw evidence bytes for a re-upload undo)."""
         out = SNAPSHOT_ROOT / when
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "undo.json").write_text(
+        ensure_private_dir(out)
+        atomic_write_text(
+            out / "undo.json",
             json.dumps([asdict(u) for u in self.undos], indent=2, ensure_ascii=False),
-            encoding="utf-8",
+            private=True,
         )
-        (out / "rollback.py").write_text(_ROLLBACK_SCRIPT, encoding="utf-8")
+        atomic_write_text(out / "rollback.py", _ROLLBACK_SCRIPT, private=True)
         return out
 
 

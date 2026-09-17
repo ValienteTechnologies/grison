@@ -4,7 +4,7 @@ import html
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -31,7 +31,7 @@ class AcunetixScanner(Scanner):
     name = "acunetix"
     label = "Acunetix"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
 
         scans = root.findall(".//Scan") if root.tag != "Scan" else [root]
@@ -113,8 +113,8 @@ class AcunetixScanner(Scanner):
                     if component and component not in aggregated[vuln_id]["affected"]:
                         aggregated[vuln_id]["affected"].append(component)
 
-        findings: list[Finding] = [
-            Finding(
+        findings: list[ScanFinding] = [
+            ScanFinding(
                 title=meta["title"],
                 plugin_id=vuln_id,
                 severity=meta["severity"],

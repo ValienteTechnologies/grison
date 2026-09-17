@@ -24,12 +24,12 @@ Layout (per-record JSON, atomic temp+rename, so a crash mid-batch never half-wri
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from grison.fsio import atomic_write_text
 from grison.model import Finding
 from grison.model.finding import SyncState
 
@@ -105,10 +105,7 @@ class StateStore:
 
     @staticmethod
     def _write(path: Path, model: _S) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(model.model_dump_json(exclude_none=True), encoding="utf-8")
-        os.replace(tmp, path)  # atomic on POSIX — no half-written state file
+        atomic_write_text(path, model.model_dump_json(exclude_none=True), private=True)
 
     # --- findings -------------------------------------------------------------
     def get_finding(self, table: str, ident: int) -> FindingState | None:

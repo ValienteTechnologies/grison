@@ -25,6 +25,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from grison import hashing
+from grison.fsio import atomic_write_bytes, atomic_write_text
 from grison.markdown import (
     DocumentError,
     extract_gw_identity,
@@ -159,7 +161,9 @@ def _carry_local_only(remote_f: Finding, local_f: Finding, *, forced: bool = Fal
         if entry.gw is None or entry.gw.id not in local_ev:
             continue
         local_e = local_ev[entry.gw.id]
-        base = local_e.gw.meta if local_e.gw is not None else None
+        # normalize: a base persisted before evidence_meta_hash gained its "sha256:"
+        # prefix is still un-prefixed on disk (see grison.hashing's module docstring)
+        base = hashing.normalize(local_e.gw.meta) if local_e.gw is not None else None
         remote_meta = entry.gw.meta if entry.gw.meta is not None else _entry_meta(entry)
         local_meta = _entry_meta(local_e)
         if local_meta == remote_meta:
@@ -383,8 +387,7 @@ def _download_evidence(
             continue
         _filename, data = client.download_evidence(entry.gw.id)
         img_path = target_dir / entry.file
-        img_path.parent.mkdir(parents=True, exist_ok=True)
-        img_path.write_bytes(data)
+        atomic_write_bytes(img_path, data)
         entry.gw.hash = _image_hash(data)
         result.evidence_written += 1
         _emit(on_event, f"evidence ↓ {Path(entry.file).name}")
@@ -863,7 +866,7 @@ def _apply(
             _emit(on_event, f"would collision {_rel(root, lr.path)}")
         else:
             sidecar = lr.path.with_suffix(".remote.md")
-            sidecar.write_text(finding_to_markdown(plan.remote_f), encoding="utf-8")
+            atomic_write_text(sidecar, finding_to_markdown(plan.remote_f))
             _emit(on_event, f"collision {_rel(root, lr.path)} → sidecar written")
             _surface_remote_losses(result, root, sidecar, plan.remote_losses)
         result.collisions.append(lr.path)
@@ -937,7 +940,7 @@ def _finalize(f: Finding, path: Path, root: Path) -> None:
     — this is the single place that keeps the two in sync on every stamp/finalize."""
     stamp_synced(f)
     persist_finding(StateStore(root), f)
-    path.write_text(finding_to_markdown(f), encoding="utf-8")
+    atomic_write_text(path, finding_to_markdown(f))
 
 
 def _clear_sidecar(path: Path) -> None:
@@ -1167,7 +1170,7 @@ def _apply_insert(
         # than silently reintroducing the echo by stamping a base off pre-canonicalization
         # local content.
         persist_finding(StateStore(root), f)
-        lr.path.write_text(finding_to_markdown(f), encoding="utf-8")
+        atomic_write_text(lr.path, finding_to_markdown(f))
         return
 
     # Persist the new id + base BEFORE evidence: if an upload then fails, the next sync
@@ -1193,8 +1196,7 @@ def _download_finding_evidence(
             continue
         _name, data = client.download_evidence(entry.gw.id)
         img = target_dir / entry.file
-        img.parent.mkdir(parents=True, exist_ok=True)
-        img.write_bytes(data)
+        atomic_write_bytes(img, data)
         entry.gw.hash = _image_hash(data)
         count += 1
         _emit(on_event, f"evidence ↓ {Path(entry.file).name}")
@@ -1225,11 +1227,11 @@ def _reconcile_evidence_meta(
     ``finalize`` is the push-side canonical persist (see :func:`_finalize_canonical`),
     passed down so the on-disk file stays the converter-canonical shell throughout."""
     assert entry.gw is not None and entry.gw.id is not None
-    base = entry.gw.meta
+    base = hashing.normalize(entry.gw.meta)  # see grison.hashing's module docstring
     local_meta = _entry_meta(entry)
     remote_meta = _row_meta(row)
     if local_meta == remote_meta:
-        if entry.gw.meta != remote_meta:  # e.g. base predates Track 1b — restamp, no drift
+        if base != remote_meta:  # e.g. base predates Track 1b — restamp, no drift
             entry.gw.meta = remote_meta
             finalize(path)
         return
@@ -1362,8 +1364,7 @@ def _push_evidence(
             row = remote_by_id.get(entry.gw.id)
             _name, data = client.download_evidence(entry.gw.id)
             img = path.parent / entry.file
-            img.parent.mkdir(parents=True, exist_ok=True)
-            img.write_bytes(data)
+            atomic_write_bytes(img, data)
             entry.gw.hash = _image_hash(data)
             if row is not None:
                 entry.gw.meta = _row_meta(row)

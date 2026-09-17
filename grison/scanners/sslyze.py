@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -91,7 +91,7 @@ class SslyzeScanner(Scanner):
     name = "sslyze"
     label = "SSLyze"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         doc = json.loads(data)
         server_results = doc.get("server_scan_results", [])
 
@@ -116,7 +116,7 @@ class SslyzeScanner(Scanner):
             self._check_certificates(scan_result, host_label, aggregated, opts)
 
         findings = [
-            Finding(
+            ScanFinding(
                 title=spec.title,
                 plugin_id=plugin_id,
                 severity=spec.severity,

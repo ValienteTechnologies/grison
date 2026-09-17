@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 
 @dataclass
@@ -35,10 +35,10 @@ class Scanner(ABC):
                 )
 
     @abstractmethod
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]: ...
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]: ...
 
     @staticmethod
-    def sort_by_severity(findings: list[Finding]) -> list[Finding]:
+    def sort_by_severity(findings: list[ScanFinding]) -> list[ScanFinding]:
         """Sort findings most-severe first (was copy-pasted across every parser)."""
         order = list(Severity)
         return sorted(findings, key=lambda f: order.index(f.severity), reverse=True)

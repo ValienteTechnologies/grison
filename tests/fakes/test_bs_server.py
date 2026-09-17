@@ -35,7 +35,8 @@ def _creds(bs: FakeBookStack) -> Creds:
 
 
 def _client(bs: FakeBookStack) -> BookStackClient:
-    return BookStackClient(_creds(bs), transport=bs.transport)
+    # sleep=lambda: no-op so a retry test doesn't actually wait out the backoff
+    return BookStackClient(_creds(bs), transport=bs.transport, sleep=lambda _: None)
 
 
 def test_auth_denied_matches_the_real_lab_server_shape() -> None:
@@ -194,9 +195,11 @@ def test_http_500_and_timeout_injection_target_method_and_path() -> None:
         c.create_page(name="X", markdown="x", book_id=book["id"])
     c.fetch_books()  # untargeted GET is unaffected
 
+    # Behavior change (deliberate, grison.remote.http): a GET is idempotent, so a
+    # one-shot transient timeout is retried transparently instead of raising.
     bs.inject_timeout(times=1, method="GET", path=r"/api/books")
-    with pytest.raises(httpx.TimeoutException):
-        c.fetch_books()
+    books = c.fetch_books()  # does NOT raise — the retry absorbs the one-shot timeout
+    assert books
 
 
 def test_operation_log_records_writes_in_order() -> None:

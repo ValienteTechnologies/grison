@@ -13,12 +13,11 @@ the content hash, so structure changes reconcile 3-way exactly like body edits.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-import yaml
+from grison import hashing
+from grison.markdown import frontmatter as fm
 
 
 @dataclass
@@ -44,7 +43,7 @@ class MethPage:
 
 def bs_content_hash(page: MethPage) -> str:
     """Merge base over the full syncable surface: title + location + order + tags + body."""
-    payload = json.dumps(
+    return hashing.digest_legacy(
         {
             "title": page.title,
             "book": page.book,
@@ -52,11 +51,8 @@ def bs_content_hash(page: MethPage) -> str:
             "priority": page.priority,
             "tags": page.tags,
             "body": page.body,
-        },
-        sort_keys=True,
-        ensure_ascii=False,
+        }
     )
-    return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
 
 
 def page_from_record(rec: dict, *, book_slug: str, chapter_slug: str | None = None) -> MethPage:
@@ -112,7 +108,7 @@ def page_to_markdown(page: MethPage) -> str:
     only (title/book/chapter/priority/tags/body, and ``grison.bs.page_id``). The merge
     base, BookStack's change markers, and the book/chapter id witnesses are volatile/
     derived and live in the state store (grison/state.py), never in the tracked file."""
-    fm: dict = {
+    meta: dict = {
         "grison": {
             "kind": "methodology",
             "bs": {"page_id": page.page_id},
@@ -121,17 +117,15 @@ def page_to_markdown(page: MethPage) -> str:
         "book": page.book,
     }
     if page.page_id is None:
-        fm["grison"]["bs"].pop("page_id")
+        meta["grison"]["bs"].pop("page_id")
     if page.chapter:
-        fm["chapter"] = page.chapter
+        meta["chapter"] = page.chapter
     if page.priority is not None:
-        fm["priority"] = page.priority
+        meta["priority"] = page.priority
     if page.tags:
         # value-less tags serialize as bare strings — the common case reads cleanly
-        fm["tags"] = [t["name"] if not t["value"] else dict(t) for t in page.tags]
-    fm_yaml = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip()
-    body = page.body.strip()
-    return f"---\n{fm_yaml}\n---\n\n{body}\n" if body else f"---\n{fm_yaml}\n---\n"
+        meta["tags"] = [t["name"] if not t["value"] else dict(t) for t in page.tags]
+    return fm.dump(meta, page.body)
 
 
 def markdown_to_page(text: str) -> MethPage:
@@ -139,27 +133,19 @@ def markdown_to_page(text: str) -> MethPage:
     only. The merge base, remote change markers, and book/chapter id witnesses are
     left at their defaults; the caller hydrates them from the state store right after
     this returns (grison/remote/methodology.py's ``_hydrate_page``)."""
-    if not text.startswith("---"):
-        raise ValueError("methodology document has no frontmatter")
-    lines = text.splitlines()
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            fm = yaml.safe_load("\n".join(lines[1:i])) or {}
-            body = "\n".join(lines[i + 1 :]).strip()
-            break
-    else:
-        raise ValueError("unterminated frontmatter")
-    grison = fm.get("grison", {})
+    meta, body = fm.split(text)
+    body = body.strip()
+    grison = meta.get("grison", {})
     bs = grison.get("bs", {})
     return MethPage(
         page_id=bs.get("page_id"),
         book_id=None,
-        book=fm.get("book", ""),
-        title=fm.get("title", ""),
+        book=meta.get("book", ""),
+        title=meta.get("title", ""),
         body=body,
-        chapter=fm.get("chapter"),
-        priority=fm.get("priority"),
-        tags=_norm_tags(fm.get("tags") or []),
+        chapter=meta.get("chapter"),
+        priority=meta.get("priority"),
+        tags=_norm_tags(meta.get("tags") or []),
     )
 
 

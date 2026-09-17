@@ -29,7 +29,8 @@ def _creds(gw: FakeGhostwriter) -> Creds:
 
 
 def _client(gw: FakeGhostwriter) -> GhostwriterClient:
-    return GhostwriterClient(_creds(gw), transport=gw.transport)
+    # sleep=lambda: no-op so a retry test doesn't actually wait out the backoff
+    return GhostwriterClient(_creds(gw), transport=gw.transport, sleep=lambda _: None)
 
 
 def test_schema_loads_and_is_cached() -> None:
@@ -253,10 +254,22 @@ def test_http_500_injection() -> None:
     c.whoami()  # the injection was one-shot — this call succeeds
 
 
-def test_timeout_injection() -> None:
+def test_timeout_injection_on_a_query_is_retried_and_succeeds() -> None:
+    """Behavior change (deliberate, grison.remote.http): a query is idempotent, so
+    a one-shot transient timeout is retried transparently instead of raising —
+    this used to raise before the retry policy landed."""
     gw = FakeGhostwriter()
     gw.inject_timeout(times=1)
     c = _client(gw)
+    result = c.whoami()  # does NOT raise — the retry absorbs the one-shot timeout
+    assert result["username"]
+
+
+def test_timeout_injection_still_raises_once_attempts_are_exhausted() -> None:
+    gw = FakeGhostwriter()
+    gw.inject_timeout(times=10)  # far more than max_attempts
+    c = GhostwriterClient(_creds(gw), transport=gw.transport, sleep=lambda _: None,
+                           max_attempts=3)
     with pytest.raises(httpx.TimeoutException):
         c.whoami()
 

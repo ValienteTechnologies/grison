@@ -84,20 +84,20 @@ def _make_transport(captured: list[httpx.Request] | None = None) -> httpx.MockTr
         method = request.method
 
         if method == "GET" and path == "/api/books":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _BOOK_ROWS})
         if method == "GET" and path == "/api/chapters":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _CHAPTER_ROWS})
         if method == "GET" and path == "/api/shelves":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _SHELF_ROWS})
         if method == "GET" and path == "/api/shelves/7":
             return httpx.Response(
                 200, json={**_SHELF_ROWS[0], "books": [{"id": 1, "slug": "methodology"}]}
             )
         if method == "GET" and path == "/api/pages":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _PAGE_LIST_ROWS})
         if method == "GET" and path == "/api/pages/10":
             return httpx.Response(200, json=_PAGE_DETAIL)

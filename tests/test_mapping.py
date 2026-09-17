@@ -5,18 +5,18 @@ from __future__ import annotations
 from grison.markdown.document import finding_to_markdown, markdown_to_finding
 from grison.markdown.mapping import default_finding_type, ir_to_finding
 from grison.model import FindingType, Severity
-from grison.scanners.ir import Finding as IRFinding
+from grison.scanners.ir import ScanFinding
 from grison.scanners.ir import Severity as IRSeverity
 
 
-def _ir(**over: object) -> IRFinding:
+def _ir(**over: object) -> ScanFinding:
     base: dict[str, object] = {
         "title": "Reflected XSS",
         "plugin_id": "p1",
         "severity": IRSeverity.HIGH,
     }
     base.update(over)
-    return IRFinding(**base)  # type: ignore[arg-type]
+    return ScanFinding(**base)  # type: ignore[arg-type]
 
 
 def test_mapping_core_rules() -> None:

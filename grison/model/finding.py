@@ -43,7 +43,11 @@ class SyncState(_Base):
 
 
 class GrisonMeta(_Base):
-    """The ``grison:`` frontmatter block — kind, tier, GW pointer, sync base."""
+    """Identity metadata for a Finding: kind, tier, and the GW pointer. ``synced``
+    (the 3-way merge base) is modeled here for the in-memory object, but it is
+    stripped before the document is written and lives in ``.grison/state/``
+    instead (see :mod:`grison.markdown.document`'s ``_strip_state`` and
+    :mod:`grison.state`) — the frontmatter block on disk is NOT the sync base."""
 
     kind: Literal["finding"] = "finding"
     tier: Literal["library", "instance"]

@@ -17,6 +17,7 @@ from typing import Annotated, TypeVar
 import typer
 
 from grison import gitdrive
+from grison.fsio import ensure_private_dir, open_private
 from grison.model import FindingType
 from grison.remote.bookstack import BookStackClient
 from grison.remote.bootstrap import bootstrap_workspace
@@ -143,7 +144,12 @@ def status(
 @app.command()
 def sync(
     dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Preview the plan, write nothing (== status).")
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Contact Ghostwriter/BookStack and preview the sync plan, write nothing "
+            "(unlike `status`, which is offline and findings-only).",
+        ),
     ] = False,
     force_local: Annotated[
         Path | None,
@@ -259,8 +265,8 @@ def _run_phase(name: str, fn: Callable[[], _T], phase_errors: list[str]) -> _T |
 def _workspace_lock(root: Path) -> Iterator[None]:
     """Serialize sync runs per workspace via an exclusive flock on .grison/lock."""
     lock_path = root / ".grison" / "lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = lock_path.open("w", encoding="utf-8")
+    ensure_private_dir(lock_path.parent)
+    fh = open_private(lock_path)
     try:
         try:
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)

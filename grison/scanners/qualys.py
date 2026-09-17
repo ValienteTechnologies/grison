@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -19,7 +19,7 @@ class QualysScanner(Scanner):
     name = "qualys"
     label = "Qualys"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
         tag = root.tag
 
@@ -33,7 +33,7 @@ class QualysScanner(Scanner):
                 "Expected WAS_SCAN_REPORT or SCAN."
             )
 
-    def _parse_was(self, root: ET.Element, opts: ImportOptions) -> list[Finding]:
+    def _parse_was(self, root: ET.Element, opts: ImportOptions) -> list[ScanFinding]:
         # Build glossary: QID -> {title, severity, description, solution, ...}
         glossary: dict[str, dict] = {}
         for qid_el in root.findall(".//GLOSSARY/QID_LIST/QID"):
@@ -77,7 +77,7 @@ class QualysScanner(Scanner):
 
         return self._build_findings(aggregated, opts)
 
-    def _parse_vuln(self, root: ET.Element, opts: ImportOptions) -> list[Finding]:
+    def _parse_vuln(self, root: ET.Element, opts: ImportOptions) -> list[ScanFinding]:
         aggregated: dict[str, dict] = {}
 
         for ip_el in root.findall(".//IP"):
@@ -105,8 +105,10 @@ class QualysScanner(Scanner):
 
         return self._build_findings(aggregated, opts)
 
-    def _build_findings(self, aggregated: dict[str, dict], opts: ImportOptions) -> list[Finding]:
-        findings: list[Finding] = []
+    def _build_findings(
+        self, aggregated: dict[str, dict], opts: ImportOptions
+    ) -> list[ScanFinding]:
+        findings: list[ScanFinding] = []
         for qid, meta in aggregated.items():
             severity = _SEVERITY_MAP.get(str(meta.get("severity", "3")), Severity.MEDIUM)
             if not self._severity_allowed(severity, opts):
@@ -124,7 +126,7 @@ class QualysScanner(Scanner):
             )
 
             findings.append(
-                Finding(
+                ScanFinding(
                     title=meta.get("title", f"QID {qid}"),
                     plugin_id=qid,
                     severity=severity,

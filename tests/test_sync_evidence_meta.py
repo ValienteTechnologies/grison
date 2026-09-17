@@ -457,3 +457,65 @@ def test_sync_pull_skips_unchanged_evidence_download(tmp_path: Path) -> None:
     assert calls == [ev_id]  # missing local file — re-downloaded
     assert r2.evidence_down == 1
     assert (path.parent / "evidence" / "shot.png").exists()
+
+
+# --- grison.hashing upgrade compat: a legacy un-prefixed meta base ---------------------------
+
+
+def test_legacy_unprefixed_evidence_meta_base_does_not_false_collide(tmp_path: Path) -> None:
+    """Proof for grison.hashing.normalize(): a per-image merge base persisted before
+    evidence_meta_hash gained its 'sha256:' prefix is un-prefixed on disk. A genuine
+    local-only caption edit against that legacy base must still classify as an
+    ordinary push (local ahead of an unchanged remote) — not a false collision, which
+    is what a raw string compare of an un-prefixed base against a freshly (prefixed)
+    computed remote hash would wrongly produce."""
+    fake = FakeGW()
+    path, rid, ev_id = _seed_with_evidence(tmp_path, fake, title="Legacy Meta")
+
+    store = StateStore(tmp_path)
+    st = store.get_finding("reportedFinding", rid)
+    assert st is not None
+    ev_state = st.evidence[str(ev_id)]
+    assert ev_state.meta is not None and ev_state.meta.startswith("sha256:")
+    ev_state.meta = ev_state.meta.removeprefix("sha256:")  # simulate a pre-upgrade base
+    store.put_finding("reportedFinding", rid, st)
+
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["evidence"][0]["caption"] = "new caption"
+    _write(path, Finding.model_validate(data))
+
+    r = sync(tmp_path, fake)
+    assert r.errors == []
+    assert path in r.pushed  # local_ahead, not a collision
+    assert fake.evidence[ev_id]["caption"] == "new caption"
+
+
+def test_legacy_unprefixed_evidence_meta_base_does_not_false_collide_on_pull_path(
+    tmp_path: Path,
+) -> None:
+    """Same proof as above, but for _carry_local_only (grison.remote.sync's pull-side
+    per-image reconcile — a separate code path, see
+    test_both_changed_evidence_meta_collides_on_pull_path): an unrelated remote body
+    edit forces the whole record to classify 'pull' this run, exercising the pull-side
+    normalize() call instead of the push-side one."""
+    fake = FakeGW()
+    path, rid, ev_id = _seed_with_evidence(tmp_path, fake, title="Legacy Meta Pull")
+
+    store = StateStore(tmp_path)
+    st = store.get_finding("reportedFinding", rid)
+    assert st is not None
+    ev_state = st.evidence[str(ev_id)]
+    assert ev_state.meta is not None and ev_state.meta.startswith("sha256:")
+    ev_state.meta = ev_state.meta.removeprefix("sha256:")  # simulate a pre-upgrade base
+    store.put_finding("reportedFinding", rid, st)
+
+    data = markdown_to_finding(path.read_text()).model_dump(mode="json")
+    data["evidence"][0]["caption"] = "new caption"
+    _write(path, Finding.model_validate(data))
+    fake.reported[rid]["description"] = "<p>remote body change</p>"  # forces a record-level pull
+
+    r = sync(tmp_path, fake)
+    assert r.errors == []
+    f2 = markdown_to_finding(path.read_text())
+    assert f2.evidence[0].caption == "new caption"  # local_ahead preserved, not a collision
+    assert "remote body change" in f2.description

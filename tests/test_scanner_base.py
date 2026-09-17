@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from grison.scanners.base import Scanner
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 
-def _f(sev: Severity) -> Finding:
-    return Finding(title=f"{sev.value} finding", plugin_id=sev.value, severity=sev)
+def _f(sev: Severity) -> ScanFinding:
+    return ScanFinding(title=f"{sev.value} finding", plugin_id=sev.value, severity=sev)
 
 
 def test_sort_by_severity_most_severe_first() -> None:

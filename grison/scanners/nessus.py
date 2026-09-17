@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 from grison.scanners.ir.cvss2 import cvss2_to_cvss3 as _cvss2_to_cvss3
 
 from .base import ImportOptions, Scanner
@@ -12,7 +12,7 @@ class NessusScanner(Scanner):
     name = "nessus"
     label = "Nessus"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
         # Aggregate: plugin_id -> {meta, affected_components, refs}
         aggregated: dict[str, dict] = {}
@@ -85,7 +85,7 @@ class NessusScanner(Scanner):
                     if component not in aggregated[plugin_id]["affected"]:
                         aggregated[plugin_id]["affected"].append(component)
 
-        findings: list[Finding] = []
+        findings: list[ScanFinding] = []
         for plugin_id, meta in aggregated.items():
             refs_html = (
                 "<ul>"
@@ -100,7 +100,7 @@ class NessusScanner(Scanner):
                 else meta["description"]
             )
             findings.append(
-                Finding(
+                ScanFinding(
                     title=meta["title"],
                     plugin_id=plugin_id,
                     severity=meta["severity"],
