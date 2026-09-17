@@ -8,8 +8,8 @@ independent checks built directly on markdown-it-py tokens and regexes — kept
 in this file, deliberately NOT importing wiki_cleanup's own internals for the
 oracle side of each proof (that would make the proof circular). The
 corruption-artifact checks are the one exception that's supposed to overlap:
-they import the exact regexes grison already uses in production
-(``grison.remote.methodology._ARTIFACT_RES``), per the task's instruction to
+they use ``_ARTIFACT_RES`` below, a frozen copy of the patterns the removed
+pre-engine sync module used to block pushes, per the task's instruction to
 "read the two existing patterns ... and reproduce fixtures for them".
 """
 
@@ -48,7 +48,16 @@ from grison.migrate.wiki_cleanup import (
     render_review,
     visible_text,
 )
-from grison.remote.methodology import _ARTIFACT_RES
+
+# Frozen copy of the artifact patterns the pre-engine BookStack sync module
+# (``grison/remote/methodology.py``, removed when the wiki moved onto the engine) used to
+# block pushes. Kept here as an independent oracle: the cleanup tool must repair exactly
+# what that module used to flag.
+_ARTIFACT_RES = [
+    (re.compile(r"\]\(https?://[^)\s]*$", re.M), "truncated link", False),
+    (re.compile(r'<span class="?citation'), "leaked citation span", True),
+    (re.compile(r'<div class="?notice'), "leaked notice-block div", True),
+]
 
 FIXTURES = Path(__file__).parent / "fixtures" / "wiki-cleanup"
 _MD = MarkdownIt("commonmark")
