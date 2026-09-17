@@ -69,3 +69,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "rule(id): a failing-case test proving this workspace-format-v2 rule id fires",
+    "rule_ok(id): a passing-case test proving this rule id does NOT fire on valid input",
+]

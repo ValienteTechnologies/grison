@@ -10,9 +10,13 @@ dist/
 # uv / venv
 .venv/
 
-# grison private workspace dir (creds + state) — never commit
-.grison/
+# grison private workspace dir (creds + state) — never commit. Anchored to the repo
+# root: tests/fixtures/ws-v2/.grison/ is real, tracked fixture data, not a scratch
+# workspace, and must not be swept up by this pattern.
+/.grison/
 
-# grison workspace content — real engagement data lands here after `grison sync`
-findings/
-methodology/
+# grison workspace content — real engagement data lands here after `grison sync` (repo
+# root only — see the note above; tests/fixtures/ws-v2/{findings,methodology}/ are
+# tracked fixture data).
+/findings/
+/methodology/

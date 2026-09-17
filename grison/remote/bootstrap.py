@@ -116,7 +116,11 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
     created_dirs = bootstrap_tree(root)
 
     grison_dir = root / ".grison"
-    ensure_private_dir(grison_dir)
+    # recursive=True: tighten permissions of files/dirs that ALREADY exist under
+    # .grison/ on every run too (a hand-created .grison/env with a wide mode, or a
+    # .grison/ copied/extracted from elsewhere, must not stay wide just because
+    # bootstrap only ever chmod'd the directory itself before).
+    ensure_private_dir(grison_dir, recursive=True)
 
     env_path = grison_dir / "env"
     env_created = False
