@@ -18,8 +18,12 @@ Layout (per-record JSON, atomic temp+rename, so a crash mid-batch never half-wri
 
     .grison/state/finding/<id>.json
     .grison/state/reportedFinding/<id>.json
-    .grison/state/page/<page_id>.json
     .grison/state/report/<report_id>.json
+
+(the wiki's own state — pages, books, chapters, shelves, mirrors — moved onto the sync
+engine's own layer, :mod:`grison.engine.state`, when ``grison/remote/methodology.py`` and
+``grison/remote/bsmap.py`` were deleted; this module now only covers findings/reports,
+which haven't moved onto the engine yet.)
 """
 
 from __future__ import annotations
@@ -65,16 +69,6 @@ class FindingState(_S):
     evidence: dict[str, EvidenceState] = Field(default_factory=dict)  # key = str(gw.id)
 
 
-class PageState(_S):
-    """State store entry for one BookStack methodology page."""
-
-    base: BaseState = Field(default_factory=BaseState)
-    remote_updated_at: str | None = None
-    remote_revision_count: int | None = None
-    book_id: int | None = None      # cached remote placement witness (drift/move detection)
-    chapter_id: int | None = None
-
-
 class ReportState(_S):
     """State store entry for one report's narrative-section merge bases."""
 
@@ -116,16 +110,6 @@ class StateStore:
 
     def delete_finding(self, table: str, ident: int) -> None:
         self._path(table, ident).unlink(missing_ok=True)
-
-    # --- methodology pages ----------------------------------------------------
-    def get_page(self, page_id: int) -> PageState | None:
-        return self._read(self._path("page", page_id), PageState)  # type: ignore[return-value]
-
-    def put_page(self, page_id: int, state: PageState) -> None:
-        self._write(self._path("page", page_id), state)
-
-    def delete_page(self, page_id: int) -> None:
-        self._path("page", page_id).unlink(missing_ok=True)
 
     # --- reports --------------------------------------------------------------
     def get_report(self, report_id: int) -> ReportState | None:

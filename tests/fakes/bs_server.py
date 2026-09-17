@@ -134,6 +134,8 @@ class BSStore:
             "description": "",
             "image_id": None,
             "cover": None,
+            "tags": [],
+            "shelf_ids": [],  # which shelves list this book, in shelf order — test-only bookkeeping
             "created_at": _now(),
             "updated_at": _now(),
             "owned_by": 1,
@@ -152,6 +154,7 @@ class BSStore:
             "name": "Untitled chapter",
             "description": "",
             "priority": 1,
+            "tags": [],
             "created_at": _now(),
             "updated_at": _now(),
             "owned_by": 1,
@@ -230,6 +233,23 @@ class BSStore:
 
     def shelf(self, shelf_id: int) -> dict | None:
         return next((s for s in self.shelves if s["id"] == shelf_id), None)
+
+    def edit_page(self, page_id: int, **fields: Any) -> dict:
+        """Simulate a real BookStack write to a page: set ``fields`` directly (e.g.
+        ``markdown=...``) AND bump ``revision_count``/``updated_at``, exactly like
+        ``_update_page`` does — real BookStack bumps both on every write. A test that
+        wants to simulate "this page changed on the server since we last synced it"
+        must go through this (or the real ``update_page``/``create_page`` API calls),
+        never a bare ``store.page(id)["markdown"] = ...``, which would leave the
+        witness stale and make the skip-detail-fetch fast path (correctly) treat the
+        page as still clean."""
+        page = self.page(page_id)
+        if page is None:
+            raise ValueError(f"page {page_id} not found")
+        page.update(fields)
+        page["revision_count"] += 1
+        page["updated_at"] = _now()
+        return page
 
     def gallery_image(self, image_id: int) -> dict | None:
         return next((g for g in self.gallery if g["id"] == image_id), None)
@@ -464,6 +484,13 @@ class FakeBookStack:
             if book is None:
                 raise BookStackFakeError(f"book {m.group(1)} not found")
             return httpx.Response(200, json=self._book_detail(book))
+        if method == "POST" and path == "/api/books":
+            body = json.loads(request.content.decode("utf-8"))
+            book = self._create_book(body)
+            return httpx.Response(200, json=self._book_detail(book))
+        if method == "DELETE" and (m := re.fullmatch(r"/api/books/(\d+)", path)):
+            self._delete_book(int(m.group(1)))
+            return httpx.Response(204)
 
         if method == "GET" and path == "/api/chapters":
             rows = []
@@ -477,6 +504,13 @@ class FakeBookStack:
             if chapter is None:
                 raise BookStackFakeError(f"chapter {m.group(1)} not found")
             return httpx.Response(200, json=self._chapter_detail(chapter))
+        if method == "POST" and path == "/api/chapters":
+            body = json.loads(request.content.decode("utf-8"))
+            chapter = self._create_chapter(body)
+            return httpx.Response(200, json=self._chapter_detail(chapter))
+        if method == "DELETE" and (m := re.fullmatch(r"/api/chapters/(\d+)", path)):
+            self._delete_chapter(int(m.group(1)))
+            return httpx.Response(204)
 
         if method == "GET" and path == "/api/shelves":
             return self._list_response([_shelf_list_row(s) for s in store.shelves], params)
@@ -566,7 +600,12 @@ class FakeBookStack:
             key=lambda p: p["priority"],
         ):
             contents.append({**_page_list_row(store, p), "type": "page"})
-        return {**_book_list_row(book), "contents": contents}
+        shelves = [
+            {"id": s["id"], "name": s["name"], "slug": s["slug"]}
+            for s in store.shelves if book["id"] in s.get("book_ids", [])
+        ]
+        return {**_book_list_row(book), "contents": contents, "tags": book["tags"],
+                "shelves": shelves}
 
     def _chapter_detail(self, chapter: dict) -> dict:
         store = self.store
@@ -577,7 +616,56 @@ class FakeBookStack:
                 key=lambda p: p["priority"],
             )
         ]
-        return {**_chapter_list_row(chapter), "pages": pages}
+        return {**_chapter_list_row(chapter), "pages": pages, "tags": chapter["tags"]}
+
+    # --- book/chapter writes -------------------------------------------------
+
+    def _create_book(self, body: dict) -> dict:
+        book = self.store.seed_book(name=body["name"], description=body.get("description", ""))
+        self.store._log("create_book", body)
+        return book
+
+    def _delete_book(self, book_id: int) -> None:
+        store = self.store
+        book = store.book(book_id)
+        if book is None:
+            raise BookStackFakeError(f"book {book_id} not found")
+        store.books.remove(book)
+        store.recycle_bin.append(
+            {
+                "id": store._next_id("deletion"), "deleted_by": 1, "created_at": _now(),
+                "updated_at": _now(), "deletable_type": "book", "deletable_id": book_id,
+                "deletable": dict(book),
+            }
+        )
+        store._log("delete_book", {"id": book_id})
+
+    def _create_chapter(self, body: dict) -> dict:
+        book_id = body.get("book_id")
+        if self.store.book(book_id) is None:
+            raise BookStackFakeError(f"book {book_id} not found")
+        siblings = [c for c in self.store.chapters if c["book_id"] == book_id]
+        chapter = self.store.seed_chapter(
+            book_id=book_id, name=body["name"], description=body.get("description", ""),
+            priority=len(siblings) + 1,
+        )
+        self.store._log("create_chapter", body)
+        return chapter
+
+    def _delete_chapter(self, chapter_id: int) -> None:
+        store = self.store
+        chapter = store.chapter(chapter_id)
+        if chapter is None:
+            raise BookStackFakeError(f"chapter {chapter_id} not found")
+        store.chapters.remove(chapter)
+        store.recycle_bin.append(
+            {
+                "id": store._next_id("deletion"), "deleted_by": 1, "created_at": _now(),
+                "updated_at": _now(), "deletable_type": "chapter", "deletable_id": chapter_id,
+                "deletable": dict(chapter),
+            }
+        )
+        store._log("delete_chapter", {"id": chapter_id})
 
     # --- writes ------------------------------------------------------------
 

@@ -71,6 +71,14 @@ def test_help_lists_verbs() -> None:
 def test_parse_bootstraps_and_status_reports_valid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # tests changed on purpose (task C, BRIEF "Standing calls"): the old paths-taking
+    # `grison status <path>` (v1 per-file finding validation) is gone — `grison
+    # validate` is the offline per-document validity command now, and the new
+    # `grison status` (no paths) is a whole-workspace overview instead. Findings are
+    # not yet engine-managed (a later step moves them onto format v2 — `grison
+    # parse`'s own output is still v1-shaped, see grison/remote/methodology.py's
+    # sibling modules for findings), so `grison status` reports them as a plain file
+    # count, not a validity verdict.
     scans = tmp_path / "scans"
     scans.mkdir()
     for name in ("burp_sample.xml", "nessus_sample.xml", "sslyze_sample.json"):
@@ -85,9 +93,16 @@ def test_parse_bootstraps_and_status_reports_valid(
     md_files = list(inbox.glob("*.md"))
     assert md_files
 
-    r2 = _runner.invoke(app, ["status", str(inbox)])
+    # `parse` alone never creates .grison/ (it stays fully offline and credential-free
+    # — only `sync`'s bootstrap does); `status` needs a workspace marker to run at all,
+    # same as `validate`, so give it the bare minimum by hand rather than pull in the
+    # whole credentialed sync path just for this offline check.
+    (tmp_path / ".grison").mkdir()
+
+    r2 = _runner.invoke(app, ["status"])
     assert r2.exit_code == 0, r2.output
-    assert "0 invalid" in r2.output
+    assert "not yet engine-managed" in r2.output
+    assert "methodology:" in r2.output
 
 
 def test_parse_skips_unrecognized(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,16 +188,23 @@ def test_sync_warnings_alone_do_not_flip_exit_code(
     assert "warning:" in r.output and "cvss score" in r.output
 
 
-def test_status_flags_invalid(tmp_path: Path) -> None:
-    bad = tmp_path / "bad.md"
-    # valid frontmatter/schema but a table in the body → GW whitelist violation
+def test_validate_flags_invalid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """tests changed on purpose: ``grison validate`` (offline, format v2) replaced
+    the old paths-taking ``grison status <path>`` (v1 per-file validity) — see
+    test_parse_bootstraps_and_status_reports_valid's own note."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".grison").mkdir()
+    (tmp_path / "findings" / "library").mkdir(parents=True)
+    bad = tmp_path / "findings" / "library" / "bad.md"
+    # a format-v2 finding with an unrecognized frontmatter field (FND-001)
     bad.write_text(
-        "---\ngrison:\n  tier: library\nseverity: low\nfinding_type: host\n---\n\n"
-        "# Bad\n\n## Description\n\n| a | b |\n| - | - |\n| 1 | 2 |\n"
+        "---\nseverity: low\nfinding_type: host\nbogus_field: nope\n---\n\n"
+        "# Bad\n\n## Description\n\nx\n\n## Impact\n\nx\n\n## Mitigation\n\nx\n\n"
+        "## Replication Steps\n\nx\n\n## References\n\nx\n"
     )
-    r = _runner.invoke(app, ["status", str(bad)])
+    r = _runner.invoke(app, ["validate", str(bad)])
     assert r.exit_code == 1
-    assert "INVALID" in r.output and "1 invalid" in r.output
+    assert "FND-001" in r.output
 
 
 # --- GRISON_GIT git-driving (Feature B) --------------------------------------------

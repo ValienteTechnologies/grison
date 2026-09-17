@@ -22,7 +22,7 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Self
 
 import httpx
 
@@ -135,7 +135,7 @@ class BaseHttpClient:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> BaseHttpClient:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:

@@ -15,6 +15,8 @@ import pytest
 from typer.testing import CliRunner, Result
 
 import grison.cli as cli_mod
+from grison import manifest as manifest_mod
+from grison.index import Index
 from grison.remote.bookstack import BookStackClient
 from grison.remote.creds import Creds
 from grison.remote.ghostwriter import GhostwriterClient
@@ -53,6 +55,16 @@ def workspace(tmp_path: Path, gw_server: FakeGhostwriter, bs_server: FakeBookSta
         f"GRISON_BS_TOKEN_SECRET={bs_server.token_secret}\n"
     )
     env_path.chmod(0o600)
+    # A real fresh bootstrap (grison/remote/bootstrap.py) writes manifest.yml/
+    # index.json/.grison/.gitignore together with .grison/env — this fixture
+    # pre-seeds env by hand (for the fake creds above) without going through that
+    # path, so it writes the same trio itself; every e2e workspace is format v2 from
+    # the start, matching what a real first `grison sync` would produce (never a v1
+    # workspace needing migration, which manifest.read() would otherwise read this
+    # as — see bootstrap.py's own comment on the same gap).
+    manifest_mod.write(root)
+    manifest_mod.write_gitignore(root)
+    Index(root=root).save()
     return root
 
 
