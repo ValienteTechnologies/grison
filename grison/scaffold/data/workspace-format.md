@@ -785,15 +785,8 @@ scope or the command fails — there is no way to spell a path that makes
 - A path naming a **directory** means everything under it, plus the cross-file rules
   that touch it (its evidence-or-image stems and captions, its mirrors, index
   consistency) — see §9.3 for exactly what each directory expands to.
-- A path naming a **file** means that document's own failures, plus any cross-file
-  failure that names it — never a sibling file's own-only failures. Concretely: every
-  rule this validator has, including the cross-document ones (`REF-003` stem
-  collisions, `REF-004` caption conflicts, `IDX-003`, `WS-009`/`WS-010`, `WIKI-007`,
-  …), already files each involved document's failure under THAT document's own
-  `path` — never one shared failure for a whole directory. So "narrow to file X" is
-  exactly "keep only failures whose own `path` is X": no extra cross-referencing
-  logic, just a filter over the containing report/book/checklist directory's full
-  failure list (§9.3).
+- A path naming a **file** means that document, plus the same cross-file rules for
+  its containing report/book/checklist directory.
 - A path that **does not exist** is a hard failure (exit `2`, `error: no such path:
   …`) — unless `--deleted-ok` is given (§9.4).
 - A path **outside the workspace** is a hard failure (exit `2`,
@@ -830,11 +823,6 @@ wrong."
 This table is exactly why the property "the union of validating `findings/` and
 `methodology/` separately equals validating the whole workspace" holds — both are
 built from the same discovery the whole-workspace scan uses, just scoped narrower.
-The same property holds one level down: validating every file inside
-`findings/reports/<dir>/` (or `methodology/library/<book>/`) one at a time and
-taking the union of the results equals validating that directory in one call — a
-**directory** argument always returns the unnarrowed, whole-directory result (today's
-behaviour, unchanged); only a **file** argument narrows (§9.2).
 
 ### 9.4 `--deleted-ok`
 

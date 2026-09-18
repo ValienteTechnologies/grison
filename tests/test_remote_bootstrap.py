@@ -69,16 +69,20 @@ def test_bootstrap_scaffolds_tree_env_and_gitignore(tmp_path: Path) -> None:
     # tests changed on purpose (workspace-format v2, BRIEF "Workspace format v2 —
     # layout and ownership": ".gitignore must NOT ignore `.grison/` wholesale (the v1
     # scaffold did; the migration rewrites that line)") — a FRESH bootstrap now writes
-    # format v2 straight away: .grison/.gitignore is the private-file allow-list, the
-    # workspace root's own .gitignore is untouched by bootstrap, and manifest.yml/
-    # index.json (both tracked) exist from the first run.
+    # format v2 straight away: .grison/.gitignore is the private-file allow-list,
+    # manifest.yml/index.json (both tracked) exist from the first run, and (task
+    # "self-contained workspace", grison/scaffold/) the workspace root's OWN
+    # .gitignore is now also scaffolded (idempotently merged), but only ever gets the
+    # collision-sidecar entry — it must still never blanket-ignore .grison/.
     result = bootstrap_workspace(tmp_path)
     assert (tmp_path / "findings" / "library").is_dir()
     assert (tmp_path / "methodology" / "checklists").is_dir()
     env = tmp_path / ".grison" / "env"
     assert env.exists() and result.env_created
     assert stat.S_IMODE(env.stat().st_mode) == 0o600  # creds are secret
-    assert not (tmp_path / ".gitignore").exists()  # bootstrap no longer touches it
+    root_gitignore = (tmp_path / ".gitignore").read_text()
+    assert "*.remote.*" in root_gitignore
+    assert ".grison/" not in root_gitignore  # never blanket-ignored
     grison_gitignore = (tmp_path / ".grison" / ".gitignore").read_text()
     assert "!manifest.yml" in grison_gitignore and "!index.json" in grison_gitignore
     assert manifest_mod.read(tmp_path).format == manifest_mod.CURRENT_FORMAT

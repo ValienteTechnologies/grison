@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,6 +16,20 @@ _FIX = Path(__file__).parent / "fixtures" / "scanners"
 _runner = CliRunner()
 _GW_CREDS_VARS = (
     "GRISON_GW_URL", "GRISON_GW_TOKEN", "GRISON_CF_CLIENT_ID", "GRISON_CF_CLIENT_SECRET",
+)
+
+# A minimal, format-v2-valid library finding — used by the git-driving tests below to
+# simulate a sync writing a new file: gitdrive.commit() now validates before
+# committing (brief D11 item 6), so the synthetic content a fake sync phase writes
+# must itself be a document that validates clean, not just an arbitrary placeholder.
+_VALID_LIBRARY_FINDING = (
+    "---\nseverity: low\nfinding_type: web\n---\n"
+    "# x\n\n"
+    "## Description\n\nx\n\n"
+    "## Impact\n\nx\n\n"
+    "## Mitigation\n\nx\n\n"
+    "## Replication Steps\n\nx\n\n"
+    "## References\n\nx\n"
 )
 
 
@@ -222,7 +237,7 @@ def test_sync_git_driving_commits_checkpoint_and_summary(
     (tmp_path / "pre.txt").write_text("dirty before sync even starts\n")
 
     def fake_run_sync(root, client, **kwargs):
-        (root / "findings" / "library" / "new.md").write_text("---\n---\n# x\n")
+        (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
         return SyncResult(pulled=[Path("a.md")], pushed=[Path("b.md")])
 
     _stub_sync_phases(monkeypatch, run_sync=fake_run_sync)
@@ -251,7 +266,7 @@ def test_sync_git_driving_notes_failures_in_message(
     _init_repo(tmp_path)
 
     def fake_run_sync(root, client, **kwargs):
-        (root / "findings" / "library" / "new.md").write_text("---\n---\n# x\n")
+        (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
         return SyncResult(errors=["boom"])
 
     _stub_sync_phases(monkeypatch, run_sync=fake_run_sync)
@@ -308,6 +323,12 @@ def test_sync_git_driving_silent_when_not_a_repo(
 def test_sync_git_driving_disabled_makes_no_git_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # tests changed on purpose (task "self-contained workspace", grison/scaffold/
+    # precommit.py): a git repo now gets its pre-commit hook installed regardless of
+    # GRISON_GIT (D11's hook is an independent, always-on enforcement point, not tied
+    # to whether grison itself drives commits) — that scaffolding step calls
+    # gitdrive.is_repo() on its own. What GRISON_GIT actually gates is gitdrive.commit()
+    # ever being called; that part of the contract is unchanged and still checked here.
     import grison.gitdrive as gitdrive_mod
 
     monkeypatch.chdir(tmp_path)
@@ -315,13 +336,12 @@ def test_sync_git_driving_disabled_makes_no_git_calls(
     monkeypatch.delenv("GRISON_GIT", raising=False)
     _init_repo(tmp_path)  # it IS a repo — but the setting is off, so it must be ignored
     calls: list[str] = []
-    monkeypatch.setattr(gitdrive_mod, "is_repo", lambda root: calls.append("is_repo") or True)
     monkeypatch.setattr(gitdrive_mod, "commit", lambda root, msg: calls.append("commit") or True)
     _stub_sync_phases(monkeypatch)
 
     r = _runner.invoke(app, ["sync"])
     assert r.exit_code == 0, r.output
-    assert calls == []
+    assert calls == []  # gitdrive.commit() itself is never called when the setting is off
 
 
 def test_sync_dry_run_never_commits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -410,3 +430,72 @@ def test_sync_claude_md_off_suppresses_scaffold_and_message(
     assert r.exit_code == 1
     assert "CLAUDE.md" not in r.output
     assert not (tmp_path / "CLAUDE.md").exists()
+
+
+# --- `grison scaffold` + `grison hook post-edit` ------------------------------------
+
+
+def test_scaffold_command_creates_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    r = _runner.invoke(app, ["scaffold"])
+    assert r.exit_code == 0, r.output
+    assert (tmp_path / "CLAUDE.md").exists()
+    assert (tmp_path / ".claude" / "settings.json").exists()
+    assert (tmp_path / ".grison" / "SPEC.md").exists()
+    assert "CLAUDE.md: created" in r.output
+
+
+def test_scaffold_command_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _runner.invoke(app, ["scaffold"])
+    r = _runner.invoke(app, ["scaffold"])
+    assert r.exit_code == 0, r.output
+    assert "CLAUDE.md: up-to-date" in r.output
+
+
+def test_scaffold_force_reports_regeneration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _runner.invoke(app, ["scaffold"])
+    r = _runner.invoke(app, ["scaffold", "--force"])
+    assert r.exit_code == 0, r.output
+    assert "updated .claude/settings.json" in r.output or "CLAUDE.md: regenerated" in r.output
+
+
+def test_hook_post_edit_reports_clean_file_silently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _runner.invoke(app, ["scaffold"])
+    good = tmp_path / "findings" / "library" / "good.md"
+    good.parent.mkdir(parents=True, exist_ok=True)
+    good.write_text(
+        "---\nseverity: low\nfinding_type: web\n---\n"
+        "# x\n\n## Description\n\nx\n\n## Impact\n\nx\n\n## Mitigation\n\nx\n\n"
+        "## Replication Steps\n\nx\n\n## References\n\nx\n"
+    )
+    payload = json.dumps({"tool_input": {"file_path": str(good)}, "cwd": str(tmp_path)})
+    r = _runner.invoke(app, ["hook", "post-edit"], input=payload)
+    assert r.exit_code == 0
+    assert r.output.strip() == ""
+
+
+def test_hook_post_edit_reports_invalid_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _runner.invoke(app, ["scaffold"])
+    bad = tmp_path / "findings" / "library" / "bad.md"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_text(
+        "---\nseverity: nope\nfinding_type: web\n---\n"
+        "# x\n\n## Description\n\nx\n\n## Impact\n\nx\n\n## Mitigation\n\nx\n\n"
+        "## Replication Steps\n\nx\n\n## References\n\nx\n"
+    )
+    payload = json.dumps({"tool_input": {"file_path": str(bad)}, "cwd": str(tmp_path)})
+    r = _runner.invoke(app, ["hook", "post-edit"], input=payload)
+    assert r.exit_code == 0  # PostToolUse can never fail the command
+    assert "FND-003" in r.output

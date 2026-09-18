@@ -104,8 +104,8 @@ WS_BAD_MANIFEST = _r(
 WS_GIT_HYGIENE = _r(
     "WS-008", "a private .grison/ path is tracked, or a tracked one is git-ignored",
     "fix .grison/.gitignore (grison writes it — see the workspace-format spec's "
-    ".gitignore allow-list) so private paths stay ignored and manifest.yml/"
-    "index.json stay tracked",
+    ".gitignore allow-list) so private paths stay ignored and grison's own tracked "
+    ".grison files stay tracked",
 )
 WS_MIRROR_EDITED = _r(
     "WS-009", "a read-only mirror file's content differs from what grison last generated",
@@ -324,8 +324,9 @@ TXT_CONFIDENTIAL_TERM = _r(
 # --- IDX: index consistency ------------------------------------------------------------
 
 IDX_BAD_INDEX = _r(
-    "IDX-001", ".grison/index.json is missing required structure or malformed",
-    "let grison regenerate it; never hand-edit .grison/index.json",
+    "IDX-001", "grison's tracked path-to-identity index is missing required structure "
+    "or malformed",
+    "let grison regenerate it; never hand-edit grison's tracked index file",
 )
 IDX_KIND_PATH_MISMATCH = _r(
     "IDX-002", "an indexed entry's kind does not match its path's shape",

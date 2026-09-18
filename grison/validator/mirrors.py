@@ -21,7 +21,36 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from grison.fsio import atomic_write_text
+
 STATE_RELATIVE_PATH = ".grison/state/mirrors.json"
+
+
+def _load(root: Path) -> dict[str, str]:
+    state_path = root / STATE_RELATIVE_PATH
+    if not state_path.exists():
+        return {}
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def record_digest(root: Path, path: str, digest: str) -> None:
+    """Record ``path``'s current digest as grison's own generated content, merging
+    into whatever is already recorded (a corrupt or missing file starts fresh rather
+    than failing — this is bookkeeping, never the source of truth for whether a
+    document is valid). ``.grison/state/`` is private, so this is written 0600 like
+    every other file under it. Used by :mod:`grison.scaffold` to mark a freshly
+    (re)generated file (e.g. ``CLAUDE.md``) as clean against the same digest
+    :func:`expected_digest` (and ``WS-009``) reads back."""
+    state = _load(root)
+    state[path] = digest
+    state_path = root / STATE_RELATIVE_PATH
+    atomic_write_text(state_path, json.dumps(state, indent=2, sort_keys=True) + "\n", private=True)
 
 
 def expected_digest(root: Path, path: str) -> str | None:

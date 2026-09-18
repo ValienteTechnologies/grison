@@ -16,6 +16,7 @@ from grison import manifest as manifest_mod
 from grison.fsio import atomic_write_text, ensure_private_dir
 from grison.index import Index
 from grison.remote.creds import load_settings
+from grison.scaffold import ScaffoldResult, scaffold_workspace
 from grison.workspace import bootstrap_tree
 
 _ENV_TEMPLATE = """\
@@ -42,67 +43,6 @@ GRISON_CF_CLIENT_SECRET=
 # GRISON_CLAUDE_MD=off  # skip scaffolding CLAUDE.md operator notes on first bootstrap (default: on)
 """
 
-_CLAUDE_MD_TEMPLATE = """\
-# grison workspace — operator notes
-
-This is a grison workspace: a plain-markdown mirror of Ghostwriter findings/reports
-and BookStack methodology. Editing the markdown here IS how you change the remote
-data — grison only validates and syncs, it has no AI subsystem of its own. You (the
-agent) are the transform layer.
-
-## Layout
-
-- `findings/inbox/` — `grison parse` output, local-only. Triage here: read, edit,
-  then `cp`/`mv` the keepers into `findings/library/` or a report dir. Never synced.
-- `findings/library/` — reusable finding templates. Syncs to Ghostwriter's finding
-  library.
-- `findings/reports/<id>-<slug>/` — one dir per *existing* Ghostwriter report.
-  grison never creates reports. Findings placed directly here sync as that report's
-  reported findings.
-- `findings/reports/<id>-<slug>/narrative/` — one markdown file per report
-  narrative section (exec summary, methodology, …). Edit freely; 3-way merged
-  per section.
-- `methodology/library/<book>/<chapter>/` — BookStack pages, markdown-native,
-  mirrored verbatim both ways.
-- `methodology/checklists/<engagement>/` — per-engagement working copies (`cp -r`
-  from library). Local-only, never synced.
-
-## Frontmatter contract
-
-Every finding/page has a `grison:` block in its YAML frontmatter (ids, hashes, sync
-state). **Never hand-edit anything inside `grison:`** — it's machine-owned and is the
-3-way merge base. Everything else (title, severity, body prose, tags, CVSS, …) is
-yours to edit normally.
-
-## `.grison/`
-
-grison's private state directory — creds, sync state, snapshots. Never read or write
-anything under here; it isn't part of the workspace data model.
-
-## Report dirs — what's read-only
-
-- `.report.yml` and `project.md` are regenerated every sync — read-only mirrors of
-  Ghostwriter project metadata. Read `project.md` for engagement context (scope,
-  objectives, white cards) before writing narrative — don't edit it.
-- `notes/<id>.md` files (with a `grison:` id in frontmatter) are read-only mirrors
-  of Ghostwriter project notes. To share a new note with the team, create
-  `notes/<name>.md` **without** frontmatter — grison pushes it as a new note on the
-  next sync.
-
-## Commands
-
-- `grison parse <file>` — scanner export → `findings/inbox/*.md` (offline).
-- `grison status <path…>` — validity report (offline, no writes).
-- `grison sync` / `grison sync --dry-run` — reconcile with Ghostwriter + BookStack;
-  dry-run previews the plan without writing anything.
-
-## Scope discipline
-
-Work only within the scope entries listed in each report's `project.md`. Entries
-marked `EXCLUDED` are off-limits — do not create findings, evidence, or narrative
-referencing them.
-"""
-
 
 @dataclass
 class BootstrapResult:
@@ -110,11 +50,19 @@ class BootstrapResult:
     env_created: bool  # True if a fresh (unfilled) env template was just written
     env_path: Path
     claude_md_created: bool  # True if a fresh CLAUDE.md scaffold was just written
+    scaffold: ScaffoldResult  # every other scaffolded file (SPEC.md, templates/,
+    # terms.txt, .claude/settings.json, root .gitignore, the git pre-commit hook) —
+    # see grison.scaffold.orchestrate.scaffold_workspace
 
 
 def bootstrap_workspace(root: Path) -> BootstrapResult:
-    """Scaffold the workspace tree, ``.grison/`` (+ env template), ``.gitignore``, and
-    (unless disabled) a ``CLAUDE.md`` operator-notes scaffold."""
+    """Scaffold the workspace tree, ``.grison/`` (+ env template), and every
+    self-contained-workspace artifact :mod:`grison.scaffold` owns — ``.grison/SPEC.md``,
+    ``.grison/templates/``, ``.grison/terms.txt``, ``CLAUDE.md``,
+    ``.claude/settings.json``, the root ``.gitignore``'s collision-sidecar entry, and
+    (when this is a git repo) the ``pre-commit`` hook — so a first ``grison sync``/
+    ``grison parse`` in an empty directory yields a complete, valid, self-contained
+    workspace (brief D11)."""
     created_dirs = bootstrap_tree(root)
 
     grison_dir = root / ".grison"
@@ -158,25 +106,20 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
             Index(root=root).save()
 
     settings = load_settings(root)
-    claude_md_path = root / "CLAUDE.md"
-    claude_md_created = False
-    if settings.claude_md_enabled and not claude_md_path.exists():
-        atomic_write_text(claude_md_path, _CLAUDE_MD_TEMPLATE)  # tracked, not private
-        claude_md_created = True
+    # A real, not-yet-migrated v1 workspace (has_v1_content, no manifest.yml written
+    # above) must not get v2-shaped scaffolding yet — CLAUDE.md's frontmatter rules,
+    # .grison/SPEC.md, and the rest all describe format v2, which doesn't apply until
+    # the one-time migration converts this workspace. `manifest_path` now exists
+    # exactly when this IS (or just became, in the block above) a v2 workspace.
+    if manifest_path.exists():
+        scaffold = scaffold_workspace(root, settings=settings)
+    else:
+        scaffold = ScaffoldResult()
 
     return BootstrapResult(
         created_dirs=created_dirs,
         env_created=env_created,
         env_path=env_path,
-        claude_md_created=claude_md_created,
+        claude_md_created=scaffold.claude_md_status == "created",
+        scaffold=scaffold,
     )
-
-
-def _ensure_gitignored(root: Path, entry: str) -> None:
-    gitignore = root / ".gitignore"
-    lines = gitignore.read_text(encoding="utf-8").splitlines() if gitignore.exists() else []
-    if entry not in [ln.strip() for ln in lines]:
-        with gitignore.open("a", encoding="utf-8") as fh:
-            if lines and lines[-1].strip():
-                fh.write("\n")
-            fh.write(f"{entry}\n")
