@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import unquote
 
 from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
@@ -50,6 +51,31 @@ class FoundRef:
     line: int
     standalone: bool
     in_list_item: bool
+
+
+def decode_ref_path(raw: str) -> str:
+    """markdown-it-py's link normalisation percent-encodes non-ASCII bytes in an
+    image/link destination (``evidence/Sonu%C3%A7lar%C4%B1.png`` for the author's
+    own ``evidence/Sonuçları.png``) — every consumer that resolves a destination
+    against the filesystem, an index, or another path's spelling needs the decoded
+    (identity) form back, not the encoded one markdown-it hands out. Used here (so
+    every :class:`FoundRef` already carries the decoded form) and independently by
+    a ``RefResolver`` that a destination can reach through a DIFFERENT markdown-it
+    parse — :mod:`grison.markdown.converter`'s own, not this module's — such as
+    :class:`grison.validator.refs.OfflineEvidenceResolver` or
+    :class:`grison.adapters._gw_common.IndexRefResolver`.
+
+    Left undecoded (still percent-encoded) when the percent-encoding names bytes
+    that are not valid UTF-8 — never raised out of here for every caller to catch:
+    a destination in that shape can never name a real file/index entry either way,
+    so it surfaces through each caller's EXISTING "does not resolve" validation
+    failure, with the bogus escaped text visible in the message — a validation
+    failure with a clear message, without inventing a second failure path callers
+    outside this fix's lane would also need to wire up."""
+    try:
+        return unquote(raw, errors="strict")
+    except UnicodeDecodeError:
+        return raw
 
 
 def scan_refs(md: str) -> list[FoundRef]:
@@ -103,7 +129,7 @@ def scan_refs(md: str) -> list[FoundRef]:
             out.append(
                 FoundRef(
                     kind="cross_reference",
-                    path=str(node.attrs.get("href") or ""),
+                    path=decode_ref_path(str(node.attrs.get("href") or "")),
                     caption=_flatten(node),
                     title=str(node.attrs.get("title") or ""),
                     line=_nearest_line(node),
@@ -120,7 +146,7 @@ def _from_image(node: SyntaxTreeNode, line: int, *, standalone: bool,
                 in_list_item: bool) -> FoundRef:
     return FoundRef(
         kind="embed",
-        path=str(node.attrs.get("src") or ""),
+        path=decode_ref_path(str(node.attrs.get("src") or "")),
         caption=_flatten(node),
         title=str(node.attrs.get("title") or ""),
         line=line,
