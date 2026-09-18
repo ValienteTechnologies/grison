@@ -552,9 +552,12 @@ def sync(
 
     Bootstraps on first run. Direction isn't chosen: a locally-edited record pushes, a
     remote-changed one pulls, and a record changed on both sides is surfaced (never
-    overwritten). Every remote write is snapshot-backed. ``--force-local``/
-    ``--force-remote`` accept a path under ``methodology/`` (routed to the wiki engine)
-    or under ``findings/`` (routed to the older findings/report phases).
+    overwritten). Every remote write is snapshot-backed: the whole run (report,
+    findings and wiki phases alike) shares ONE undo snapshot, so a single ``grison
+    undo`` afterwards reverses every remote write this run made, newest first —
+    never just the last phase's. ``--force-local``/``--force-remote`` accept a path
+    under ``methodology/`` (routed to the wiki engine) or under ``findings/`` (routed
+    to the older findings/report phases).
     """
     root = Path.cwd()
     boot = bootstrap_workspace(root)
@@ -576,6 +579,26 @@ def sync(
     # recorded and printed, never left to silently cancel the phases after it.
     phase_errors: list[str] = []
     wiki: WikiPhaseResult | None = None
+    # ONE undo snapshot for the whole run (not one per phase — grison.engine.undo's
+    # module docstring, "the user's mental model is 'undo the last sync'"): every
+    # phase below appends its remote-write preimages to this SAME Snapshot. It is
+    # checkpointed (persisted in place) after EACH phase that ran, not only once at
+    # the very end — a crash/Ctrl-C/uncaught error between phases must not lose an
+    # earlier phase's already-applied remote writes from the undo record. `run_at` is
+    # fixed once, up front, so every checkpoint of this run writes the SAME
+    # `.grison/snapshots/<run_at>/` directory (Snapshot.persist's `at` param) —
+    # overwriting ops.json with the fuller list so far, never creating a second
+    # directory. Still nothing is written for a pull-only run (the "no snapshot" rule
+    # — `not snapshot.empty` guards every checkpoint call).
+    snapshot = Snapshot()
+    run_at = datetime.now(UTC)
+    snapshot_dir: Path | None = None
+
+    def _checkpoint_snapshot() -> None:
+        nonlocal snapshot_dir
+        if not dry_run and not snapshot.empty:
+            snapshot_dir = snapshot.persist(root, at=run_at)
+
     with _workspace_lock(root):  # one sync at a time per workspace (GW has no compare-and-swap)
         if not dry_run:  # checkpoint whatever was dirty before we touch anything
             _git_commit_or_warn(root, settings, "grison: pre-sync checkpoint")
@@ -599,8 +622,14 @@ def sync(
             # "a reported finding belongs to the report whose indexed directory
             # it sits in") once that indexing has happened, so this order lets a
             # first sync pull a report AND its findings in one run instead of
-            # needing two.
-            rep = _run_phase(
+            # needing two. The report phase now ALSO syncs every report's
+            # evidence/ file set, before findings (D1: "replacing an image's
+            # bytes must re-push every finding referencing it, automatically, in
+            # the same run" — see _run_reports_phase's docstring) — its result
+            # carries the one evidence_by_report the findings phase's own
+            # GwReportedFindingAdapter needs, built once and shared, never a
+            # second org-wide evidence fetch.
+            rep_and_evidence = _run_phase(
                 "report",
                 lambda: _run_reports_phase(
                     root,
@@ -608,9 +637,14 @@ def sync(
                     dry_run=dry_run,
                     force_local=fl,
                     force_remote=fr,
+                    snapshot=snapshot,
                 ),
                 phase_errors,
             )
+            rep, evidence_by_report = (
+                rep_and_evidence if rep_and_evidence is not None else (None, {})
+            )
+            _checkpoint_snapshot()  # durable now, even if findings/wiki never run
             result = _run_phase(
                 "findings",
                 lambda: _run_findings_phase(
@@ -619,19 +653,12 @@ def sync(
                     dry_run=dry_run,
                     force_local=fl,
                     force_remote=fr,
+                    evidence_by_report=evidence_by_report,
+                    snapshot=snapshot,
                 ),
                 phase_errors,
             )
-        if result is not None:
-            if json_output:
-                typer.echo(_findings_json(result))
-            else:
-                _print_findings_summary(result, dry_run=dry_run, verbose=verbose)
-        if rep is not None:
-            if json_output:
-                typer.echo(_reports_json(rep))
-            else:
-                _print_reports_summary(rep, dry_run=dry_run, verbose=verbose)
+            _checkpoint_snapshot()  # durable now, even if the wiki phase never runs
         findings_ok = result is not None and result.exit_code == 0
         report_ok = rep is not None and rep.exit_code == 0
         bad = (
@@ -650,16 +677,39 @@ def sync(
                         dry_run=dry_run,
                         force_local=fl,
                         force_remote=fr,
+                        snapshot=snapshot,
                     )
 
             wiki = _run_phase("wiki", _do_wiki, phase_errors)
+            _checkpoint_snapshot()  # final checkpoint — wiki was the last phase to append
             if wiki is not None:
-                if json_output:
-                    typer.echo(_wiki_json(wiki))
-                else:
-                    _print_wiki_summary(wiki, dry_run=dry_run, verbose=verbose)
                 bad = bad or wiki.exit_code != 0
         bad = bad or bool(phase_errors)  # catches a wiki-phase failure too
+
+        if result is not None:
+            result.snapshot_dir = snapshot_dir
+        if rep is not None:
+            rep.snapshot_dir = snapshot_dir
+        if wiki is not None:
+            wiki.snapshot_dir = snapshot_dir
+
+        if result is not None:
+            if json_output:
+                typer.echo(_findings_json(result))
+            else:
+                _print_findings_summary(result, dry_run=dry_run, verbose=verbose)
+        if rep is not None:
+            if json_output:
+                typer.echo(_reports_json(rep))
+            else:
+                _print_reports_summary(rep, dry_run=dry_run, verbose=verbose)
+        if wiki is not None:
+            if json_output:
+                typer.echo(_wiki_json(wiki))
+            else:
+                _print_wiki_summary(wiki, dry_run=dry_run, verbose=verbose)
+        if not json_output and snapshot_dir is not None:
+            typer.echo(f"snapshot: {snapshot_dir}")
 
         if not dry_run:  # capturing state is the point, even (especially) after failures
             _git_commit_or_warn(root, settings, _git_sync_message(bad, result, rep, wiki))
@@ -790,9 +840,13 @@ def _findings_relative_force_set(root: Path, paths: set[Path]) -> frozenset[Pure
 
 @dataclass
 class FindingsPhaseResult:
-    """The findings phase's result: library findings + reported findings (both
-    through :mod:`grison.engine.apply`) and, per indexed report, its evidence
-    file set (through :mod:`grison.engine.filesets` — BRIEF task A/B)."""
+    """The findings phase's result: library findings + reported findings, both
+    through :mod:`grison.engine.apply`. Evidence file sets sync in the REPORTS
+    phase now, before this one — see :func:`grison.cli._run_reports_phase`'s
+    docstring (D1: a reupload's re-push must land in the same run as the
+    reupload, which requires evidence to sync before whatever references it) —
+    so ``ReportsPhaseResult``, not this one, carries evidence's own plans/
+    summaries/events."""
 
     plans: list[Plan] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
@@ -844,17 +898,31 @@ def _run_findings_phase(
     dry_run: bool,
     force_local: set[Path],
     force_remote: set[Path],
+    evidence_by_report: dict[int, dict[int, dict[str, Any]]],
+    snapshot: Snapshot,
 ) -> FindingsPhaseResult:
-    """The findings phase (BRIEF engine step 3): each indexed report's
-    ``evidence/`` file set first (so a fresh upload/reupload's id is visible to
-    the finding canonicalization that follows), then library findings, then
-    reported findings across every report (one adapter/kind — see
-    :mod:`grison.adapters.gw_findings`'s module docstring on cross-report
-    moves). Validation is scoped to ``findings/`` here, same pattern as the wiki
-    phase's own ``methodology/`` scoping."""
+    """The findings phase (BRIEF engine step 3): library findings, then reported
+    findings across every report (one adapter/kind — see
+    :mod:`grison.adapters.gw_findings`'s module docstring on cross-report moves).
+    Evidence file sets no longer sync here — see :func:`_run_reports_phase`'s
+    docstring (D1) — so ``evidence_by_report`` (that phase's own result, built
+    ONCE right after its evidence-file-set sync) is a required parameter, not
+    something this phase re-fetches; the fresh-index dependency that made "report
+    phase, then findings phase" work at all (a reupload's new id, or a brand-new
+    report directory, must already be on disk before this phase's own
+    ``Index.load`` below) is unchanged — it was always ``grison.cli.sync``'s
+    sequential phase calls (each phase persists its index before the next one
+    loads), never anything specific to where evidence used to sync. Validation is
+    scoped to ``findings/`` here, same pattern as the wiki phase's own
+    ``methodology/`` scoping.
+
+    ``snapshot`` is ``grison.cli.sync``'s ONE run-wide :class:`Snapshot` — the same
+    object the report and (if it runs) wiki phases also append to and that
+    ``sync`` alone persists, once, after every phase has run (one undo snapshot
+    per sync run, not one per phase — see :mod:`grison.engine.undo`'s module
+    docstring). This phase never persists it and never creates its own."""
     index = Index.load(root)
     state = StateStore(root)
-    snapshot = Snapshot()
     ctx = GWContext.build(client, index)
 
     all_failures = validate_workspace(root, paths=[root / "findings"])
@@ -862,65 +930,10 @@ def _run_findings_phase(
 
     fl = _findings_relative_force_set(root, force_local)
     fr = _findings_relative_force_set(root, force_remote)
-    fs_options = FilesetRunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
     options = RunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
 
     events: list[Event] = []
     summaries: dict[str, KindSummary] = {}
-    evidence_plans: list[Plan] = []
-
-    for report_dir in sorted(ctx.report_dirs):
-        report_id = ctx.report_dirs[report_dir]
-        evidence_adapter = GwEvidenceAdapter(report_id=report_id)
-        doc_bodies = _report_finding_bodies(root, report_dir)
-        evidence_dir = report_dir / "evidence"
-        try:
-            result = engine_sync_fileset(
-                root,
-                ctx,
-                evidence_adapter,
-                evidence_dir,
-                index=index,
-                state=state,
-                snapshot=snapshot,
-                doc_bodies=doc_bodies,
-                options=fs_options,
-            )
-        except Exception as e:  # noqa: BLE001 — per-record isolation (ENGINE.md §5):
-            # one report's evidence file set blowing up must not abort every other
-            # report/finding in this phase, any more than one record's own apply
-            # step does inside grison.engine.filesets/apply themselves.
-            reason = f"{type(e).__name__}: {e}"
-            events.append(Event(verb="failed", path=str(evidence_dir), detail=reason))
-            evidence_plans.append(
-                Plan(kind=evidence_adapter.kind, outcome=Outcome.FAILED, path=evidence_dir,
-                    reason=reason)
-            )
-            summaries[f"gw.evidence[{report_dir}]"] = KindSummary(
-                kind=evidence_adapter.kind, counts={"failed": 1},
-                problem_paths=[str(evidence_dir)],
-            )
-            continue
-        # a fileset's own problems (collision/failed/withheld evidence) must count
-        # toward this phase's exit code exactly like a finding's would — folded
-        # into the SAME plans list FindingsPhaseResult.exit_code reads, not just
-        # reported as text/JSON events that a bad run's exit code would then miss.
-        evidence_plans.extend(result.plans)
-        events.extend(result.events)
-        key = f"gw.evidence[{report_dir}]"
-        summaries[key] = result.summary
-        if not dry_run and result.resolved_captions:
-            _apply_caption_rewrites(
-                root, doc_bodies, result.resolved_captions, folder_name="evidence"
-            )
-
-    # Evidence rows, re-fetched fresh (post-write) for every report, so the
-    # findings adapters' RefResolver sees ids/captions/friendly-names as they
-    # actually are right now, not as of the start of this sync.
-    evidence_by_report: dict[int, dict[int, dict[str, Any]]] = {}
-    for report_id in ctx.report_dirs.values():
-        rows = GwEvidenceAdapter(report_id=report_id).list_remote(ctx)
-        evidence_by_report[report_id] = {i: r.data for i, r in rows.items()}
 
     lib_plans, lib_events, lib_summary = engine_run(
         root,
@@ -949,17 +962,13 @@ def _run_findings_phase(
     events.extend(rf_events)
     summaries[GwReportedFindingAdapter.kind] = rf_summary
 
-    snapshot_dir: Path | None = None
     if not dry_run:
         index.save()
-        if not snapshot.empty:
-            snapshot_dir = snapshot.persist(root)
 
     return FindingsPhaseResult(
-        plans=[*evidence_plans, *lib_plans, *rf_plans],
+        plans=[*lib_plans, *rf_plans],
         events=events,
         summaries=summaries,
-        snapshot_dir=snapshot_dir,
     )
 
 
@@ -995,8 +1004,9 @@ def _print_findings_summary(
             typer.secho(
                 f"MASS-CHANGE GUARD tripped on {kind} — writes withheld.", fg=typer.colors.RED
             )
-    if findings.snapshot_dir:
-        typer.echo(f"snapshot: {findings.snapshot_dir}")
+    # No per-phase "snapshot: ..." line here: one sync run shares ONE snapshot across
+    # every phase (grison.cli.sync persists it once, after the last phase runs, and
+    # prints it once itself) — see grison.engine.undo's module docstring.
 
 
 def _findings_last_sync_summary(findings: FindingsPhaseResult) -> dict[str, Any]:
@@ -1028,16 +1038,21 @@ def _run_wiki_phase(
     dry_run: bool,
     force_local: set[Path],
     force_remote: set[Path],
+    snapshot: Snapshot,
 ) -> WikiPhaseResult:
     """The wiki phase: BookStack structure (books/chapters/shelves — creates any new
     local book/chapter directory, then regenerates the read-only mirrors), then pages
     through :mod:`grison.engine.apply`. The validation gate is scoped to
     ``methodology/`` here (task step 1's scope parameter — findings/reports are still
     format v1 and would fail v2 validation wholesale); pulls are never blocked by it,
-    only pushes/creates/deletes (see ``grison.engine.apply``'s own gate)."""
+    only pushes/creates/deletes (see ``grison.engine.apply``'s own gate).
+
+    ``snapshot`` is ``grison.cli.sync``'s ONE run-wide :class:`Snapshot`, shared with
+    the report and findings phases that already ran — this phase's own writes
+    (structure, images, pages) append to it too, never their own snapshot; ``sync``
+    persists it once, after this (the last) phase runs."""
     index = Index.load(root)
     state = StateStore(root)
-    snapshot = Snapshot()
     ctx = build_context(client, state)
     ctx.indexed_page_ids = frozenset(
         rec.id for rec in index.records.values() if rec.kind.value == BsPageAdapter.kind
@@ -1069,7 +1084,8 @@ def _run_wiki_phase(
 
     # D9/BRIEF task C: each book's images/ folder BEFORE its pages, so a fresh
     # upload's gallery URL is visible to the page push that follows (same
-    # ordering reason as gw_evidence-before-findings, see _run_findings_phase).
+    # ordering reason as gw.evidence-before-gw.reportSection, see
+    # _run_reports_phase).
     events: list[Event] = []
     summaries: dict[str, KindSummary] = {}
     image_plans: list[Plan] = []
@@ -1111,18 +1127,14 @@ def _run_wiki_phase(
     summaries[BsPageAdapter.kind] = summary
     plans = [*image_plans, *plans]
 
-    snapshot_dir: Path | None = None
     if not dry_run:
         index.save()
-        if not snapshot.empty:
-            snapshot_dir = snapshot.persist(root)
 
     return WikiPhaseResult(
         plans=plans,
         events=events,
         summaries=summaries,
         structure=structure,
-        snapshot_dir=snapshot_dir,
     )
 
 
@@ -1223,15 +1235,27 @@ def _print_wiki_summary(wiki: WikiPhaseResult, *, dry_run: bool, verbose: bool =
         typer.secho(f"skipped  {path}: {reason}", fg=typer.colors.YELLOW)
     for e in st.errors:
         typer.secho(f"  error: {e}", fg=typer.colors.RED)
-    if wiki.snapshot_dir:
-        typer.echo(f"snapshot: {wiki.snapshot_dir}")
+    # No per-phase "snapshot: ..." line here — see _print_findings_summary's comment.
 
 
 @dataclass
 class ReportsPhaseResult:
     """The reports phase's result: report-directory structure (create + mirrors +
     missing-scope trip-wire), plus every :class:`~grison.engine.model.Plan` reached
-    across both engine-managed kinds (``gw.reportSection``, ``gw.projectNote``)."""
+    across every kind this phase now owns — ``gw.evidence[<report_dir>]`` (one
+    file-set summary per report; see :mod:`grison.engine.filesets`),
+    ``gw.reportSection``, ``gw.projectNote``.
+
+    D1 ("replacing an image's bytes must re-push every finding referencing it,
+    automatically, in the same run"): evidence file sets sync HERE, before
+    narrative sections, not in the findings phase — a report's ``evidence/``
+    folder belongs to the report, and a narrative section's own re-push (on a
+    reupload) must land in the SAME run as the reupload, which only holds if
+    the reupload has ALREADY happened by the time ``NarrativeSectionAdapter``
+    classifies. The evidence plans/summaries/events counted here (not in
+    ``FindingsPhaseResult``) is a deliberate choice, not an accident of where
+    the code physically runs — see :func:`_run_reports_phase`'s docstring for
+    the exact reasoning and where `grison status`/``--json`` surface it."""
 
     plans: list[Plan] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
@@ -1265,15 +1289,40 @@ def _run_reports_phase(
     dry_run: bool,
     force_local: set[Path],
     force_remote: set[Path],
-) -> ReportsPhaseResult:
+    snapshot: Snapshot,
+) -> tuple[ReportsPhaseResult, dict[int, dict[int, dict[str, Any]]]]:
     """The reports phase: report directories + `.report.yml`/`project.md` mirrors
     (:func:`grison.adapters.gw_report.sync_report_dirs` — structure-style, like the
-    wiki's book/chapter pass), then narrative sections and project notes through the
-    engine. The validation gate is scoped to ``findings/reports`` (findings/library
-    and findings/inbox are still format v1 — the findings phase, not this one)."""
+    wiki's book/chapter pass); THEN, per indexed report, its ``evidence/`` file set
+    (:mod:`grison.engine.filesets` — moved here from the findings phase, D1: "a
+    reupload must re-push every finding referencing it, automatically, in the same
+    run" — this only holds for a NARRATIVE section's own reupload-triggered re-push
+    if the reupload has already happened by the time ``NarrativeSectionAdapter``
+    classifies, and the reports phase runs before the findings phase, so evidence
+    has to sync here to land in the SAME run at all); THEN narrative sections and
+    project notes through the engine, using the evidence rows the fileset sync just
+    established (``evidence_by_report``, returned alongside the result — the
+    findings phase's ``GwReportedFindingAdapter`` needs the exact same rows, built
+    only ONCE here and shared rather than re-fetched, per the coordinator's
+    instruction). The validation gate is scoped to ``findings/reports``
+    (findings/library and findings/inbox are still format v1 — the findings phase,
+    not this one).
+
+    Evidence's own plans/summaries/events land in THIS phase's result (a deliberate
+    choice — the alternative, folding them into ``FindingsPhaseResult`` instead, was
+    considered and rejected: evidence now sync BEFORE, not alongside, the findings
+    engine runs, so counting them there would misdescribe when/where the work
+    happened; ``grison status``/``--json`` read ``ReportsPhaseResult.summaries``'s
+    ``gw.evidence[<report_dir>]`` keys exactly as before, just attributed to the
+    "report" phase instead of "findings" in the per-phase last-sync bookkeeping).
+
+    ``snapshot`` is ``grison.cli.sync``'s ONE run-wide :class:`Snapshot` — the
+    findings and (if it runs) wiki phases append to the SAME object; this phase
+    (the first one to run) never persists it and never creates its own (one undo
+    snapshot per sync run, not one per phase — see :mod:`grison.engine.undo`'s
+    module docstring)."""
     index = Index.load(root)
     state = StateStore(root)
-    snapshot = Snapshot()
     ctx = build_gw_context(client, index)
 
     dirs = gw_report.sync_report_dirs(
@@ -1293,12 +1342,73 @@ def _run_reports_phase(
     fl = _reports_relative_force_set(root, force_local)
     fr = _reports_relative_force_set(root, force_remote)
     options = RunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
+    fs_options = FilesetRunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
 
     plans: list[Plan] = []
     events: list[Event] = []
     summaries: dict[str, KindSummary] = {}
-    for adapter in (NarrativeSectionAdapter(), ReportNoteAdapter()):
-        p, e, s = engine_run(
+
+    # --- evidence file sets, one per indexed report (D1 — see docstring above) ---
+    evidence_ctx = GWContext.build(client, index)
+    for report_dir in sorted(evidence_ctx.report_dirs):
+        report_id = evidence_ctx.report_dirs[report_dir]
+        evidence_adapter = GwEvidenceAdapter(report_id=report_id)
+        doc_bodies = _report_finding_bodies(root, report_dir)
+        evidence_dir = report_dir / "evidence"
+        try:
+            fs_result = engine_sync_fileset(
+                root,
+                evidence_ctx,
+                evidence_adapter,
+                evidence_dir,
+                index=index,
+                state=state,
+                snapshot=snapshot,
+                doc_bodies=doc_bodies,
+                options=fs_options,
+            )
+        except Exception as e:  # noqa: BLE001 — per-record isolation (ENGINE.md §5):
+            # one report's evidence file set blowing up must not abort every other
+            # report/section in this phase, any more than one record's own apply
+            # step does inside grison.engine.filesets/apply themselves.
+            reason = f"{type(e).__name__}: {e}"
+            events.append(Event(verb="failed", path=str(evidence_dir), detail=reason))
+            plans.append(
+                Plan(kind=evidence_adapter.kind, outcome=Outcome.FAILED, path=evidence_dir,
+                    reason=reason)
+            )
+            summaries[f"gw.evidence[{report_dir}]"] = KindSummary(
+                kind=evidence_adapter.kind, counts={"failed": 1},
+                problem_paths=[str(evidence_dir)],
+            )
+            continue
+        # a fileset's own problems (collision/failed/withheld evidence) must count
+        # toward THIS phase's exit code exactly like a section's would — folded
+        # into the SAME plans list ReportsPhaseResult.exit_code reads, not just
+        # reported as text/JSON events that a bad run's exit code would then miss.
+        plans.extend(fs_result.plans)
+        events.extend(fs_result.events)
+        summaries[f"gw.evidence[{report_dir}]"] = fs_result.summary
+        if not dry_run and fs_result.resolved_captions:
+            _apply_caption_rewrites(
+                root, doc_bodies, fs_result.resolved_captions, folder_name="evidence"
+            )
+
+    # Evidence rows, re-fetched fresh (post-write) for every report, so the
+    # narrative/findings adapters' RefResolvers see ids/captions/friendly-names as
+    # they actually are right now, not as of the start of this sync — built ONCE
+    # here and returned for the findings phase to reuse (never a second org-wide
+    # fetch for the same data).
+    evidence_by_report: dict[int, dict[int, dict[str, Any]]] = {}
+    for report_id in evidence_ctx.report_dirs.values():
+        rows = GwEvidenceAdapter(report_id=report_id).list_remote(evidence_ctx)
+        evidence_by_report[report_id] = {i: r.data for i, r in rows.items()}
+
+    # --- narrative sections + project notes ---------------------------------
+    for adapter in (
+        NarrativeSectionAdapter(evidence_by_report=evidence_by_report), ReportNoteAdapter(),
+    ):
+        p, adapter_events, s = engine_run(
             root,
             ctx,
             adapter,
@@ -1309,22 +1419,19 @@ def _run_reports_phase(
             options=options,
         )
         plans.extend(p)
-        events.extend(e)
+        events.extend(adapter_events)
         summaries[adapter.kind] = s
 
-    snapshot_dir: Path | None = None
     if not dry_run:
         index.save()
-        if not snapshot.empty:
-            snapshot_dir = snapshot.persist(root)
 
-    return ReportsPhaseResult(
+    result = ReportsPhaseResult(
         plans=plans,
         events=events,
         summaries=summaries,
         dirs=dirs,
-        snapshot_dir=snapshot_dir,
     )
+    return result, evidence_by_report
 
 
 def _refresh_report_dirs(ctx: GWReportContext, index: Index) -> None:
@@ -1394,8 +1501,7 @@ def _print_reports_summary(
             typer.echo(f"  ! {msg}")
     for e in d.errors:
         typer.secho(f"  error: {e}", fg=typer.colors.RED)
-    if reports.snapshot_dir:
-        typer.echo(f"snapshot: {reports.snapshot_dir}")
+    # No per-phase "snapshot: ..." line here — see _print_findings_summary's comment.
 
 
 @dataclass
@@ -1447,18 +1553,22 @@ def undo(
         typer.Option("--list", help="List available snapshots, newest first, and exit."),
     ] = False,
 ) -> None:
-    """Reverse a sync's remote writes from its undo snapshot (``.grison/snapshots/``)
-    — findings, report/note, or wiki, whichever this snapshot holds.
+    """Reverse a whole ``grison sync`` run's remote writes from its undo snapshot
+    (``.grison/snapshots/``) — findings, report/note, and wiki, whichever this
+    snapshot holds (one snapshot per sync RUN, not one per phase: ``grison sync``
+    shares a single ``Snapshot`` across every phase it runs).
 
     Replays the snapshot's inverse operations through the adapters, newest write
-    first, each one guarded by the same pre-write re-fetch check ``grison sync``
-    itself uses — a record changed on the server since the snapshot was taken is
-    reported, not silently overwritten. A snapshot is homogeneous (one phase's own
-    kinds — each phase persists its own snapshot dir), so this picks which
-    remote(s) to contact, and which adapters to build, by looking at the kinds the
-    snapshot actually recorded — never touching a remote the snapshot doesn't need.
-    Owner-only: never run from an agent's own initiative (see the workspace's
-    scaffolded ``.claude/settings.json`` deny-list).
+    first (across every phase's kinds — a library push from the findings phase and
+    an evidence upload from the report phase in the SAME run are undone by one
+    ``grison undo``, newest first), each one guarded by the same pre-write re-fetch
+    check ``grison sync`` itself uses — a record changed on the server since the
+    snapshot was taken is reported, not silently overwritten. A snapshot may hold
+    both Ghostwriter and BookStack kinds together, so this picks which remote(s) to
+    contact, and which adapters to build, by looking at the kinds the snapshot
+    actually recorded — never touching a remote the snapshot doesn't need. Owner-
+    only: never run from an agent's own initiative (see the workspace's scaffolded
+    ``.claude/settings.json`` deny-list).
     """
     root = find_workspace_root(Path.cwd())
     names = engine_list_snapshots(root)
@@ -1501,9 +1611,10 @@ def undo(
     state = StateStore(root)
     index = Index.load(root)
     with contextlib.ExitStack() as stack:
-        # A single snapshot's ops all come from ONE phase (findings XOR report XOR
-        # wiki — each phase builds its own Snapshot), but `undo.replay` takes one
-        # `ctx` for every adapter it calls regardless of kind, and a Ghostwriter
+        # A single snapshot's ops may come from any mix of the run's phases (findings,
+        # report, wiki — `grison sync` shares ONE Snapshot across all of them, see
+        # its own docstring), but `undo.replay` takes one `ctx` for every adapter it
+        # calls regardless of kind, and a Ghostwriter
         # adapter's `ctx.client` and a BookStack adapter's `ctx.client` are
         # different types (and even within Ghostwriter, the findings adapters and
         # the report/note adapters take different context shapes — see

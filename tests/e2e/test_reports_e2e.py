@@ -1046,26 +1046,30 @@ def test_captioned_evidence_embed_in_narrative_round_trips_clean(run_grison, gw_
     assert gw_server.operation_log == []
 
 
-def test_evidence_reupload_surfaces_as_a_collision_never_a_silent_overwrite(
+def test_evidence_reupload_pushes_the_narrative_section_with_the_new_id(
     run_grison, gw_server,
 ):
-    """Before the fix: an evidence reupload (same filename, new remote id) made
-    IndexRefResolver.to_local fail to resolve the narrative's OLD embed id (the
-    index now points the path at the new id), and since canonical_local/
-    canonical_remote compared raw markdown with no id folding, the narrative
-    section's (unchanged) local text still equalled its base — classifying PULL
-    and silently OVERWRITING the local narrative with an unresolved-reference
-    placeholder instead of ever surfacing the new id.
+    """D1, verbatim: "replacing an image's bytes must re-push every finding
+    referencing it" — automatically, in the SAME run as the reupload, no
+    ``--force-local`` and no extra sync.
 
-    Fixed: canonical_local folds the embed's CURRENT id (grison.engine.filesets.
-    canonical_prose), so local no longer equals base once the id changes
-    underneath it — the local file is never overwritten. This is the SAME
-    mechanism gw_findings.py already uses for a reported finding's own evidence
-    embeds, and a reupload of evidence referenced by a REPORTED FINDING surfaces
-    identically (a COLLISION, not a same-sync auto-push — the finding's/section's
-    own HTML on Ghostwriter is untouched by the reupload itself, so nothing marks
-    it stale until it's re-pushed): resolving the collision (``--force-local``,
-    "keep my local text") re-pushes with the NEW id."""
+    Before THIS fix (coordinator correction, phase-reordering task): evidence
+    file sets synced in the FINDINGS phase, which runs AFTER the reports phase
+    — so a narrative section's own re-push (triggered by its embedded
+    evidence's reupload) could only ever be classified on the NEXT sync, one
+    run after the reupload actually happened. In between, Ghostwriter's own
+    stored narrative text still referenced a DELETED evidence id — a broken
+    report export for however long the user waited before syncing again.
+
+    Fixed: :func:`grison.cli._run_reports_phase` now syncs each report's
+    ``evidence/`` file set BEFORE its narrative sections/notes — a report's
+    ``evidence/`` folder belongs to the report — so by the time
+    ``NarrativeSectionAdapter`` classifies, the reupload (if any, this same
+    run) has already repointed the index; the classification table's `L !=
+    base, R == base` (the LOCAL side's id-fold changed; the REMOTE side's
+    ``canonical_remote_prose``-derived literal id didn't, since nothing has
+    touched the section's OWN stored HTML yet) reaches PUSH in that SAME
+    engine_run call, right after the fileset sync that repointed the index."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
         id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
@@ -1087,27 +1091,23 @@ def test_evidence_reupload_surfaces_as_a_collision_never_a_silent_overwrite(
 
     evidence_file = _rdir("report-a") / "evidence" / "shot.png"
     evidence_file.write_bytes(b"brand new bytes, same filename")
-    run_grison("sync")  # findings phase reuploads: id 90 deleted, a new id created
+    push_result = run_grison("sync")  # reupload AND the section's own re-push, same run
 
-    result = run_grison("sync")  # reports phase now sees the repointed index
-
-    assert "reports (gw.reportSection): collision 1" in result.output
-    # the core bug this proves fixed: never silently overwritten with a placeholder
-    assert section.read_text(encoding="utf-8") == original_text
-    sidecar = section.with_name("executive_summary.remote.md")
-    assert sidecar.exists()
-
+    assert "reports (gw.evidence[findings/reports/report-a]): move_edit 1" in push_result.output
+    assert "reports (gw.reportSection): push 1" in push_result.output
+    assert "collision" not in push_result.output
+    assert section.read_text(encoding="utf-8") == original_text  # local text never touched
     new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
         "shot.png"
     ))
     assert new_id != 90
-
-    resolve_result = run_grison("sync", "--force-local", str(section))
-
-    assert "reports (gw.reportSection): push 1" in resolve_result.output
-    assert section.read_text(encoding="utf-8") == original_text  # local text never touched
     assert f'data-evidence-id="{new_id}"' in report["extraFields"]["executive_summary"]
-    assert not sidecar.exists()
+
+    before = len(gw_server.operation_log)
+    clean_result = run_grison("sync")
+
+    assert "reports (gw.reportSection): clean 1" in clean_result.output
+    assert gw_server.operation_log[before:] == []  # nothing left to push — settled
 
 
 def test_non_ascii_evidence_filename_pushes_from_a_narrative_embed(run_grison, gw_server):

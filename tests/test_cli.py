@@ -83,7 +83,7 @@ def _stub_sync_phases(monkeypatch: pytest.MonkeyPatch, run_sync=None, sync_repor
         cli_mod, "_run_findings_phase", run_sync or (lambda *a, **k: FindingsPhaseResult())
     )
     monkeypatch.setattr(
-        cli_mod, "_run_reports_phase", sync_reports or (lambda *a, **k: ReportsPhaseResult())
+        cli_mod, "_run_reports_phase", sync_reports or (lambda *a, **k: (ReportsPhaseResult(), {}))
     )
 
 
@@ -190,7 +190,10 @@ def test_sync_exit_code_reflects_result_errors(
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
 
-    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+    def fake_run_sync(
+        root, client, *, dry_run=False, force_local=None, force_remote=None,
+        evidence_by_report=None, snapshot=None,
+    ):
         plan = Plan(
             kind="gw.finding",
             outcome=Outcome.FAILED,
@@ -202,8 +205,10 @@ def test_sync_exit_code_reflects_result_errors(
         event = Event(verb="failed", path="findings/library/bad.md", detail="boom")
         return FindingsPhaseResult(plans=[plan], events=[event], summaries={"gw.finding": summary})
 
-    def fake_reports_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
-        return ReportsPhaseResult()
+    def fake_reports_phase(
+        root, client, *, dry_run=False, force_local=None, force_remote=None, snapshot=None,
+    ):
+        return ReportsPhaseResult(), {}
 
     monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
     monkeypatch.setattr(cli_mod, "_run_findings_phase", fake_run_sync)
@@ -233,7 +238,10 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
 
-    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+    def fake_run_sync(
+        root, client, *, dry_run=False, force_local=None, force_remote=None,
+        evidence_by_report=None, snapshot=None,
+    ):
         plan = Plan(
             kind="gw.finding",
             outcome=Outcome.SKIP,
@@ -251,8 +259,10 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
         )
         return FindingsPhaseResult(plans=[plan], events=[event], summaries={"gw.finding": summary})
 
-    def fake_reports_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
-        return ReportsPhaseResult()
+    def fake_reports_phase(
+        root, client, *, dry_run=False, force_local=None, force_remote=None, snapshot=None,
+    ):
+        return ReportsPhaseResult(), {}
 
     monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
     monkeypatch.setattr(cli_mod, "_run_findings_phase", fake_run_sync)
@@ -292,7 +302,10 @@ def test_sync_git_driving_commits_checkpoint_and_summary(
     _init_repo(tmp_path)
     (tmp_path / "pre.txt").write_text("dirty before sync even starts\n")
 
-    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+    def fake_run_sync(
+        root, client, *, dry_run=False, force_local=None, force_remote=None,
+        evidence_by_report=None, snapshot=None,
+    ):
         (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
         summary = KindSummary(kind="gw.finding")
         summary.counts = {"pull": 1, "push": 1}
@@ -321,7 +334,10 @@ def test_sync_git_driving_notes_failures_in_message(
     monkeypatch.setenv("GRISON_GIT", "commit")
     _init_repo(tmp_path)
 
-    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+    def fake_run_sync(
+        root, client, *, dry_run=False, force_local=None, force_remote=None,
+        evidence_by_report=None, snapshot=None,
+    ):
         (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
         plan = Plan(
             kind="gw.finding",

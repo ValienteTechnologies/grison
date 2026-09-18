@@ -36,9 +36,16 @@ Two independent rules (D1, restated generically):
       modelled as CREATE+DELETE_REMOTE (:data:`Outcome.MOVE_EDIT` is reused as the
       "re-upload" outcome purely as an internal signal — never a real update
       call), and the caller is responsible for then re-pushing every document
-      that referenced the old id (see :func:`canonical_prose` — the mechanism
-      that makes that re-push happen "by construction" rather than by
-      remembering to do it).
+      that referenced the old id, automatically, in the same run (D1) —
+      :func:`canonical_prose` (LOCAL side, id resolved through the live index)
+      paired with :func:`canonical_remote_prose` (REMOTE side, the LITERAL id
+      already present in the remote's own stored HTML/text, never re-resolved
+      through that same live index) is the mechanism that makes that re-push
+      happen "by construction": a reupload leaves the referencing record's own
+      remote content untouched, so its canonical form doesn't move off ``base``,
+      while the LOCAL side's does (the id it resolves to changed) — the record
+      classifies PUSH, never a silent CLEAN or an unresolved-reference PULL
+      overwrite.
   (b) an image line (found via :mod:`grison.markdown.refscan`) in a referencing
       document is a reference; removing a reference never deletes the file.
 
@@ -72,10 +79,10 @@ free:
     returns ``resolved_captions``, and the caller rewrites the alt text in every
     referencing document to match (:func:`rewrite_captions`). Because a
     referencing document's own canonical payload never includes caption/title
-    text (:func:`strip_embed_captions`, used by :func:`canonical_prose`), this
-    rewrite can never make that document look locally edited: its content hash
-    is unaffected by construction, not by remembering to exclude the rewrite
-    from the change guard.
+    text (:func:`_substitute_embed_identity`, used by :func:`canonical_prose`/
+    :func:`canonical_remote_prose`), this rewrite can never make that document
+    look locally edited: its content hash is unaffected by construction, not by
+    remembering to exclude the rewrite from the change guard.
 """
 
 from __future__ import annotations
@@ -83,6 +90,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
@@ -103,6 +111,8 @@ from grison.engine.undo import Snapshot, UndoOp
 from grison.fsio import atomic_write_bytes
 from grison.hashing import digest
 from grison.index import Index, IndexKind
+from grison.markdown.converter import ConverterError, html_to_md
+from grison.markdown.refs import LocalRef, RemoteRef
 from grison.markdown.refscan import scan_refs
 
 #: Same values as grison.engine.apply's — one change-guard rule for every record
@@ -229,7 +239,12 @@ def strip_embed_captions(md: str) -> str:
     file-set embed's caption/title (they belong to the remote row, not the
     document — see the module docstring): otherwise rewriting an alt on pull
     would change the document's content hash and make it look locally edited.
-    Blanks every embed's alt/title text, keeping the path (identity) intact."""
+    Blanks every embed's alt/title text, keeping the path (identity) intact.
+    :func:`canonical_prose`/:func:`canonical_remote_prose` fold this same
+    exclusion into their own single-pass substitution (:func:`_substitute_
+    embed_identity`, which drops alt/title AND replaces the path) rather than
+    calling this directly; kept as its own named, independently useful/
+    testable transform (the caption-blanking half in isolation)."""
     return _EMBED_LINE_RE.sub(lambda m: f"{m.group(1)}{m.group(3)}{m.group(4)}{m.group(6)}", md)
 
 
@@ -237,19 +252,108 @@ class ResolvesEmbeds(Protocol):
     def to_remote_id(self, path: str) -> int | None: ...
 
 
+def _substitute_embed_identity(md: str, token_for: Callable[[str], str]) -> str:
+    """Replace every embed's ``(path "title")`` with ``(<token_for(path)>)`` —
+    dropping alt/title (same reason :func:`strip_embed_captions` does: they
+    belong to the remote row, not the document) AND the authored path itself,
+    which :func:`canonical_prose`/:func:`canonical_remote_prose` both replace
+    with a stable REMOTE IDENTITY token so the two are directly comparable
+    (see their docstrings)."""
+    return _EMBED_LINE_RE.sub(
+        lambda m: f"{m.group(1)}{m.group(3)}{token_for(m.group(4))}{m.group(6)}", md
+    )
+
+
 def canonical_prose(md: str, resolver: ResolvesEmbeds) -> dict[str, Any]:
-    """Canonical payload for one prose field/section that may embed file-set
-    references: the caption-stripped text, PLUS every embed's currently-resolved
-    remote id. The id is what actually changes when a file's bytes change under
-    an unchanged name (D1: a new remote row) — the document's own markdown text
-    (which only ever names the stable path) does not change at all in that case,
-    so without the id folded in here the document would wrongly classify CLEAN
-    and never get re-pushed with its new embed id, exactly the bug the task
-    calls out ("make sure the document's hash changes by construction")."""
-    ids: list[int | None] = [
-        resolver.to_remote_id(ref.path) for ref in scan_refs(md) if ref.kind == "embed"
-    ]
-    return {"text": strip_embed_captions(md), "embed_ids": ids}
+    """Canonical payload for one LOCAL prose field/section that may embed
+    file-set references: the caption-stripped text, with every embed's
+    AUTHORED PATH replaced by its CURRENTLY-resolved remote id (looked up
+    through the live index/evidence rows ``resolver`` wraps) — never left as
+    the path itself, which stays the stable text ``evidence/x.png`` even
+    when the id underneath it changes (D1: bytes changing under an
+    unchanged name creates a NEW remote row). This is what makes a reupload
+    change THIS document's hash "by construction": :func:`canonical_remote_prose`
+    (this record's OWN counterpart, called on the REMOTE side) folds the
+    LITERAL id already present in the remote's stored HTML/text instead —
+    never re-resolved through the same live lookup — so after a reupload
+    with nothing else pushed, remote's payload is unchanged (still the OLD
+    literal id, matching base) while this one changes (the NEW id), and the
+    record classifies PUSH, not a silent CLEAN or an unresolved-reference
+    PULL overwrite (D1: "replacing an image's bytes must re-push every
+    finding referencing it")."""
+    return {"text": _substitute_embed_identity(
+        md, lambda path: _id_token(resolver.to_remote_id(path))
+    )}
+
+
+def _id_token(eid: int | None) -> str:
+    return str(eid) if eid is not None else "unresolved"
+
+
+@dataclass(frozen=True)
+class _LiteralEmbedResolver:
+    """The ``RefResolver`` :func:`canonical_remote_prose` hands ``html_to_md`` —
+    used ONLY to compute a REMOTE record's canonical form, never for a real
+    PULL (which uses the adapter's own, ordinary index-backed resolver, so a
+    genuinely-broken reference still renders as a human-visible unresolved
+    placeholder in the FILE grison writes). Resolves every embed
+    successfully, always: a native ``data-evidence-id="N"``/gallery-id
+    reference becomes the LITERAL ``N`` itself (never re-derived through the
+    current index/evidence rows the way a real PULL resolver would); the
+    legacy ``{{.friendlyName}}`` dot-form (BRIEF D1) has no literal id of its
+    own, so it resolves through ``name_to_id`` (a snapshot of THIS run's
+    evidence rows — the same one the real resolver would consult) when
+    possible, else falls back to the literal name itself. Either way this
+    NEVER queries the workspace index, so a stale id (its evidence row has
+    since been reuploaded under a new id) still canonicalizes identically to
+    how it did before that reupload — see :func:`canonical_prose`'s
+    docstring for why that is exactly the property this record's REMOTE
+    canonical form needs."""
+
+    name_to_id: Mapping[str, int] | Callable[[], Mapping[str, int]] = field(
+        default_factory=dict
+    )
+
+    def _rows(self) -> Mapping[str, int]:
+        return self.name_to_id() if callable(self.name_to_id) else self.name_to_id
+
+    def to_local(self, remote: RemoteRef) -> LocalRef | None:
+        if remote.id is not None:
+            return LocalRef(path=str(remote.id))
+        if remote.name is not None:
+            eid = self._rows().get(remote.name)
+            return LocalRef(path=str(eid) if eid is not None else f"name:{remote.name}")
+        return None
+
+    def to_remote(self, path: str) -> RemoteRef | None:  # pragma: no cover — html_to_md
+        return None  # only ever resolves PUSH direction refs, never called here
+
+
+def canonical_remote_prose(
+    html: str, *, headings: bool = False,
+    name_to_id: Mapping[str, int] | Callable[[], Mapping[str, int]] = {},  # noqa: B006
+) -> dict[str, Any]:
+    """Canonical payload for one REMOTE prose field/section — the record-type
+    counterpart :func:`canonical_prose` computes for the LOCAL side. Converts
+    ``html`` to markdown through :class:`_LiteralEmbedResolver` (never the
+    adapter's own, index-backed resolver) so every embed's identity in the
+    result is the LITERAL one already present in ``html``, not one re-derived
+    through whatever the index currently says — see that resolver's own
+    docstring for why this is the fix for D1's "replacing an image's bytes
+    must re-push every finding referencing it, automatically, in the same
+    run": this payload only ever changes when ``html`` itself changes, so a
+    reupload that leaves this record's own stored HTML untouched leaves this
+    payload UNCHANGED (still equal to ``base``), while :func:`canonical_prose`'s
+    LOCAL payload (computed via the live index) does change — the PUSH the
+    classification table reaches from `L != base, R == base`. Never raises —
+    same fallback every ``html_to_md`` caller in this codebase uses for
+    unconvertible input: the raw HTML, verbatim."""
+    resolver = _LiteralEmbedResolver(name_to_id=name_to_id)
+    try:
+        md = html_to_md(html or "", headings=headings, refs=resolver)
+    except ConverterError:
+        md = html or ""
+    return {"text": md}
 
 
 def rewrite_captions(md: str, resolved: dict[str, tuple[str, str]], *, folder_name: str) -> str:

@@ -70,13 +70,14 @@ from typing import Any
 
 from grison.adapters._gw_common import GWContext
 from grison.engine.adapter import AdapterMode
-from grison.engine.filesets import canonical_prose
+from grison.engine.filesets import canonical_prose, canonical_remote_prose
 from grison.engine.model import Canonical, LocalDoc, RemoteRecord, Veto
 from grison.formats import finding as finding_fmt
 from grison.formats.common import FormatError
 from grison.index import Index, IndexKind
 from grison.markdown.converter import md_to_html
 from grison.markdown.refs import LocalRef, RefResolver, RemoteRef
+from grison.markdown.refscan import decode_ref_path
 from grison.model.cvss import parse_cvss
 from grison.model.cwe import is_known_cwe
 from grison.model.enums import FindingType, Severity
@@ -154,7 +155,13 @@ class GwRefResolver:
     def _id_for_path(self, path: str) -> int | None:
         if not path.startswith("evidence/"):
             return None
-        rec = self.index.get(str(self.report_dir / path))
+        # ``path`` reaches here either already-decoded (a scan_refs-sourced call)
+        # or still percent-encoded (a call from grison.markdown.converter's OWN,
+        # separate markdown-it parse, during an actual push — markdown-it-py
+        # percent-encodes non-ASCII bytes in a destination) — decode_ref_path is
+        # a safe no-op on the former, matching grison.adapters._gw_common.
+        # IndexRefResolver's identical fix.
+        rec = self.index.get(str(self.report_dir / decode_ref_path(path)))
         if rec is None or rec.kind is not IndexKind.GW_EVIDENCE:
             return None
         return rec.id
@@ -167,7 +174,7 @@ class GwRefResolver:
         if eid is None:
             return None
         row = self.evidence_rows.get(eid, {})
-        name = row.get("friendly_name") or PurePosixPath(path).stem
+        name = row.get("friendly_name") or PurePosixPath(decode_ref_path(path)).stem
         return RemoteRef("gw-evidence", id=eid, name=name, url=None)
 
     def to_local(self, remote: RemoteRef) -> LocalRef | None:
@@ -228,13 +235,24 @@ def _sections_canonical(
 def _remote_sections_canonical(
     data: dict[str, Any], refs: GwRefResolver | None
 ) -> dict[str, Any]:
-    from grison.markdown.converter import html_to_md
-
-    out: dict[str, Any] = {}
-    for f in _SECTIONS:
-        md = html_to_md(data.get(f) or "", refs=refs)
-        out[f] = canonical_prose(md, refs if refs is not None else _EMPTY_RESOLVER)
-    return out
+    """D1 ("replacing an image's bytes must re-push every finding referencing
+    it, automatically, in the same run"): unlike :func:`_sections_canonical`
+    (the LOCAL side, which resolves each embed's id through the live index via
+    :func:`~grison.engine.filesets.canonical_prose`), this canonicalizes
+    through :func:`~grison.engine.filesets.canonical_remote_prose` — the
+    LITERAL id already present in the remote HTML, never re-derived through
+    that same live index — so a reupload (which leaves THIS finding's own
+    stored HTML untouched) never drifts this payload off ``base`` on its own;
+    see that function's docstring for why that's what turns a reupload into a
+    same-run PUSH instead of a silent CLEAN or an unresolved-reference PULL
+    overwrite."""
+    name_to_id = {
+        row["friendly_name"]: eid
+        for eid, row in (refs.evidence_rows.items() if refs is not None else ())
+        if row.get("friendly_name")
+    }
+    return {f: canonical_remote_prose(data.get(f) or "", name_to_id=name_to_id)
+            for f in _SECTIONS}
 
 
 def _gw_fields(  # noqa: PLR0913

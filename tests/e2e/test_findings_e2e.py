@@ -225,10 +225,17 @@ def test_mass_evidence_delete_is_guarded_and_announced(run_grison, gw_server, wo
 
 
 def test_undo_reverses_a_library_push_and_an_evidence_upload(run_grison, gw_server, workspace):
-    """G: ``grison undo`` covers the findings phase too — the newest snapshot's
-    remote writes (a library ``update_finding_by_pk`` and a report-scoped
-    ``uploadEvidence``) are replayed in reverse through the Ghostwriter adapters:
-    the finding's pre-image is restored and the uploaded evidence row deleted."""
+    """G: ``grison undo`` covers the findings phase too — a library
+    ``update_finding_by_pk`` and a report-scoped ``uploadEvidence`` from the SAME
+    ``grison sync`` are each replayed in reverse through the Ghostwriter adapters:
+    the finding's pre-image is restored and the uploaded evidence row deleted.
+
+    ``grison sync`` persists ONE undo snapshot for the whole run, shared across the
+    report, findings and wiki phases (grison.engine.undo's module docstring: "the
+    user's mental model is 'undo the last sync'") — even though evidence file sets
+    sync in the REPORTS phase and the library push happens in the FINDINGS phase
+    that follows it, both land in the SAME snapshot. A single ``grison undo``
+    therefore reverses both writes from one sync, newest write first."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     report_dir = _rdir(workspace)
     gw_server.store.seed_finding(
@@ -260,11 +267,15 @@ def test_undo_reverses_a_library_push_and_an_evidence_upload(run_grison, gw_serv
     assert len(gw_server.store.evidence) == 1
     assert "brand new text" in gw_server.store._by_id(gw_server.store.findings, 1)["description"]
 
-    undone = run_grison("undo")
+    snapshots_dir = workspace / ".grison" / "snapshots"
+    names = sorted(p.name for p in snapshots_dir.iterdir())
+    assert len(names) == 1  # one snapshot for the whole run, not one per phase
 
-    assert undone.exit_code == 0, undone.output
-    assert gw_server.store.evidence == []  # the create was reversed (delete_evidence_by_pk)
+    result = run_grison("undo")  # no name given -> the run's one snapshot
+
+    assert result.exit_code == 0, result.output
     assert "old text" in gw_server.store._by_id(gw_server.store.findings, 1)["description"]
+    assert gw_server.store.evidence == []  # the create was reversed too, same undo
 
 
 def test_n_new_evidence_uploads_fetch_the_org_wide_evidence_list_only_once(
@@ -560,3 +571,158 @@ def test_position_preserved_across_plain_content_push(run_grison, gw_server, wor
     assert "gw.reportedFinding): push 1" in result.output, result.output
     row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
     assert row is not None and row["position"] == 7
+
+
+# --- D1, verbatim: "replacing an image's bytes must re-push every finding
+# referencing it" — automatically, no --force-local (coordinator correction over
+# an earlier, weaker fix that only reached COLLISION; see grison.engine.filesets.
+# canonical_remote_prose's docstring for the mechanism) ------------------------
+
+
+def test_evidence_reupload_pushes_the_reported_finding_with_the_new_id(
+    run_grison, gw_server, workspace,
+):
+    """Unlike a narrative section (reports phase, before findings phase), a
+    reported finding's own evidence lives in the SAME phase as the reupload
+    (grison.cli._run_findings_phase: each report's evidence/ fileset syncs,
+    THEN evidence_by_report is rebuilt fresh, THEN the finding adapters run) —
+    so the reupload and the finding's own re-push with the new id land in the
+    SAME sync, no second sync needed."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        caption="Login screen",
+    )
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=7, title="SQLi", severityId=5, findingTypeId=4,
+        description='<div class="richtext-evidence" data-evidence-id="90"></div>',
+    )
+    run_grison("sync")
+    finding_path = _rdir(workspace) / "sqli.md"
+    original_text = finding_path.read_text(encoding="utf-8")
+    assert "evidence/shot.png" in original_text
+
+    evidence_file = _rdir(workspace) / "evidence" / "shot.png"
+    evidence_file.write_bytes(b"brand new bytes, same filename")
+
+    result = run_grison("sync")  # reupload AND re-push, same run
+
+    assert "findings (gw.reportedFinding): push 1" in result.output, result.output
+    assert "collision" not in result.output
+    assert finding_path.read_text(encoding="utf-8") == original_text  # local text untouched
+    new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
+        "shot.png"
+    ))
+    assert new_id != 90
+    row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert f'data-evidence-id="{new_id}"' in row["description"]
+
+    before = len(gw_server.operation_log)
+    clean_result = run_grison("sync")
+
+    assert "findings (gw.reportedFinding): clean" in clean_result.output
+    assert gw_server.operation_log[before:] == []  # settled
+
+
+def test_evidence_reupload_pushes_every_finding_that_references_it(
+    run_grison, gw_server, workspace,
+):
+    """One evidence file referenced by TWO reported findings: a reupload must
+    re-push BOTH, each with the SAME new id."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        caption="Login screen",
+    )
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=7, title="SQLi", severityId=5, findingTypeId=4,
+        description='<div class="richtext-evidence" data-evidence-id="90"></div>',
+    )
+    gw_server.store.seed_reported_finding(
+        id=51, reportId=7, title="XSS", severityId=4, findingTypeId=4,
+        description='<div class="richtext-evidence" data-evidence-id="90"></div>',
+    )
+    run_grison("sync")
+
+    evidence_file = _rdir(workspace) / "evidence" / "shot.png"
+    evidence_file.write_bytes(b"brand new bytes, same filename")
+
+    result = run_grison("sync")
+
+    assert "findings (gw.reportedFinding): push 2" in result.output, result.output
+    new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
+        "shot.png"
+    ))
+    row50 = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    row51 = gw_server.store._by_id(gw_server.store.reported_findings, 51)
+    assert f'data-evidence-id="{new_id}"' in row50["description"]
+    assert f'data-evidence-id="{new_id}"' in row51["description"]
+
+
+def test_evidence_reupload_plus_a_concurrent_remote_edit_is_still_a_collision(
+    run_grison, gw_server, workspace,
+):
+    """The pre-write re-fetch guard must still catch a GENUINE concurrent
+    edit — the reupload's automatic re-push must never blindly overwrite a
+    finding someone else changed on Ghostwriter in between."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        caption="Login screen",
+    )
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=7, title="SQLi", severityId=5, findingTypeId=4,
+        description='<div class="richtext-evidence" data-evidence-id="90"></div>',
+    )
+    run_grison("sync")
+
+    evidence_file = _rdir(workspace) / "evidence" / "shot.png"
+    evidence_file.write_bytes(b"brand new bytes, same filename")
+
+    def concurrent_edit() -> None:
+        row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+        row["description"] = "<p>someone changed this on Ghostwriter</p>"
+
+    baseline = gw_server.call_count("reportedFinding_by_pk")
+    gw_server.on_request("reportedFinding_by_pk", concurrent_edit, call_number=baseline + 1)
+
+    result = run_grison("sync")
+
+    assert "findings (gw.reportedFinding): collision 1" in result.output, result.output
+    row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert row["description"] == "<p>someone changed this on Ghostwriter</p>"  # push withheld
+
+
+def test_non_ascii_evidence_filename_pushes_from_a_reported_finding(
+    run_grison, gw_server, workspace,
+):
+    """grison.markdown.refscan item 3's fix also applies to GwRefResolver
+    (grison/adapters/gw_findings.py) — markdown-it-py percent-encodes non-ASCII
+    bytes in an image destination on the converter's own parse, so
+    GwRefResolver.to_remote/_id_for_path used to fail to resolve
+    evidence/Phishing_Sonuçları.png against the index (keyed by the real,
+    decoded path) and raise ConverterError instead of pushing."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/Phishing_Sonuçları.png",
+        friendlyName="Phishing_Sonuçları",
+    )
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=7, title="Phishing", severityId=3, findingTypeId=4,
+    )
+    run_grison("sync")  # downloads + indexes evidence/Phishing_Sonuçları.png
+
+    finding_path = _rdir(workspace) / "phishing.md"
+    text = finding_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Description\n\n",
+        "## Description\n\n![Results](evidence/Phishing_Sonuçları.png)\n\n",
+        1,
+    )
+    finding_path.write_text(text, encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert "findings (gw.reportedFinding): push 1" in result.output, result.output
+    row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert 'data-evidence-id="90"' in row["description"]

@@ -75,14 +75,57 @@ def _remote_body_to_local(body: str, gallery_by_url: dict[str, str], *, in_chapt
     return _URL_IMAGE_LINE_RE.sub(_sub, body)
 
 
-def _matched_names_and_urls(body: str) -> tuple[list[str], list[str]]:
-    """Every gallery image reference in ``body``, split by spelling: local names
-    (``images/x.png``/``../images/x.png``, in document order) and raw absolute
-    URLs (in document order) — the two vocabularies :func:`_local_body_to_remote`/
-    :func:`_remote_body_to_local` translate between."""
-    names = [m.group(3) for m in _LOCAL_IMAGE_LINE_RE.finditer(body)]
-    urls = [m.group(2) for m in _URL_IMAGE_LINE_RE.finditer(body)]
-    return names, urls
+_URL_NUMERIC_ID_RE = re.compile(r"/(\d+)/[^/]+$")
+
+
+def _gallery_token(url: str) -> str:
+    """``url`` -> a canonicalization token that is a PURE FUNCTION of the URL
+    STRING itself — never a live gallery lookup (D9: "replacing an image's
+    bytes must re-push every page referencing it, automatically, in the same
+    run" — see :func:`_substitute_gallery_tokens`'s docstring for why a
+    live lookup is exactly the bug this avoids). A numeric id segment
+    immediately before the filename (this fake's/some real installs' URL
+    shape) is used when present — it's the more precise identity and, being
+    read directly off the URL text, is exactly as "literal" as the URL
+    itself; otherwise the URL is used verbatim (real BookStack's usual
+    ``.../gallery/YYYY-MM/name.ext`` shape has no such segment at all)."""
+    m = _URL_NUMERIC_ID_RE.search(url)
+    return m.group(1) if m else url
+
+
+def _substitute_gallery_tokens(ctx: BSContext | None, body: str, *, book_id: int | None) -> str:
+    """Replace every gallery image reference's PATH/URL portion (either
+    spelling) with its :func:`_gallery_token` — alt text and title are kept
+    exactly as authored (unlike a Ghostwriter evidence embed's caption, a
+    BookStack page's alt text has no separate remote row to belong to
+    instead — D9: "BookStack's gallery has no caption column at all" — so it
+    stays ordinary document content, part of what a real edit to it should
+    change). Both spellings of a reference to the SAME image reduce to the
+    SAME text: replacing the PATH itself, not just adding a parallel fold
+    list, is what actually makes :meth:`BsPageAdapter.canonical_local`'s
+    result comparable to :meth:`BsPageAdapter.canonical_remote`'s — the raw
+    ``body``/``markdown`` text alone differs between an authored
+    ``images/x.png`` and BookStack's stored absolute URL even when they name
+    the SAME row, so a fold list alongside the UNCHANGED raw text is not
+    enough (the "body" field would still differ) — see
+    :meth:`BsPageAdapter.canonical_remote`'s docstring for the full D9
+    reasoning this exists to satisfy. ``ctx``/``book_id`` unavailable (offline)
+    degrades to the raw ``body``, unchanged, same as before this fix."""
+    if ctx is None or book_id is None:
+        return body
+    gallery_by_name = _gallery_by_name_for_book(ctx, book_id)
+
+    def _local_sub(m: re.Match[str]) -> str:
+        name = m.group(3)
+        url = gallery_by_name.get(name)
+        token = _gallery_token(url) if url is not None else "unresolved"
+        return f"{m.group(1)}{token}{m.group(4)}"
+
+    def _url_sub(m: re.Match[str]) -> str:
+        return f"{m.group(1)}{_gallery_token(m.group(2))}{m.group(3)}"
+
+    body = _LOCAL_IMAGE_LINE_RE.sub(_local_sub, body)
+    return _URL_IMAGE_LINE_RE.sub(_url_sub, body)
 
 
 def _gallery_by_name_for_book(ctx: BSContext, book_id: int) -> dict[str, str]:
@@ -175,77 +218,48 @@ class BsPageAdapter:
     """``methodology/library/**/*.md`` <-> BookStack pages.
 
     ``canonical_local``/``canonical_remote`` (the ``Adapter`` protocol's two
-    ctx-less methods) fold every gallery image reference's CURRENT remote id into
-    the hash (:meth:`_fold_image_ids`) — the SAME "local file identity" fix
-    :mod:`grison.adapters.gw_report`/:mod:`grison.adapters.gw_findings` apply via
-    :func:`grison.engine.filesets.canonical_prose`'s ``embed_ids``, adapted to D9's
-    own vocabulary (a stored absolute gallery URL, not an html node id). Before
-    this fix, a reupload of an image a page references (D9: bytes changing under
-    an unchanged filename creates a NEW gallery row, the old one deleted — see
-    :mod:`grison.adapters.bs_images`) left the page's OLD, now-orphaned URL
-    unresolved by :meth:`_localize_gallery_urls` (no CURRENT row has that URL any
-    more): the page's canonical remote form kept the literal stale URL text, which
-    (since the local file never changed) still hashed equal to ``base`` — so the
-    page classified PULL and got silently overwritten with the raw URL instead of
-    ever surfacing the new one. Folding each reference's id (resolved fresh, by
-    filename for a local-spelled reference or directly by URL for one that's still
-    raw) makes the LOCAL side's fold change the moment the id underneath its
-    filename changes, so local no longer equals base and the page is never
-    overwritten (see ``tests/e2e/test_wiki_images_e2e.py`` for the resulting
-    COLLISION + ``--force-local`` resolution — the same "COLLISION, not an
-    automatic same-run push" shape :mod:`grison.adapters.gw_report`'s own reupload
-    fix reaches, for the identical reason: nothing marks the referencing document's
-    OWN stored text/HTML stale until it is actually re-pushed).
+    ctx-less methods) replace every gallery image reference's PATH/URL with a
+    :func:`_gallery_token` (:func:`_substitute_gallery_tokens`) before hashing
+    — D9's counterpart to the id-folding :mod:`grison.adapters.gw_report`/
+    :mod:`grison.adapters.gw_findings` do via :func:`grison.engine.filesets.
+    canonical_prose`/``canonical_remote_prose``, adapted to D9's own vocabulary
+    (a stored absolute gallery URL, not an html node id). ``canonical_local``
+    tokenizes via the LIVE per-book gallery (whatever the CURRENT url/id for a
+    filename is); ``canonical_remote`` tokenizes an ALREADY-resolved (this run)
+    local-spelled reference the SAME way, but a still-raw, unresolved URL (one
+    :meth:`_localize_gallery_urls` could not translate — an orphaned reference
+    after a reupload) DIRECTLY, as a pure function of the URL TEXT itself,
+    never through a live lookup (see :func:`_substitute_gallery_tokens`'s own
+    docstring for the full reasoning, including why the SUBSTITUTION has to
+    happen IN the body text, not as a separate parallel fold list alongside
+    the unchanged raw text — a fold list alone still leaves the "body" field
+    itself different between an authored ``images/x.png`` and BookStack's
+    stored URL, which is enough on its own to make two otherwise-identical
+    records hash differently): D9 ("replacing an image's bytes must re-push
+    every page referencing it, automatically, in the same run") needs the
+    page's remote canonical form to stay UNCHANGED across a reupload that left
+    the page's own stored body untouched (still naming the OLD url, unresolved
+    though it now is) — a live lookup on that orphaned URL instead drifted the
+    remote payload itself off ``base``, and the page could only ever reach a
+    COLLISION, needing ``--force-local``, never the automatic same-run PUSH D9
+    requires (see ``tests/e2e/test_wiki_images_e2e.py``).
 
-    Resolving a reference needs the live gallery (``ctx`` — the ``Adapter``
-    protocol doesn't hand ``canonical_local``/``canonical_remote`` one at all), so
-    ``self._ctx``/``self._url_to_id_cache`` are captured as a side effect of
-    ``fetch_remote``/``refetch``/``create``/``update`` — the only methods that DO
-    receive ``ctx`` — mirroring :class:`grison.adapters.gw_report.
-    NarrativeSectionAdapter`'s identical ``self._index`` caching (see that class's
-    own docstring for why this is safe: :mod:`grison.engine.apply`'s loop order
-    guarantees ``fetch_remote`` runs before any ``canonical_local``/
+    Resolving a LOCAL-spelled reference needs the live gallery (``ctx`` — the
+    ``Adapter`` protocol doesn't hand ``canonical_local``/``canonical_remote``
+    one at all), so ``self._ctx`` is captured as a side effect of
+    ``fetch_remote``/``refetch``/``create``/``update`` — the only methods that
+    DO receive ``ctx`` — mirroring :class:`grison.adapters.gw_report.
+    NarrativeSectionAdapter`'s identical ``self._index`` caching (see that
+    class's own docstring for why this is safe: :mod:`grison.engine.apply`'s
+    loop order guarantees ``fetch_remote`` runs before any ``canonical_local``/
     ``canonical_remote`` call on the SAME adapter instance within one sync). The
     one caller with no ctx-bearing call at all (:func:`grison.engine.offline_status.
-    compute_offline_status`) degrades to folding no ids, never a crash."""
+    compute_offline_status`) degrades to no substitution at all (the raw body),
+    never a crash."""
 
     kind = "bs.page"
     mode: AdapterMode = "read-write"
     _ctx: BSContext | None = field(default=None, init=False, repr=False, compare=False)
-    _url_to_id_cache: dict[str, int] | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
-
-    def _url_to_id(self, ctx: BSContext) -> dict[str, int]:
-        """Every CURRENT gallery image's absolute URL -> id, org-wide (BookStack's
-        URL is unique per row regardless of book) — cached on this adapter
-        instance for the whole sync run, the same one ``fetch_gallery_images()``
-        call :func:`_gallery_by_name_for_book` already pays for per book, just
-        keyed the other way."""
-        if self._url_to_id_cache is None:
-            self._url_to_id_cache = {
-                row["url"]: row["id"] for row in ctx.client.fetch_gallery_images()
-                if row.get("url")
-            }
-        return self._url_to_id_cache
-
-    def _fold_image_ids(
-        self, ctx: BSContext | None, body: str, *, book_id: int | None,
-    ) -> list[int | None]:
-        """Every gallery image reference in ``body`` (either spelling), resolved to
-        its CURRENT remote id, in document order — ``None`` where ``ctx``/
-        ``book_id`` aren't available (offline) or a reference can't currently be
-        resolved at all (a genuinely orphaned/broken reference), never fatal."""
-        if ctx is None or book_id is None:
-            return []
-        names, urls = _matched_names_and_urls(body)
-        if not names and not urls:
-            return []
-        url_to_id = self._url_to_id(ctx)
-        gallery_by_name = _gallery_by_name_for_book(ctx, book_id)
-        ids: list[int | None] = [url_to_id.get(gallery_by_name.get(n, "")) for n in names]
-        ids.extend(url_to_id.get(u) for u in urls)
-        return ids
 
     def scan_local(self, root: Path) -> Iterable[LocalDoc]:
         base = root / "methodology" / "library"
@@ -351,20 +365,20 @@ class BsPageAdapter:
         if doc is None:
             return {"_invalid": True}
         book_id = self._ctx.books_by_slug.get(doc.book, {}).get("id") if self._ctx else None
+        body = _substitute_gallery_tokens(self._ctx, doc.body, book_id=book_id)
         return {"title": doc.title, "priority": doc.priority, "tags": doc.tags,
-                "body": doc.body, "book": doc.book, "chapter": doc.chapter,
-                "image_ids": self._fold_image_ids(self._ctx, doc.body, book_id=book_id)}
+                "body": body, "book": doc.book, "chapter": doc.chapter}
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
         if data.get("_recycled") or data.get("_skipped"):
             # never hashed for a real comparison: _recycled is always vetoed to SKIP
             # before a write; _skipped supplies cached_hash instead of calling this.
             return {"_unavailable": True}
-        body = (data.get("markdown") or "").strip()
+        raw_body = (data.get("markdown") or "").strip()
+        body = _substitute_gallery_tokens(self._ctx, raw_body, book_id=data.get("book_id"))
         return {"title": data["name"], "priority": data.get("priority"),
                 "tags": _tags_to_local(data.get("tags") or []),
-                "body": body, "book": data["book_slug"], "chapter": data.get("chapter_slug"),
-                "image_ids": self._fold_image_ids(self._ctx, body, book_id=data.get("book_id"))}
+                "body": body, "book": data["book_slug"], "chapter": data.get("chapter_slug")}
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         del path

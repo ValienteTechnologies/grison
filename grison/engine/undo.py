@@ -5,15 +5,27 @@ snapshot's inverse operations through the adapters, newest-op-first, each one gu
 by the same re-fetch check the forward apply loop uses — a record changed since the
 snapshot was taken is reported, not silently overwritten.
 
+One snapshot per ``grison sync`` RUN, not one per phase: :func:`grison.cli.sync`
+opens a single :class:`Snapshot` before its first phase and threads the SAME object
+through the report, findings and wiki phases, so every remote write from one run —
+whichever phase made it, Ghostwriter or BookStack alike — lands in one ops list in
+insertion order and is undone by one ``grison undo``, newest write first, regardless
+of which phase wrote it. This matches the user's mental model ("undo the last
+sync"): before this, each phase persisted its own snapshot, so a sync that both
+uploaded evidence (report phase) and pushed a library finding (findings phase) left
+two snapshot directories and a single ``grison undo`` only reversed the newer one.
+
 Undo is for REMOTE writes. A snapshot only ever holds ops for PUSH/MOVE_EDIT/CREATE/
 DELETE_REMOTE (the outcomes in ``grison.engine.apply._REMOTE_WRITE_OUTCOMES``) — never
 PULL/PULL_NEW/DELETE_LOCAL/a pure MOVE, which touch only the local, git-tracked tree
 and have nothing for grison's own undo to add over `git checkout`/`git mv`. This
 matters operationally, not just conceptually: with prune-to-10, a workspace that
 recorded every read-only sync too would have its real (remote-write) undo points
-evicted by ordinary pull-only syncs. :func:`grison.engine.apply.run` only calls
-:meth:`Snapshot.persist` when :attr:`Snapshot.empty` is False, so a run with no remote
-writes leaves no snapshot at all.
+evicted by ordinary pull-only syncs. :func:`grison.cli.sync` only calls
+:meth:`Snapshot.persist` when :attr:`Snapshot.empty` is False (i.e. at least one
+phase made a remote write), so a run with no remote writes at all leaves no
+snapshot — the keep-10 pruning in :func:`_prune` therefore counts RUNS, one
+directory per sync that wrote something, never phases within a run.
 """
 
 from __future__ import annotations
@@ -119,12 +131,13 @@ class SnapshotSummary:
 
 
 def snapshot_kinds(root: Path, name: str) -> set[str]:
-    """Every distinct ``kind`` recorded in snapshot ``name`` — a phase's own
-    ``Snapshot`` only ever collects its own kinds (each phase persists its own
-    snapshot directory), so this tells a caller with more than one remote domain
-    (e.g. the CLI's ``grison undo``, which drives BookStack and Ghostwriter through
-    different context objects) which domain's adapters/context a given snapshot
-    needs, without guessing from the snapshot's timestamp or name."""
+    """Every distinct ``kind`` recorded in snapshot ``name`` — one run's ``Snapshot``
+    now collects every phase's kinds together (Ghostwriter's ``gw.*`` and
+    BookStack's ``bs.*`` alike, whichever phases actually wrote), so this tells a
+    caller with more than one remote domain (e.g. the CLI's ``grison undo``, which
+    drives BookStack and Ghostwriter through different context objects) which
+    domain's adapters/context a given snapshot needs, without guessing from the
+    snapshot's timestamp or name — and without assuming a snapshot is homogeneous."""
     return {op.kind for op in _load(root, name)}
 
 

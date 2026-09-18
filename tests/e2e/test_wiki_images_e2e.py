@@ -265,28 +265,31 @@ def test_undo_refuses_to_guess_the_book_for_an_image_restore_with_no_uploaded_to
     assert bs_server.store.gallery == []  # never silently restored into a guessed page
 
 
-def test_image_reupload_surfaces_as_a_collision_never_a_silent_url_overwrite(
+def test_image_reupload_pushes_the_page_with_the_new_url_in_the_same_run(
     run_grison, bs_server,
 ):
-    """Before the fix: BsPageAdapter._remote_body_to_local resolved a stored
-    absolute gallery URL back to ``images/x.png`` via the LIVE gallery-by-URL map
-    only — after a reupload (D9: bytes changing under an unchanged filename
-    creates a NEW gallery row, the old one deleted, see grison.adapters.bs_images)
-    the page's server-side body still had the OLD, now-orphaned URL, which no
-    longer resolved to anything: the page's canonical remote form kept that raw
-    URL text, still hashed equal to base (the local file never changed), and the
-    page classified PULL — overwriting the local page with a literal URL instead
-    of ever being re-pushed with the new one.
+    """D9/D1, verbatim: "replacing an image's bytes must re-push every page
+    referencing it" — automatically, no ``--force-local``.
 
-    Fixed: canonical_local/canonical_remote fold each image reference's CURRENT
-    remote id (BsPageAdapter._fold_image_ids), resolving by the local file's own
-    identity (the stable ``images/x.png`` filename) rather than by matching the
-    stored URL text — so local no longer equals base once the id underneath that
-    filename changes, and the page is never overwritten. This is the SAME
-    "COLLISION, not a same-run automatic push" shape a reupload produces for a
-    Ghostwriter narrative section/finding (nothing marks the page's OWN stored
-    body stale until it is actually re-pushed) — resolving it (``--force-local``,
-    "keep my local text") re-pushes with the NEW gallery URL."""
+    Before this fix (coordinator correction over an earlier, weaker fix):
+    ``canonical_remote`` resolved a still-orphaned URL (one a reupload left
+    unresolved) through the LIVE gallery, which no longer had it — the fold
+    went from a real value to ``None``, drifting REMOTE's own payload off
+    ``base`` (not just local's), so the page could only ever reach a
+    COLLISION, needing ``--force-local``.
+
+    Fixed: an unresolved reference's token is computed directly from the URL
+    TEXT itself (:func:`grison.adapters.bs_pages._gallery_token`), never a
+    live lookup — so a reupload that leaves the page's own stored body
+    untouched (still naming the OLD, now-orphaned url) leaves
+    ``canonical_remote``'s payload UNCHANGED (still equal to ``base``), while
+    ``canonical_local``'s (resolved through the LIVE, POST-reupload gallery)
+    changes — `L != base, R == base` reaches PUSH directly. Unlike
+    Ghostwriter's reports-then-findings phase split, BookStack's images
+    always sync before pages WITHIN THE SAME PHASE (D9/BRIEF task C: "so a
+    fresh upload's gallery URL is visible to the page push that follows"),
+    so the reupload and the page's own re-push land in the SAME sync — the
+    very run that does the reupload."""
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi\n")
     run_grison("sync")
@@ -305,25 +308,22 @@ def test_image_reupload_surfaces_as_a_collision_never_a_silent_url_overwrite(
 
     (images_dir / "diagram.png").write_bytes(b"reuploaded bytes, different content")
 
-    result = run_grison("sync")  # bs.image reuploads (new id), bs.page reclassifies
+    result = run_grison("sync")  # bs.image reuploads (new id) AND bs.page re-pushes
 
-    assert "wiki (bs.page): collision 1" in result.output
-    # the core bug this proves fixed: never silently overwritten with the raw URL
-    assert page_path.read_text(encoding="utf-8") == original_text
-    assert "https://" not in page_path.read_text(encoding="utf-8")
-    sidecar = page_path.with_name("getting-started.remote.md")
-    assert sidecar.exists()
+    assert "wiki (bs.page): push 1" in result.output
+    assert "collision" not in result.output
+    assert page_path.read_text(encoding="utf-8") == original_text  # local text never touched
 
     new_url = bs_server.store.gallery[0]["url"]
     assert new_url != original_url
-
-    resolve_result = run_grison("sync", "--force-local", str(page_path))
-
-    assert "wiki (bs.page): push 1" in resolve_result.output
-    assert page_path.read_text(encoding="utf-8") == original_text  # local text never touched
-    pushed_markdown = bs_server.store.gallery and bs_server.store.page(
+    pushed_markdown = bs_server.store.page(
         next(p["id"] for p in bs_server.store.pages if p["name"] == "Getting Started")
     )["markdown"]
     assert new_url in pushed_markdown
     assert original_url not in pushed_markdown
-    assert not sidecar.exists()
+
+    before = len(bs_server.operation_log)
+    clean_result = run_grison("sync")
+
+    assert "wiki (bs.page): clean 1" in clean_result.output
+    assert bs_server.operation_log[before:] == []  # settled
