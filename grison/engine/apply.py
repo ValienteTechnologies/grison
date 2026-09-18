@@ -17,7 +17,7 @@ from typing import Any
 
 from grison.engine.adapter import Adapter
 from grison.engine.classify import classify
-from grison.engine.events import build_event
+from grison.engine.events import build_event, emit_losses
 from grison.engine.identity import Missing, PairDecision, Unindexed, pair
 from grison.engine.model import (
     Event,
@@ -378,12 +378,17 @@ def _apply_create(  # noqa: PLR0913
     # returns an id, before ANY other bookkeeping — a crash right after this line can
     # never produce a duplicate create on the next sync (see tests/test_engine_apply.py).
     index.set(str(p.path), IndexKind(adapter.kind), rec.id)
-    snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=rec.id))
+    # local_preimage: the author's own pre-create bytes — undoing this create restores
+    # them (grison.engine.undo._replay_one), rather than deleting the file or leaving
+    # it in its post-create mirrored form.
+    snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=rec.id,
+                           local_preimage=p.local.raw_text))
     text = adapter.render_local(rec.data, path=p.path)
     if text != p.local.raw_text:
         atomic_write_text(root / p.path, text)
     state.put(adapter.kind, rec.id, base=digest(adapter.canonical_remote(rec.data)),
               witness=rec.witness)
+    emit_losses(events, str(p.path), rec.losses)
     events.append(Event(verb="create", path=str(p.path)))
 
 
@@ -450,12 +455,14 @@ def _apply_update(  # noqa: PLR0913
         old_id = p.id
         index.set(str(p.path), IndexKind(adapter.kind), rec.id)
         state.forget(adapter.kind, old_id)
-        snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=rec.id))
+        snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=rec.id,
+                               local_preimage=p.local.raw_text))
         text = adapter.render_local(rec.data, path=p.path)
         if text != p.local.raw_text:
             atomic_write_text(root / p.path, text)
         state.put(adapter.kind, rec.id, base=digest(adapter.canonical_remote(rec.data)),
                   witness=rec.witness)
+        emit_losses(events, str(p.path), rec.losses)
         events.append(Event(verb="push", path=str(p.path), detail="re-created remotely"))
         return
     preimage = fresh.data
@@ -470,6 +477,7 @@ def _apply_update(  # noqa: PLR0913
         atomic_write_text(root / p.path, text)
     state.put(adapter.kind, p.id, base=digest(adapter.canonical_remote(resp.data)),
               witness=resp.witness)
+    emit_losses(events, str(p.path), resp.losses)
     verb = "move" if p.outcome is Outcome.MOVE_EDIT else "push"
     detail = f"from {p.move_from}" if p.move_from else ""
     events.append(Event(verb=verb, path=str(p.path), detail=detail))
@@ -542,6 +550,7 @@ def _apply_pull(  # noqa: PLR0913
         index.set(str(path), IndexKind(adapter.kind), p.remote.id)
     state.put(adapter.kind, p.remote.id, base=digest(adapter.canonical_remote(p.remote.data)),
               witness=p.remote.witness)
+    emit_losses(events, str(path), p.remote.losses)
     events.append(Event(verb="pull", path=str(path), detail=detail))
 
 

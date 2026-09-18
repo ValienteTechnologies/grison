@@ -45,6 +45,7 @@ class IndexKind(StrEnum):
     GW_FINDING = "gw.finding"
     GW_REPORTED_FINDING = "gw.reportedFinding"
     GW_REPORT = "gw.report"
+    GW_REPORT_SECTION = "gw.reportSection"
     GW_EVIDENCE = "gw.evidence"
     GW_PROJECT_NOTE = "gw.projectNote"
     BS_SHELF = "bs.shelf"

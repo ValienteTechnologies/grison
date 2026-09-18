@@ -246,6 +246,27 @@ def test_new_local_page_creates(run_grison, bs_server):
     assert _indexed_id(Path.cwd(), "methodology/library/playbook/new-page.md") == created[0]["id"]
 
 
+def test_undo_of_a_page_create_restores_the_authors_original_file(run_grison, bs_server) -> None:
+    """Coordinator correction: undoing a CREATE restores the author's own pre-push
+    bytes (not BookStack's post-create rewrite, which assigns ``priority`` — see
+    ``test_new_local_page_creates`` above — and not a bare delete, which would lose
+    the author's words entirely) and un-indexes the path."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page_path = Path.cwd() / "methodology" / "library" / "playbook" / "new-page.md"
+    _write_page_file(page_path, title="New Page", body="New page body text.")
+    original_text = page_path.read_text(encoding="utf-8")
+
+    run_grison("sync")
+    assert page_path.read_text(encoding="utf-8") != original_text  # rewritten (priority added)
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 0
+    assert page_path.read_text(encoding="utf-8") == original_text  # restored, not deleted
+    assert not any(p["book_id"] == book["id"] for p in bs_server.store.pages)
+    assert Index.load(Path.cwd()).get("methodology/library/playbook/new-page.md") is None
+
+
 def test_copying_a_synced_page_creates_a_new_remote_page(run_grison, bs_server):
     """tests changed on purpose (D3): there is no id in the document any more, so
     copying a file can no longer collide on identity — it is an ordinary CREATE."""

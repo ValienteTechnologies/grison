@@ -3,11 +3,12 @@
 The golden-value tests below reconstruct the pre-refactor formula independently
 (inline ``json.dumps``/``hashlib``, never calling into ``grison.hashing`` itself) and
 assert it against the real call sites' live output — the proof that routing
-``gwmap.content_hash``/``repmap.section_hash`` through ``grison.hashing`` did not
-change a single persisted byte. (``bsmap.bs_content_hash``'s own golden test was
-removed with ``grison/remote/bsmap.py`` — the wiki moved onto the sync engine, whose
-own state layer always writes fresh ``grison.hashing.digest`` values, so there is no
-v1-persisted byte left to stay compatible with.)
+``gwmap.content_hash`` through ``grison.hashing`` did not change a single persisted
+byte. (``bsmap.bs_content_hash``'s and ``repmap.section_hash``'s own golden tests
+were removed with ``grison/remote/bsmap.py``/``grison/remote/repmap.py`` — the wiki
+and reports phases both moved onto the sync engine, whose own state layer always
+writes fresh ``grison.hashing.digest`` values, so there is no v1-persisted byte left
+to stay compatible with for either.)
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ import json
 from grison import hashing
 from grison.model.finding import Cvss, EvidenceGwRef, EvidenceItem, Finding, GrisonMeta, GwRef
 from grison.remote.gwmap import content_hash, evidence_meta_hash
-from grison.remote.repmap import section_hash
 
 
 def _legacy_dict_hash(payload: object) -> str:
@@ -109,12 +109,6 @@ def test_gwmap_content_hash_matches_pre_refactor_formula() -> None:
         "evidence": [],
     }
     assert content_hash(f) == _legacy_dict_hash(expected_payload)
-
-
-def test_repmap_section_hash_matches_pre_refactor_formula() -> None:
-    md = "## Summary\n\nSome narrative text.\n"
-    expected = "sha256:" + hashlib.sha256(md.strip().encode()).hexdigest()
-    assert section_hash(md) == expected
 
 
 # --- the two newly-prefixed hashes ----------------------------------------------

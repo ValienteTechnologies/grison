@@ -1,0 +1,48 @@
+{
+  "data": {
+    "extraFieldSpec": [
+      {
+        "id": 3,
+        "internalName": "about_us",
+        "displayName": "About Us",
+        "position": 1
+      },
+      {
+        "id": 4,
+        "internalName": "executive_summary",
+        "displayName": "Executive Summary",
+        "position": 2
+      },
+      {
+        "id": 5,
+        "internalName": "attack_chain",
+        "displayName": "Attack Chain",
+        "position": 3
+      },
+      {
+        "id": 6,
+        "internalName": "methodology",
+        "displayName": "Methodology",
+        "position": 4
+      },
+      {
+        "id": 7,
+        "internalName": "disclaimer",
+        "displayName": "Disclaimer",
+        "position": 5
+      },
+      {
+        "id": 8,
+        "internalName": "scope_text",
+        "displayName": "Scope Text",
+        "position": 6
+      },
+      {
+        "id": 9,
+        "internalName": "appendix",
+        "displayName": "Appendix",
+        "position": 7
+      }
+    ]
+  }
+}

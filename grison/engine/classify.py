@@ -8,7 +8,13 @@ Read-only / append-only record types (ENGINE.md 'The classification table', thir
 bullet) are enforced here too: a read-only record's local edit never produces PUSH/
 CREATE/DELETE_REMOTE (a validation-gate failure, WS-009, is how the workspace actually
 learns about the edit — this is defense in depth, not the primary mechanism); an
-append-only record only ever CREATEs from a new local file, never PUSH/PULL/DELETE.
+append-only record's ALREADY-INDEXED half behaves exactly like a read-only one (it
+still PULLs/DELETE_LOCALs/REPAIRs/FORGETs normally — ENGINE.md: "Read-only record
+types... only ever take PULL / PULL_NEW / DELETE_LOCAL"; append-only is that same
+rule, plus the one thing read-only can't do at all: CREATE from a brand-new local
+file). Append-only never PUSHes/DELETE_REMOTEs an already-indexed record either way
+— a local edit to one is clamped to INVALID, the same defense-in-depth read-only
+relies on.
 """
 
 from __future__ import annotations
@@ -47,7 +53,10 @@ def classify(  # noqa: PLR0911, PLR0913
     PUSH, PULL, CREATE, MOVE, …) is silently un-forceable the same way.
     """
     if append_only:
-        outcome = _classify_append_only(indexed=indexed, local_present=local_present)
+        outcome = _classify_append_only(
+            indexed=indexed, local_present=local_present, remote_present=remote_present,
+            local_hash=local_hash, remote_hash=remote_hash, base_hash=base_hash,
+        )
     elif indexed:
         outcome = _classify_indexed(
             local_present=local_present, remote_present=remote_present,
@@ -86,13 +95,28 @@ def classify(  # noqa: PLR0911, PLR0913
     return outcome
 
 
-def _classify_append_only(*, indexed: bool, local_present: bool) -> Outcome:
-    """Append-only (ENGINE.md): only ever CREATE from a new local file; an existing
-    (indexed) record is always CLEAN from this engine's point of view — it is never
-    updated or deleted once created, by construction (the adapter simply never offers
-    a PUSH/DELETE_REMOTE/DELETE_LOCAL path for this kind)."""
+def _classify_append_only(  # noqa: PLR0913
+    *,
+    indexed: bool,
+    local_present: bool,
+    remote_present: bool,
+    local_hash: str | None,
+    remote_hash: str | None,
+    base_hash: str | None,
+) -> Outcome:
+    """Append-only (ENGINE.md): a brand-new local file CREATEs; an already-indexed
+    record classifies exactly like a read-only one — it still PULLs a remote edit,
+    DELETE_LOCALs when the remote copy is gone (and the local copy was never
+    touched), REPAIRs a stale base, and FORGETs when both sides are gone. What it
+    can never do is write anything back — a local edit to an indexed record, or a
+    local delete that would otherwise DELETE_REMOTE, or a genuine COLLISION, all
+    clamp to INVALID via :func:`_clamp_read_only` (never a push; the primary
+    enforcement is the validator, this is defense in depth, same as read-only)."""
     if indexed:
-        return Outcome.CLEAN
+        return _clamp_read_only(
+            _classify_indexed(local_present=local_present, remote_present=remote_present,
+                              local_hash=local_hash, remote_hash=remote_hash, base_hash=base_hash)
+        )
     if local_present:
         return Outcome.CREATE
     return Outcome.CLEAN  # a remote-only append-only record with no local copy: PULL_NEW

@@ -144,6 +144,20 @@ def test_fidelity_report_row_matches_lab_capture() -> None:
     assert got == sample
 
 
+def test_fidelity_extra_field_spec_rows_match_lab_capture() -> None:
+    """Captured live 2026-09-18 against the reset lab (report task E) —
+    ``seed_defaults()``'s own 7-field default (ids 3-9, same internalName/position
+    order) is this exact live shape, not a guess."""
+    sample = json.loads(
+        (LAB_SAMPLES / "gw-extra-field-spec.json").read_text()
+    )["data"]["extraFieldSpec"]
+    gw = FakeGhostwriter()  # seed_defaults() already seeds the 7-field default
+
+    got = _client(gw).fetch_report_extra_field_specs()
+
+    assert got == sample
+
+
 # --- store CRUD + constraints -------------------------------------------------
 
 
