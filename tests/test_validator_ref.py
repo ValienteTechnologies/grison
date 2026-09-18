@@ -89,3 +89,26 @@ def test_ref007_wrong_wiki_image_spelling(tmp_path: Path) -> None:
         "images/recon-diagram.png",
     )
     assert "REF-007" in rule_ids(validate_workspace(root))
+
+
+def test_non_ascii_evidence_filename_validates(tmp_path: Path) -> None:
+    """markdown-it-py percent-encodes non-ASCII bytes in an image destination
+    (``evidence/Phishing_Sonu%C3%A7lar%C4%B1.png`` for the author's own
+    ``evidence/Phishing_Sonuçları.png``) — without decoding it back before
+    resolving against the filesystem, this failed REF-002 even though the file
+    exists at exactly that path."""
+    root = copy_fixture(tmp_path)
+    evidence_dir = root / "findings" / "reports" / "14-acme-corp" / "evidence"
+    (evidence_dir / "Phishing_Sonuçları.png").write_bytes(b"\x89PNG-fake-bytes")
+    narrative = (
+        root / "findings" / "reports" / "14-acme-corp" / "narrative" / "executive_summary.md"
+    )
+    edit(
+        narrative,
+        "One critical and one high finding were identified",
+        "![Phishing results](evidence/Phishing_Sonuçları.png)\n\n"
+        "One critical and one high finding were identified",
+    )
+    fails = rule_ids(validate_workspace(root))
+    assert "REF-002" not in fails
+    assert "REF-006" not in fails

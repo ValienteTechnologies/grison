@@ -33,6 +33,7 @@ from typing import Any
 
 from grison.adapters._gw_common import GWReportContext, IndexRefResolver, slugify
 from grison.engine.adapter import AdapterMode
+from grison.engine.filesets import canonical_prose
 from grison.engine.mirrors import MirrorWrite, write_mirror_guarded
 from grison.engine.model import Canonical, LocalDoc, RemoteRecord, Veto
 from grison.engine.state import StateStore
@@ -346,9 +347,41 @@ class SectionDoc:
     report_dir: str
 
 
+@dataclass
 class NarrativeSectionAdapter:
+    """Every indexed report's narrative sections, as ONE adapter instance per sync
+    run.
+
+    ``canonical_local``/``canonical_remote`` (the ``Adapter`` protocol's two
+    ctx-less methods — see ``ENGINE.md``'s Adapter protocol sketch) fold each
+    embed's CURRENT remote id into the hash via :func:`grison.engine.filesets.
+    canonical_prose`, exactly like :mod:`grison.adapters.gw_findings` does for
+    findings (D1: a reupload changes an evidence row's id under an unchanged path —
+    see that module's docstring) — a captioned embed's caption/title never enters
+    the hash either way (:func:`~grison.engine.filesets.strip_embed_captions`), so
+    a caption round-trips exactly (see :class:`~grison.adapters._gw_common.
+    IndexRefResolver`) without ever making the section look locally edited. Doing
+    this needs the CURRENT ``.grison/index.json`` (D3), which — unlike
+    :class:`~grison.adapters.gw_findings.GwReportedFindingAdapter`, whose ``index``
+    is a constructor field the CLI already threads through — this adapter has no
+    such constructor-injected access to (every one of its 3 construction sites is a
+    bare, zero-argument ``NarrativeSectionAdapter()``, shared with the notes phase
+    and offline status; changing that shape is out of this fix's lane). Instead
+    ``self._index`` is captured as a side effect of ``fetch_remote``/``refetch`` —
+    the only two methods this adapter has that DO receive ``ctx`` — which
+    :mod:`grison.engine.apply`'s loop order guarantees run before any
+    ``canonical_local``/``canonical_remote`` call on the SAME adapter instance
+    within one sync (``scan_local``+``fetch_remote`` both happen up front, then
+    classification). The one caller with no ctx-bearing call at all, ever
+    (:func:`grison.engine.offline_status.compute_offline_status`), degrades to an
+    empty index — the same "no id known" a library finding with no evidence at all
+    already gets from :mod:`grison.adapters.gw_findings`'s own ``_EMPTY_RESOLVER``,
+    never a crash."""
+
     kind = "gw.reportSection"
     mode: AdapterMode = "read-write"
+    _index: Index = field(default_factory=lambda: Index(root=Path()), init=False, repr=False,
+                          compare=False)
 
     def scan_local(self, root: Path) -> Iterable[LocalDoc]:
         base = root / "findings" / "reports"
@@ -372,8 +405,26 @@ class NarrativeSectionAdapter:
     def _spec_by_name(self, ctx: GWReportContext) -> dict[str, dict[str, Any]]:
         return {s["internalName"]: s for s in ctx.field_specs}
 
-    def _resolver_for(self, ctx: GWReportContext, report_dir: str) -> IndexRefResolver:
-        return IndexRefResolver(index=ctx.index, report_dir=report_dir)
+    def _resolver_for(
+        self, ctx: GWReportContext, report_id: int, report_dir: str
+    ) -> IndexRefResolver:
+        """The caption-carrying resolver (D1) — ``evidence_rows`` comes from
+        ``ctx.evidence_for_report`` (passed LAZILY: see
+        :class:`~grison.adapters._gw_common.IndexRefResolver`'s own field docstring
+        — a report with no evidence reference anywhere never triggers the org-wide
+        evidence fetch) so a pulled embed's caption/description are the evidence
+        row's OWN current values (:class:`~grison.adapters._gw_common.
+        IndexRefResolver`'s ``to_local``), never dropped."""
+        return IndexRefResolver(index=ctx.index, report_dir=report_dir,
+                                evidence_rows=lambda: ctx.evidence_for_report(report_id))
+
+    def _canon_resolver(self, report_dir: str) -> IndexRefResolver:
+        """The id-folding-only resolver :meth:`canonical_local`/:meth:`canonical_remote`
+        use (see the class docstring on why they can't just call :meth:`_resolver_for`
+        — no ``ctx`` reaches either of them). No ``evidence_rows`` needed: neither
+        caller reads caption/description through it — :func:`grison.engine.filesets.
+        canonical_prose` only ever calls ``to_remote_id``."""
+        return IndexRefResolver(index=self._index, report_dir=report_dir)
 
     def _section_data(
         self, ctx: GWReportContext, report_id: int, spec: dict[str, Any], html: str,
@@ -382,7 +433,7 @@ class NarrativeSectionAdapter:
         losses: list[str] = []
         try:
             body_md = html_to_md(
-                html or "", headings=True, refs=self._resolver_for(ctx, report_dir),
+                html or "", headings=True, refs=self._resolver_for(ctx, report_id, report_dir),
                 on_loss=losses.append,
             ).strip()
         except ConverterError:
@@ -393,6 +444,7 @@ class NarrativeSectionAdapter:
         }
 
     def fetch_remote(self, ctx: GWReportContext) -> dict[int, RemoteRecord]:
+        self._index = ctx.index
         out: dict[int, RemoteRecord] = {}
         for rec in ctx.reports:
             rid = rec["id"]
@@ -409,6 +461,7 @@ class NarrativeSectionAdapter:
         return out
 
     def refetch(self, ctx: GWReportContext, id: int) -> RemoteRecord | None:
+        self._index = ctx.index
         report_id, spec_id = decode_section_id(id)
         row = ctx.client.fetch_report_by_pk(report_id)
         if row is None:
@@ -426,10 +479,10 @@ class NarrativeSectionAdapter:
     def canonical_local(self, doc: SectionDoc | None) -> Canonical:
         if doc is None:
             return {"_invalid": True}
-        return {"body": doc.body.strip()}
+        return canonical_prose(doc.body.strip(), self._canon_resolver(doc.report_dir))
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
-        return {"body": data["body_md"]}
+        return canonical_prose(data["body_md"], self._canon_resolver(data["report_dir"]))
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         del path
@@ -460,7 +513,9 @@ class NarrativeSectionAdapter:
         row = ctx.client.fetch_report_by_pk(report_id)
         if row is None:
             raise LookupError(f"report {report_id} no longer exists remotely")
-        html = md_to_html(doc.body.strip(), headings=True, refs=self._resolver_for(ctx, rdir))
+        html = md_to_html(
+            doc.body.strip(), headings=True, refs=self._resolver_for(ctx, report_id, rdir)
+        )
         merged = dict(row.get("extraFields") or {})
         merged[field_name] = html
         ctx.client.update_report(report_id, {"extraFields": merged})

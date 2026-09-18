@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -73,6 +73,16 @@ def _remote_body_to_local(body: str, gallery_by_url: dict[str, str], *, in_chapt
         return f"{prefix}{rel_prefix}{name}{suffix}" if name else m.group(0)
 
     return _URL_IMAGE_LINE_RE.sub(_sub, body)
+
+
+def _matched_names_and_urls(body: str) -> tuple[list[str], list[str]]:
+    """Every gallery image reference in ``body``, split by spelling: local names
+    (``images/x.png``/``../images/x.png``, in document order) and raw absolute
+    URLs (in document order) — the two vocabularies :func:`_local_body_to_remote`/
+    :func:`_remote_body_to_local` translate between."""
+    names = [m.group(3) for m in _LOCAL_IMAGE_LINE_RE.finditer(body)]
+    urls = [m.group(2) for m in _URL_IMAGE_LINE_RE.finditer(body)]
+    return names, urls
 
 
 def _gallery_by_name_for_book(ctx: BSContext, book_id: int) -> dict[str, str]:
@@ -160,9 +170,82 @@ def _normalize(
     }
 
 
+@dataclass
 class BsPageAdapter:
+    """``methodology/library/**/*.md`` <-> BookStack pages.
+
+    ``canonical_local``/``canonical_remote`` (the ``Adapter`` protocol's two
+    ctx-less methods) fold every gallery image reference's CURRENT remote id into
+    the hash (:meth:`_fold_image_ids`) — the SAME "local file identity" fix
+    :mod:`grison.adapters.gw_report`/:mod:`grison.adapters.gw_findings` apply via
+    :func:`grison.engine.filesets.canonical_prose`'s ``embed_ids``, adapted to D9's
+    own vocabulary (a stored absolute gallery URL, not an html node id). Before
+    this fix, a reupload of an image a page references (D9: bytes changing under
+    an unchanged filename creates a NEW gallery row, the old one deleted — see
+    :mod:`grison.adapters.bs_images`) left the page's OLD, now-orphaned URL
+    unresolved by :meth:`_localize_gallery_urls` (no CURRENT row has that URL any
+    more): the page's canonical remote form kept the literal stale URL text, which
+    (since the local file never changed) still hashed equal to ``base`` — so the
+    page classified PULL and got silently overwritten with the raw URL instead of
+    ever surfacing the new one. Folding each reference's id (resolved fresh, by
+    filename for a local-spelled reference or directly by URL for one that's still
+    raw) makes the LOCAL side's fold change the moment the id underneath its
+    filename changes, so local no longer equals base and the page is never
+    overwritten (see ``tests/e2e/test_wiki_images_e2e.py`` for the resulting
+    COLLISION + ``--force-local`` resolution — the same "COLLISION, not an
+    automatic same-run push" shape :mod:`grison.adapters.gw_report`'s own reupload
+    fix reaches, for the identical reason: nothing marks the referencing document's
+    OWN stored text/HTML stale until it is actually re-pushed).
+
+    Resolving a reference needs the live gallery (``ctx`` — the ``Adapter``
+    protocol doesn't hand ``canonical_local``/``canonical_remote`` one at all), so
+    ``self._ctx``/``self._url_to_id_cache`` are captured as a side effect of
+    ``fetch_remote``/``refetch``/``create``/``update`` — the only methods that DO
+    receive ``ctx`` — mirroring :class:`grison.adapters.gw_report.
+    NarrativeSectionAdapter`'s identical ``self._index`` caching (see that class's
+    own docstring for why this is safe: :mod:`grison.engine.apply`'s loop order
+    guarantees ``fetch_remote`` runs before any ``canonical_local``/
+    ``canonical_remote`` call on the SAME adapter instance within one sync). The
+    one caller with no ctx-bearing call at all (:func:`grison.engine.offline_status.
+    compute_offline_status`) degrades to folding no ids, never a crash."""
+
     kind = "bs.page"
     mode: AdapterMode = "read-write"
+    _ctx: BSContext | None = field(default=None, init=False, repr=False, compare=False)
+    _url_to_id_cache: dict[str, int] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def _url_to_id(self, ctx: BSContext) -> dict[str, int]:
+        """Every CURRENT gallery image's absolute URL -> id, org-wide (BookStack's
+        URL is unique per row regardless of book) — cached on this adapter
+        instance for the whole sync run, the same one ``fetch_gallery_images()``
+        call :func:`_gallery_by_name_for_book` already pays for per book, just
+        keyed the other way."""
+        if self._url_to_id_cache is None:
+            self._url_to_id_cache = {
+                row["url"]: row["id"] for row in ctx.client.fetch_gallery_images()
+                if row.get("url")
+            }
+        return self._url_to_id_cache
+
+    def _fold_image_ids(
+        self, ctx: BSContext | None, body: str, *, book_id: int | None,
+    ) -> list[int | None]:
+        """Every gallery image reference in ``body`` (either spelling), resolved to
+        its CURRENT remote id, in document order — ``None`` where ``ctx``/
+        ``book_id`` aren't available (offline) or a reference can't currently be
+        resolved at all (a genuinely orphaned/broken reference), never fatal."""
+        if ctx is None or book_id is None:
+            return []
+        names, urls = _matched_names_and_urls(body)
+        if not names and not urls:
+            return []
+        url_to_id = self._url_to_id(ctx)
+        gallery_by_name = _gallery_by_name_for_book(ctx, book_id)
+        ids: list[int | None] = [url_to_id.get(gallery_by_name.get(n, "")) for n in names]
+        ids.extend(url_to_id.get(u) for u in urls)
+        return ids
 
     def scan_local(self, root: Path) -> Iterable[LocalDoc]:
         base = root / "methodology" / "library"
@@ -194,6 +277,7 @@ class BsPageAdapter:
 
     def fetch_remote(self, ctx: BSContext) -> dict[int, RemoteRecord]:
         assert isinstance(ctx, BSContext) and ctx.state is not None
+        self._ctx = ctx
         rows = ctx.client.fetch_pages()
         books_by_id = ctx.books_by_id
         chapters_by_id = ctx.chapters_by_id
@@ -236,6 +320,7 @@ class BsPageAdapter:
         return out
 
     def refetch(self, ctx: BSContext, id: int) -> RemoteRecord | None:
+        self._ctx = ctx
         try:
             detail = ctx.client.fetch_page(id)
         except BookStackError:
@@ -265,18 +350,21 @@ class BsPageAdapter:
     def canonical_local(self, doc: PageDoc | None) -> Canonical:
         if doc is None:
             return {"_invalid": True}
+        book_id = self._ctx.books_by_slug.get(doc.book, {}).get("id") if self._ctx else None
         return {"title": doc.title, "priority": doc.priority, "tags": doc.tags,
-                "body": doc.body, "book": doc.book, "chapter": doc.chapter}
+                "body": doc.body, "book": doc.book, "chapter": doc.chapter,
+                "image_ids": self._fold_image_ids(self._ctx, doc.body, book_id=book_id)}
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
         if data.get("_recycled") or data.get("_skipped"):
             # never hashed for a real comparison: _recycled is always vetoed to SKIP
             # before a write; _skipped supplies cached_hash instead of calling this.
             return {"_unavailable": True}
+        body = (data.get("markdown") or "").strip()
         return {"title": data["name"], "priority": data.get("priority"),
                 "tags": _tags_to_local(data.get("tags") or []),
-                "body": (data.get("markdown") or "").strip(),
-                "book": data["book_slug"], "chapter": data.get("chapter_slug")}
+                "body": body, "book": data["book_slug"], "chapter": data.get("chapter_slug"),
+                "image_ids": self._fold_image_ids(self._ctx, body, book_id=data.get("book_id"))}
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         del path
@@ -319,6 +407,7 @@ class BsPageAdapter:
 
     def create(self, ctx: BSContext, doc: PageDoc) -> RemoteRecord:
         assert isinstance(ctx, BSContext)
+        self._ctx = ctx
         book_id, chapter_id = self._resolve_parent(ctx, doc)
         if book_id is not None:
             real_book_id = book_id
@@ -338,6 +427,7 @@ class BsPageAdapter:
 
     def update(self, ctx: BSContext, id: int, doc: PageDoc) -> RemoteRecord:
         assert isinstance(ctx, BSContext)
+        self._ctx = ctx
         book_id, chapter_id = self._resolve_parent(ctx, doc)
         if book_id is not None:
             real_book_id = book_id

@@ -928,6 +928,118 @@ def test_external_image_left_alone() -> None:
     assert not any(i.url.endswith("logo.png") for i in r.images)
 
 
+# --- item 4a: host-relative gallery URL (no scheme/host at all) --------------
+
+
+def test_host_relative_gallery_reference_is_recognized_given_bs_host() -> None:
+    """Before the fix: clean_page only recognized a FULLY-QUALIFIED
+    ``https://<host>/uploads/images/...`` gallery reference — a real
+    BookStack export also stores the host-relative spelling,
+    ``/uploads/images/...`` (no scheme/host), which was left completely
+    unrecognized (never reported, never rewritten) even though it names the
+    exact same upload."""
+    md = "![Diagram](/uploads/images/gallery/2026-09/network-diagram.png)\n"
+    r = clean_page(md, bs_host="192.168.122.177:8443")
+    assert len(r.images) == 1
+    assert r.images[0].url == (
+        "https://192.168.122.177:8443/uploads/images/gallery/2026-09/network-diagram.png"
+    )
+    assert r.images[0].proposed_filename == "network-diagram.png"
+
+
+def test_host_relative_gallery_reference_unrecognized_without_bs_host() -> None:
+    """No ``bs_host`` given: nothing to build a canonical absolute URL from,
+    so a host-relative reference is left exactly as before this fix —
+    unrecognized, not guessed at."""
+    md = "![Diagram](/uploads/images/gallery/2026-09/network-diagram.png)\n"
+    r = clean_page(md)
+    assert r.images == []
+    assert "/uploads/images/gallery/2026-09/network-diagram.png" in r.text
+
+
+def test_host_relative_and_absolute_spellings_of_the_same_image_share_one_url() -> None:
+    """A page mixing both spellings for the SAME upload (both occur in real
+    pages) must be recognized as the SAME file, not two — both resolve to
+    the identical canonical absolute URL."""
+    md = (
+        "![A](https://192.168.122.177:8443/uploads/images/gallery/2026-09/diagram.png)\n\n"
+        "![B](/uploads/images/gallery/2026-09/diagram.png)\n"
+    )
+    r = clean_page(md, own_hosts=OWN_HOSTS, bs_host="192.168.122.177:8443")
+    assert {i.url for i in r.images} == {
+        "https://192.168.122.177:8443/uploads/images/gallery/2026-09/diagram.png"
+    }
+    assert {i.proposed_filename for i in r.images} == {"diagram.png"}
+
+
+def test_host_relative_gallery_reference_rewritten_with_mapping() -> None:
+    md = "![Diagram](/uploads/images/gallery/2026-09/network-diagram.png)\n"
+    mapping = {
+        "https://192.168.122.177:8443/uploads/images/gallery/2026-09/network-diagram.png": (
+            "network-diagram.png"
+        ),
+    }
+    r = clean_page(md, bs_host="192.168.122.177:8443", image_map=mapping)
+    assert "![Diagram](images/network-diagram.png)" in r.text
+    assert "/uploads/images/" not in r.text
+    r2 = clean_page(r.text, bs_host="192.168.122.177:8443", image_map=mapping)
+    assert r2.changes == []  # idempotent
+
+
+# --- item 4b: REF-007's two local spellings (book root vs. inside a chapter) --
+
+
+def test_gallery_image_rewritten_with_the_dotdot_spelling_inside_a_chapter() -> None:
+    """Before the fix: clean_page always emitted the book-root ``images/<file>``
+    spelling regardless of where the page actually lives — REF-007 requires
+    ``../images/<file>`` for a page one level down, inside a chapter."""
+    md = _read("gallery-images.md")
+    mapping = {
+        "https://192.168.122.177:8443/uploads/images/gallery/2026-09/network-diagram.png": (
+            "network-diagram.png"
+        ),
+        "https://192.168.122.177:8443/uploads/images/gallery/2026-09/legend.png": "legend.png",
+    }
+    r = clean_page(
+        md, title="Network Diagram", own_hosts=OWN_HOSTS, in_chapter=True, image_map=mapping,
+    )
+    assert "![Diagram](../images/network-diagram.png)" in r.text
+    assert "![Legend](../images/legend.png)" in r.text
+    assert "images/network-diagram.png)" not in r.text.replace("../images/network-diagram.png)", "")
+    r2 = clean_page(
+        r.text, own_hosts=OWN_HOSTS, in_chapter=True, image_map=mapping,
+    )
+    assert r2.changes == []  # idempotent
+
+
+def test_book_root_page_still_gets_the_bare_images_spelling() -> None:
+    """The default (in_chapter=False) is unchanged — a book-root page keeps
+    getting the plain images/<file> spelling."""
+    md = "![Diagram](https://192.168.122.177:8443/uploads/images/gallery/x/a.png)\n"
+    mapping = {"https://192.168.122.177:8443/uploads/images/gallery/x/a.png": "a.png"}
+    r = clean_page(md, own_hosts=OWN_HOSTS, image_map=mapping)
+    assert "![Diagram](images/a.png)" in r.text
+
+
+# --- idempotence on the masked real-shape page (read-only, never copied) -----
+
+_REAL_SHAPE_PAGE = Path(
+    "/home/tfp/repos/grison-rework/lab/real-shapes/big-page-masked.md"
+)
+
+
+@pytest.mark.skipif(not _REAL_SHAPE_PAGE.is_file(), reason="lab real-shape fixture not present")
+def test_idempotent_on_the_masked_real_shape_page() -> None:
+    """Reads the real, masked (content-scrubbed, structure-preserved) page
+    directly from the lab worktree — never copied into this repo — and
+    proves clean_page settles: a second pass over its own output makes no
+    further changes."""
+    md = _REAL_SHAPE_PAGE.read_text(encoding="utf-8")
+    r1 = clean_page(md, own_hosts=OWN_HOSTS, bs_host="192.168.122.177:8443")
+    r2 = clean_page(r1.text, own_hosts=OWN_HOSTS, bs_host="192.168.122.177:8443")
+    assert r2.changes == []
+
+
 _CHEATSHEET_PLACEHOLDERS = (
     "<user>", "<password>", "<domain>", "<target>", "<ip>", "<hash>", "<jumphost>", "<bastion>",
 )  # fmt: skip

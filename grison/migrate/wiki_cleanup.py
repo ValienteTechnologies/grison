@@ -667,6 +667,23 @@ def _wrap(marker: str, content: str) -> str:
 class _RenderCtx:
     own_hosts: frozenset[str]
     image_map: Mapping[str, str]
+    #: The workspace's own BookStack host (``host[:port]``, no scheme) — lets a
+    #: HOST-RELATIVE gallery reference (``/uploads/images/gallery/...``, no
+    #: scheme/host at all — real BookStack exports use this spelling as often
+    #: as the fully-qualified one) be turned into the same canonical absolute
+    #: URL an ``own_hosts``-qualified absolute reference already resolves to,
+    #: so both spellings key into ``image_map``/``CleanResult.images``
+    #: identically (see ``_canonical_gallery_url``). ``None`` leaves a
+    #: host-relative reference unrecognized (today's behavior — see
+    #: ``clean_page``'s docstring for the caller-facing knob, ``bs_host``).
+    bs_host: str | None = None
+    #: Whether the page being cleaned sits inside a chapter — REF-007's two
+    #: accepted local spellings for a gallery image reference are
+    #: ``images/<file>`` at the book root and ``../images/<file>`` one level
+    #: down inside a chapter; ``clean_page`` always emitted the book-root
+    #: spelling regardless of where the page actually lives (a real REF-007
+    #: violation for any chapter page whose gallery image needed rewriting).
+    in_chapter: bool = False
     env: dict[str, object] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     images: list[ImageRef] = field(default_factory=list)
@@ -759,6 +776,28 @@ def _render_node(node: _HNode | str, ctx: _RenderCtx) -> str:
     return _render_children(node, ctx)
 
 
+def _canonical_gallery_url(src: str, ctx: _RenderCtx) -> str | None:
+    """``src`` -> the canonical absolute gallery URL it names, if it names one
+    of THIS wiki's own ``/uploads/images/...`` gallery uploads at all — either
+    spelling a real BookStack export uses (module docstring/BRIEF item 4a):
+    a fully-qualified ``https://<own-host>/uploads/images/...`` reference, or
+    a host-relative ``/uploads/images/...`` one (no scheme/host). Both key
+    into ``ctx.image_map``/``CleanResult.images`` under the SAME absolute URL
+    either way, so a page mixing both spellings for the same file (seen on
+    real pages) still gets ONE proposed local filename, not two. Returns
+    ``None`` for anything else, including a host-relative reference when
+    ``ctx.bs_host`` isn't known (nothing to build an absolute URL from)."""
+    if src.startswith("/uploads/images/"):
+        return f"https://{ctx.bs_host}{src}" if ctx.bs_host else None
+    if (
+        src.startswith(("http://", "https://"))
+        and urlsplit(src).netloc in ctx.own_hosts
+        and "/uploads/images/" in src
+    ):
+        return src
+    return None
+
+
 def _render_image(alt: str, src: str, ctx: _RenderCtx, *, orig: str | None) -> str:
     """Render one image. ``orig`` is the exact original markdown source span
     (``!alt-text ... `` slice) when this came from ALREADY-native markdown
@@ -770,23 +809,19 @@ def _render_image(alt: str, src: str, ctx: _RenderCtx, *, orig: str | None) -> s
     HTML tag being converted, which always needs reconstruction since the
     syntax itself is changing from HTML to markdown."""
     scheme = urlsplit(src).scheme.lower()
-    host = urlsplit(src).netloc
-    is_own_gallery = (
-        src.startswith(("http://", "https://"))
-        and host in ctx.own_hosts
-        and "/uploads/images/" in src
-    )
-    if is_own_gallery:
-        local = ctx.image_map.get(src)
+    canonical = _canonical_gallery_url(src, ctx)
+    if canonical is not None:
+        rel_prefix = "../images/" if ctx.in_chapter else "images/"  # REF-007
+        local = ctx.image_map.get(canonical)
         if local is not None:
             ctx.notes.append(R_GALLERY_IMAGE)
-            return f"![{alt}](images/{local})"
-        filename = url2pathname(urlsplit(src).path.rsplit("/", 1)[-1])
-        ctx.images.append(ImageRef(url=src, proposed_filename=filename))
+            return f"![{alt}]({rel_prefix}{local})"
+        filename = url2pathname(urlsplit(canonical).path.rsplit("/", 1)[-1])
+        ctx.images.append(ImageRef(url=canonical, proposed_filename=filename))
         if orig is not None:
             return orig  # nothing textually changes yet, just recorded above
         ctx.notes.append(R_HTML_INLINE)
-        return f"![{alt}]({src})"
+        return f"![{alt}]({canonical})"
     if scheme == "file":
         ctx.notes.append(R_FILE_LINK)
         return _escape_brackets(alt)  # D5: a file: image keeps only its alt text
@@ -1336,6 +1371,8 @@ def _convert_structural(
     *,
     own_hosts: frozenset[str],
     image_map: Mapping[str, str],
+    bs_host: str | None = None,
+    in_chapter: bool = False,
 ) -> tuple[
     str,
     list[Change],
@@ -1397,7 +1434,10 @@ def _convert_structural(
         if ttype == "html_block" and tmap:
             start, end = slice_lines(tmap[0], tmap[1])
             raw = text[start:end]
-            ctx = _RenderCtx(own_hosts=own_hosts, image_map=image_map, env=env)
+            ctx = _RenderCtx(
+                own_hosts=own_hosts, image_map=image_map, bs_host=bs_host,
+                in_chapter=in_chapter, env=env,
+            )
             converted, reason = _convert_block_fragment(raw, ctx)
             if converted is None:
                 unresolved.append(
@@ -1445,7 +1485,10 @@ def _convert_structural(
         abs_start = seg_start + idx
         abs_end = abs_start + len(content)
         code_mask = _code_mask(content, getattr(tok, "children", None) or [])
-        ctx = _RenderCtx(own_hosts=own_hosts, image_map=image_map, env=env)
+        ctx = _RenderCtx(
+            own_hosts=own_hosts, image_map=image_map, bs_host=bs_host,
+            in_chapter=in_chapter, env=env,
+        )
         converted, reason = _convert_inline_content(content, code_mask, ctx)
         if converted is None:
             if _looks_actionable(content, env):
@@ -2147,6 +2190,8 @@ def clean_page(
     *,
     title: str | None = None,
     own_hosts: Iterable[str] = (),
+    bs_host: str | None = None,
+    in_chapter: bool = False,
     image_map: Mapping[str, str] | None = None,
 ) -> CleanResult:
     """Clean one BookStack wiki page BODY (not the whole file — no
@@ -2165,12 +2210,23 @@ def clean_page(
     ``own_hosts`` is the set of ``host[:port]`` values (as
     ``urllib.parse.urlsplit(...).netloc`` would report them) that identify
     THIS wiki's own image-gallery uploads; an absolute
-    ``https://<own-host>/uploads/images/...`` reference is reported in
-    ``CleanResult.images`` with a proposed local filename. ``image_map``, if
-    given, maps such a URL to the local relative path already downloaded for
-    it (by a caller with network access) — when a URL is a key in this
-    mapping, the reference is rewritten in place to
-    ``![caption](images/<file>)`` instead of merely being reported.
+    ``https://<own-host>/uploads/images/...`` reference is recognized as one.
+    Real BookStack pages also store a HOST-RELATIVE spelling of the same
+    reference, ``/uploads/images/...`` (no scheme/host at all) — ``bs_host``
+    (a single ``host[:port]``, no scheme) is the workspace's own BookStack
+    host, used ONLY to turn that host-relative spelling into the SAME
+    canonical absolute URL an ``own_hosts``-qualified one already resolves
+    to, so both spellings of the same reference key into ``image_map``/
+    ``CleanResult.images`` identically; a host-relative reference is left
+    unrecognized (today's behavior) when ``bs_host`` isn't given. Either
+    recognized form is reported in ``CleanResult.images`` with a proposed
+    local filename. ``image_map``, if given, maps the CANONICAL absolute URL
+    to the local relative path already downloaded for it (by a caller with
+    network access) — when that URL is a key in this mapping, the reference
+    is rewritten in place to ``![caption](images/<file>)`` (book root) or
+    ``![caption](../images/<file>)`` (``in_chapter=True`` — REF-007: a page
+    that sits inside a chapter needs the one-level-up spelling) instead of
+    merely being reported.
     """
     changes: list[Change] = []
     unresolved: list[Issue] = []
@@ -2187,7 +2243,8 @@ def clean_page(
     hosts = frozenset(own_hosts)
     mapping = image_map or {}
     text, ch, un, img, deliberate, orig_deliberate_lines, line_map = _convert_structural(
-        text, line_map, own_hosts=hosts, image_map=mapping
+        text, line_map, own_hosts=hosts, image_map=mapping,
+        bs_host=bs_host, in_chapter=in_chapter,
     )
     changes.extend(ch)
     unresolved.extend(un)

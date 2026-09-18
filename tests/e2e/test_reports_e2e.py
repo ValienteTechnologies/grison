@@ -997,3 +997,140 @@ def test_collision_persists_unresolved_across_a_second_sync(run_grison, gw_serve
     assert (
         es.with_name("executive_summary.remote.md").read_text(encoding="utf-8").strip() == "REMOTE"
     )
+
+
+# --- evidence embeds in narrative sections (D1, shared with gw_findings) --------
+#
+# Proof for the fix to NarrativeSectionAdapter.canonical_local/canonical_remote and
+# IndexRefResolver.to_local (grison.adapters.gw_report / _gw_common): sections now
+# go through the SAME grison.engine.filesets.canonical_prose mechanism
+# grison.adapters.gw_findings uses — embed ids folded into the hash, captions
+# excluded from it, IndexRefResolver.to_local carrying an embed's caption/
+# description through from the evidence row instead of dropping them.
+
+
+def test_captioned_evidence_embed_in_narrative_round_trips_clean(run_grison, gw_server):
+    """Before the fix: IndexRefResolver.to_local always returned an empty caption/
+    description, so a narrative section's pulled embed permanently disagreed with
+    itself on caption text (raw-markdown comparison, no strip) and could never
+    settle to CLEAN. Fixed: to_local carries the evidence row's own caption/
+    description, and canonical_prose's caption-stripping makes the caption
+    irrelevant to the hash either way — a captioned embed is CLEAN immediately
+    after the pull that introduced it, and stays CLEAN with the caption intact."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        caption="Login screen", description="A close-up of the login form",
+    )
+    run_grison("sync")  # report dir + empty narrative + evidence/shot.png, all indexed
+
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["extraFields"]["executive_summary"] = (
+        '<div class="richtext-evidence" data-evidence-id="90"></div>'
+    )
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+
+    pull_result = run_grison("sync")
+
+    assert "reports (gw.reportSection): pull 1" in pull_result.output
+    pulled = section.read_text(encoding="utf-8")
+    assert '![Login screen](evidence/shot.png "A close-up of the login form")' in pulled
+
+    clean_result = run_grison("sync")  # round trip: nothing changed, must settle CLEAN
+
+    assert "reports (gw.reportSection): clean 1" in clean_result.output
+    assert section.read_text(encoding="utf-8") == pulled  # caption/description untouched
+    assert gw_server.operation_log == []
+
+
+def test_evidence_reupload_surfaces_as_a_collision_never_a_silent_overwrite(
+    run_grison, gw_server,
+):
+    """Before the fix: an evidence reupload (same filename, new remote id) made
+    IndexRefResolver.to_local fail to resolve the narrative's OLD embed id (the
+    index now points the path at the new id), and since canonical_local/
+    canonical_remote compared raw markdown with no id folding, the narrative
+    section's (unchanged) local text still equalled its base — classifying PULL
+    and silently OVERWRITING the local narrative with an unresolved-reference
+    placeholder instead of ever surfacing the new id.
+
+    Fixed: canonical_local folds the embed's CURRENT id (grison.engine.filesets.
+    canonical_prose), so local no longer equals base once the id changes
+    underneath it — the local file is never overwritten. This is the SAME
+    mechanism gw_findings.py already uses for a reported finding's own evidence
+    embeds, and a reupload of evidence referenced by a REPORTED FINDING surfaces
+    identically (a COLLISION, not a same-sync auto-push — the finding's/section's
+    own HTML on Ghostwriter is untouched by the reupload itself, so nothing marks
+    it stale until it's re-pushed): resolving the collision (``--force-local``,
+    "keep my local text") re-pushes with the NEW id."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        caption="Login screen",
+    )
+    run_grison("sync")
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["extraFields"]["executive_summary"] = (
+        '<div class="richtext-evidence" data-evidence-id="90"></div>'
+    )
+    run_grison("sync")  # pulls the embed; establishes CLEAN state referencing id 90
+
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+    original_text = section.read_text(encoding="utf-8")
+    assert "evidence/shot.png" in original_text
+
+    evidence_file = _rdir("report-a") / "evidence" / "shot.png"
+    evidence_file.write_bytes(b"brand new bytes, same filename")
+    run_grison("sync")  # findings phase reuploads: id 90 deleted, a new id created
+
+    result = run_grison("sync")  # reports phase now sees the repointed index
+
+    assert "reports (gw.reportSection): collision 1" in result.output
+    # the core bug this proves fixed: never silently overwritten with a placeholder
+    assert section.read_text(encoding="utf-8") == original_text
+    sidecar = section.with_name("executive_summary.remote.md")
+    assert sidecar.exists()
+
+    new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
+        "shot.png"
+    ))
+    assert new_id != 90
+
+    resolve_result = run_grison("sync", "--force-local", str(section))
+
+    assert "reports (gw.reportSection): push 1" in resolve_result.output
+    assert section.read_text(encoding="utf-8") == original_text  # local text never touched
+    assert f'data-evidence-id="{new_id}"' in report["extraFields"]["executive_summary"]
+    assert not sidecar.exists()
+
+
+def test_non_ascii_evidence_filename_pushes_from_a_narrative_embed(run_grison, gw_server):
+    """grison/markdown/refscan.py item 3: markdown-it-py percent-encodes non-ASCII
+    bytes in an image destination — grison.markdown.converter's own markdown-it
+    parse hands IndexRefResolver.to_remote a percent-encoded ``src`` on push
+    (``evidence/Sonu%C3%A7lar%C4%B1.png``, not ``evidence/Sonuçları.png``), which
+    used to fail to resolve against the index (keyed by the real, decoded path)
+    and raise ConverterError instead of pushing."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/Sonuçları.png", friendlyName="Sonuçları",
+    )
+    run_grison("sync")  # downloads + indexes evidence/Sonuçları.png
+
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+    section.write_text("![Results](evidence/Sonuçları.png)\n", encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert "reports (gw.reportSection): push 1" in result.output
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    assert 'data-evidence-id="90"' in report["extraFields"]["executive_summary"]
