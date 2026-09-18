@@ -6,12 +6,26 @@ module attaches ``book``/``chapter`` (directory-derived slugs) when it scans a f
 :meth:`BsPageAdapter.canonical_local` has everything it needs without a path argument
 (the :class:`~grison.engine.adapter.Adapter` protocol doesn't pass one).
 
-No converter: BookStack pages are markdown-native, mirrored verbatim (same as the
-pre-engine module this replaces).
+No converter for prose: BookStack pages are markdown-native, mirrored verbatim (same
+as the pre-engine module this replaces). ONE exception (D9/BRIEF task C): a gallery
+image line, ``![caption](images/x.png)`` at the book root or ``![caption](../images/
+x.png)`` inside a chapter (REF-007's two accepted spellings), is translated to/from
+BookStack's own absolute gallery URL — the only spelling that actually renders an
+image in BookStack, and the one it stores verbatim in ``markdown``. The translation
+happens ONLY where a live gallery lookup (``ctx``) is available:
+:meth:`fetch_remote`/:meth:`refetch` translate URL -> local path once, into
+``data["markdown"]``, so :meth:`canonical_remote`/:meth:`render_local` (which get no
+``ctx`` at all — the :class:`~grison.engine.adapter.Adapter` protocol doesn't pass one
+to those) can just use it verbatim, already in the SAME vocabulary
+:meth:`canonical_local` compares against (the local file's own, as-authored body);
+:meth:`create`/:meth:`update`/:meth:`restore` translate local path -> URL right before
+sending. See :mod:`grison.adapters.bs_images` for the ``images/`` folder <-> gallery
+row mechanism this depends on.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -25,6 +39,57 @@ from grison.formats.common import FormatError
 from grison.remote.bookstack import BookStackError
 
 _RECYCLE_REASON = "in the BookStack recycle bin, recoverable there"
+
+# --- gallery image line <-> absolute URL translation (D9/BRIEF task C) --------------
+
+_LOCAL_IMAGE_LINE_RE = re.compile(
+    r'(!\[[^\]]*\]\()(images/|\.\./images/)([^)\s"]+)((?:\s+"[^"]*")?\))'
+)
+_URL_IMAGE_LINE_RE = re.compile(r'(!\[[^\]]*\]\()(https?://[^)\s"]+)((?:\s+"[^"]*")?\))')
+
+
+def _local_body_to_remote(body: str, gallery_by_name: dict[str, str]) -> str:
+    """``images/x.png``/``../images/x.png`` -> the book's absolute gallery URL for
+    ``x.png`` (a name with no matching gallery row is left exactly as written — an
+    unresolved reference is a validator failure, REF-002, never guessed here)."""
+
+    def _sub(m: re.Match[str]) -> str:
+        prefix, _rel, name, suffix = m.group(1), m.group(2), m.group(3), m.group(4)
+        url = gallery_by_name.get(name)
+        return f"{prefix}{url}{suffix}" if url else m.group(0)
+
+    return _LOCAL_IMAGE_LINE_RE.sub(_sub, body)
+
+
+def _remote_body_to_local(body: str, gallery_by_url: dict[str, str], *, in_chapter: bool) -> str:
+    """The absolute gallery URL BookStack stores -> the ONE correct local spelling
+    for this page's location (REF-007: ``images/`` at the book root, ``../images/``
+    inside a chapter) — the PULL-side counterpart of :func:`_local_body_to_remote`."""
+    rel_prefix = "../images/" if in_chapter else "images/"
+
+    def _sub(m: re.Match[str]) -> str:
+        prefix, url, suffix = m.group(1), m.group(2), m.group(3)
+        name = gallery_by_url.get(url)
+        return f"{prefix}{rel_prefix}{name}{suffix}" if name else m.group(0)
+
+    return _URL_IMAGE_LINE_RE.sub(_sub, body)
+
+
+def _gallery_by_name_for_book(ctx: BSContext, book_id: int) -> dict[str, str]:
+    """filename -> absolute gallery URL, for every gallery image belonging to
+    ``book_id`` (:func:`grison.adapters.bs_images.page_ids_in_book`)."""
+    from grison.adapters.bs_images import page_ids_in_book
+
+    page_ids = page_ids_in_book(ctx.client, ctx, book_id)
+    out: dict[str, str] = {}
+    for row in ctx.client.fetch_gallery_images():
+        if row.get("uploaded_to") not in page_ids:
+            continue
+        name = PurePosixPath(row.get("name") or "").name
+        url = row.get("url") or ""
+        if name and url:
+            out[name] = url
+    return out
 
 
 @dataclass(frozen=True)
@@ -124,6 +189,7 @@ class BsPageAdapter:
         rows = ctx.client.fetch_pages()
         books_by_id = ctx.books_by_id
         chapters_by_id = ctx.chapters_by_id
+        gallery_cache: dict[int, dict[str, str]] = {}
         out: dict[int, RemoteRecord] = {}
         for row in rows:
             pid = row["id"]
@@ -139,8 +205,9 @@ class BsPageAdapter:
                 )
                 continue
             detail = ctx.client.fetch_page(pid)
-            out[pid] = RemoteRecord(id=pid, data=_normalize(detail, books_by_id, chapters_by_id),
-                                    witness=witness)
+            data = _normalize(detail, books_by_id, chapters_by_id)
+            self._localize_gallery_urls(ctx, data, gallery_cache)
+            out[pid] = RemoteRecord(id=pid, data=data, witness=witness)
         # Recycle-bin awareness (BRIEF B) is scoped to records grison already knows
         # about — an indexed id whose remote copy is now in the bin gets the SKIP
         # below; a binned page grison has never indexed (someone else's housekeeping,
@@ -166,9 +233,30 @@ class BsPageAdapter:
             detail = ctx.client.fetch_page(id)
         except BookStackError:
             return None
-        return RemoteRecord(id=id, data=_normalize(detail, ctx.books_by_id, ctx.chapters_by_id),
+        data = _normalize(detail, ctx.books_by_id, ctx.chapters_by_id)
+        self._localize_gallery_urls(ctx, data, {})
+        return RemoteRecord(id=id, data=data,
                             witness={"updated_at": detail.get("updated_at"),
                                     "revision_count": detail.get("revision_count")})
+
+    def _localize_gallery_urls(
+        self, ctx: BSContext, data: dict[str, Any], gallery_cache: dict[int, dict[str, str]],
+    ) -> None:
+        """Mutates ``data["markdown"]`` in place: absolute gallery URL -> the one
+        correct local spelling for this page's location (D9/BRIEF task C — see
+        module docstring). Cheap no-op when the body has no gallery image line at
+        all (the regex never matches)."""
+        book_id = data.get("book_id")
+        if book_id is None or "images/" not in (data.get("markdown") or ""):
+            return
+        gallery_by_name = gallery_cache.get(book_id)
+        if gallery_by_name is None:
+            gallery_by_name = _gallery_by_name_for_book(ctx, book_id)
+            gallery_cache[book_id] = gallery_by_name
+        gallery_by_url = {url: name for name, url in gallery_by_name.items()}
+        data["markdown"] = _remote_body_to_local(
+            data["markdown"], gallery_by_url, in_chapter=data.get("chapter_id") is not None,
+        )
 
     def canonical_local(self, doc: PageDoc | None) -> Canonical:
         if doc is None:
@@ -220,14 +308,26 @@ class BsPageAdapter:
             raise LookupError(f"unknown chapter {doc.chapter!r} in book {doc.book!r}")
         return None, chapter["id"]
 
+    def _remote_body_for_push(self, ctx: BSContext, doc: PageDoc, book_id: int) -> str:
+        if "images/" not in doc.body:
+            return doc.body
+        return _local_body_to_remote(doc.body, _gallery_by_name_for_book(ctx, book_id))
+
     def create(self, ctx: BSContext, doc: PageDoc) -> RemoteRecord:
         assert isinstance(ctx, BSContext)
         book_id, chapter_id = self._resolve_parent(ctx, doc)
+        if book_id is not None:
+            real_book_id = book_id
+        else:
+            assert chapter_id is not None
+            real_book_id = ctx.chapters_by_id[chapter_id]["book_id"]
         rec = ctx.client.create_page(
-            name=doc.title, markdown=doc.body, book_id=book_id, chapter_id=chapter_id,
+            name=doc.title, markdown=self._remote_body_for_push(ctx, doc, real_book_id),
+            book_id=book_id, chapter_id=chapter_id,
             tags=_tags_to_remote(doc.tags), priority=doc.priority,
         )
         data = _normalize(rec, ctx.books_by_id, ctx.chapters_by_id)
+        self._localize_gallery_urls(ctx, data, {})
         return RemoteRecord(id=rec["id"], data=data,
                             witness={"updated_at": rec.get("updated_at"),
                                     "revision_count": rec.get("revision_count")})
@@ -235,11 +335,18 @@ class BsPageAdapter:
     def update(self, ctx: BSContext, id: int, doc: PageDoc) -> RemoteRecord:
         assert isinstance(ctx, BSContext)
         book_id, chapter_id = self._resolve_parent(ctx, doc)
+        if book_id is not None:
+            real_book_id = book_id
+        else:
+            assert chapter_id is not None
+            real_book_id = ctx.chapters_by_id[chapter_id]["book_id"]
         rec = ctx.client.update_page(
-            id, markdown=doc.body, name=doc.title, book_id=book_id, chapter_id=chapter_id,
+            id, markdown=self._remote_body_for_push(ctx, doc, real_book_id), name=doc.title,
+            book_id=book_id, chapter_id=chapter_id,
             priority=doc.priority, tags=_tags_to_remote(doc.tags),
         ) or ctx.client.fetch_page(id)
         data = _normalize(rec, ctx.books_by_id, ctx.chapters_by_id)
+        self._localize_gallery_urls(ctx, data, {})
         return RemoteRecord(id=id, data=data,
                             witness={"updated_at": rec.get("updated_at"),
                                     "revision_count": rec.get("revision_count")})
@@ -259,6 +366,12 @@ class BsPageAdapter:
         book_id = preimage.get("book_id")
         chapter_id = preimage.get("chapter_id")
         markdown = preimage.get("markdown") or ""
+        if book_id is not None and "images/" in markdown:
+            # the preimage's markdown was captured already LOCALIZED (fetch_remote/
+            # refetch/create/update all localize `data["markdown"]` in place — see
+            # module docstring) — translate back to the URL form BookStack itself
+            # stores before sending it back.
+            markdown = _local_body_to_remote(markdown, _gallery_by_name_for_book(ctx, book_id))
         name = preimage.get("name") or "Untitled"
         tags = preimage.get("tags") or []
         priority = preimage.get("priority")

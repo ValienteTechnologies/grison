@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from grison.cli import app
+from grison.cli import FindingsPhaseResult, app
+from grison.engine.model import Event, KindSummary, Outcome, Plan
 
 _FIX = Path(__file__).parent / "fixtures" / "scanners"
 _runner = CliRunner()
@@ -71,9 +72,11 @@ def _set_fake_ghostwriter_creds(monkeypatch: pytest.MonkeyPatch) -> None:
 def _stub_sync_phases(monkeypatch: pytest.MonkeyPatch, run_sync=None, sync_reports=None) -> None:
     import grison.cli as cli_mod
     from grison.remote.reports import ReportResult
-    from grison.remote.sync import SyncResult
 
-    monkeypatch.setattr(cli_mod, "run_sync", run_sync or (lambda *a, **k: SyncResult()))
+    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(
+        cli_mod, "_run_findings_phase", run_sync or (lambda *a, **k: FindingsPhaseResult())
+    )
     monkeypatch.setattr(cli_mod, "sync_reports", sync_reports or (lambda *a, **k: ReportResult()))
 
 
@@ -116,7 +119,7 @@ def test_parse_bootstraps_and_status_reports_valid(
 
     r2 = _runner.invoke(app, ["status"])
     assert r2.exit_code == 0, r2.output
-    assert "not yet engine-managed" in r2.output
+    assert "findings" in r2.output  # findings are now engine-managed too (task step 3)
     assert "methodology:" in r2.output
 
 
@@ -145,7 +148,6 @@ def test_sync_exit_code_reflects_result_errors(
     a green summary line next to a swallowed error would be misleading."""
     import grison.cli as cli_mod
     from grison.remote.reports import ReportResult
-    from grison.remote.sync import SyncResult
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GRISON_GW_URL", "https://gw.test")
@@ -153,32 +155,40 @@ def test_sync_exit_code_reflects_result_errors(
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
 
-    def fake_run_sync(
-        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
-    ):
-        return SyncResult(errors=["findings/library/bad.md: boom"])
+    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        plan = Plan(kind="gw.finding", outcome=Outcome.FAILED,
+                    path=Path("findings/library/bad.md"), reason="boom")
+        summary = KindSummary(kind="gw.finding")
+        summary.bump(Outcome.FAILED)
+        event = Event(verb="failed", path="findings/library/bad.md", detail="boom")
+        return FindingsPhaseResult(plans=[plan], events=[event], summaries={"gw.finding": summary})
 
     def fake_sync_reports(
         root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
     ):
         return ReportResult()
 
-    monkeypatch.setattr(cli_mod, "run_sync", fake_run_sync)
+    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(cli_mod, "_run_findings_phase", fake_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", fake_sync_reports)
     r = _runner.invoke(app, ["sync"])
     assert r.exit_code == 1
     assert "boom" in r.output
 
 
-def test_sync_warnings_alone_do_not_flip_exit_code(
+def test_sync_info_severity_skip_does_not_flip_exit_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A clean batch that only carries non-fatal warnings (a canonicalized construct, a
-    recomputed cvss score) must print them dimmed but still exit 0 — warnings are
-    visibility, not a failure signal."""
+    """Test changed on purpose (engine step 3): the v1 pipeline had a separate
+    non-fatal "warnings" list (a canonicalized construct, a recomputed cvss score)
+    that never affected the exit code. The engine has no such list — every
+    validation problem is a hard failure (INVALID) now — but it keeps the same
+    "something the user need not act on must not fail the run" property for an
+    INFO-severity SKIP (a draft/template record, ENGINE.md's exit-code policy):
+    it's printed (with --verbose) but never flips the exit code."""
     import grison.cli as cli_mod
+    from grison.engine.model import VetoSeverity
     from grison.remote.reports import ReportResult
-    from grison.remote.sync import SyncResult
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GRISON_GW_URL", "https://gw.test")
@@ -186,21 +196,26 @@ def test_sync_warnings_alone_do_not_flip_exit_code(
     monkeypatch.setenv("GRISON_CF_CLIENT_ID", "cid")
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
 
-    def fake_run_sync(
-        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
-    ):
-        return SyncResult(warnings=["findings/library/f.md: cvss score 5.0 disagreed..."])
+    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        plan = Plan(kind="gw.finding", outcome=Outcome.SKIP,
+                    path=Path("findings/library/f.md"), reason="a draft, skipped",
+                    severity=VetoSeverity.INFO)
+        summary = KindSummary(kind="gw.finding")
+        summary.bump(Outcome.SKIP)
+        event = Event(verb="skip", path="findings/library/f.md", detail="a draft, skipped",
+                      severity=VetoSeverity.INFO)
+        return FindingsPhaseResult(plans=[plan], events=[event], summaries={"gw.finding": summary})
 
     def fake_sync_reports(
         root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
     ):
         return ReportResult()
 
-    monkeypatch.setattr(cli_mod, "run_sync", fake_run_sync)
+    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(cli_mod, "_run_findings_phase", fake_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", fake_sync_reports)
     r = _runner.invoke(app, ["sync"])
-    assert r.exit_code == 0
-    assert "warning:" in r.output and "cvss score" in r.output
+    assert r.exit_code == 0, r.output
 
 
 def test_validate_flags_invalid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -228,17 +243,17 @@ def test_validate_flags_invalid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 def test_sync_git_driving_commits_checkpoint_and_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from grison.remote.sync import SyncResult
-
     monkeypatch.chdir(tmp_path)
     _set_fake_ghostwriter_creds(monkeypatch)
     monkeypatch.setenv("GRISON_GIT", "commit")
     _init_repo(tmp_path)
     (tmp_path / "pre.txt").write_text("dirty before sync even starts\n")
 
-    def fake_run_sync(root, client, **kwargs):
+    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
         (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
-        return SyncResult(pulled=[Path("a.md")], pushed=[Path("b.md")])
+        summary = KindSummary(kind="gw.finding")
+        summary.counts = {"pull": 1, "push": 1}
+        return FindingsPhaseResult(summaries={"gw.finding": summary})
 
     _stub_sync_phases(monkeypatch, run_sync=fake_run_sync)
 
@@ -258,16 +273,19 @@ def test_sync_git_driving_commits_checkpoint_and_summary(
 def test_sync_git_driving_notes_failures_in_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from grison.remote.sync import SyncResult
-
     monkeypatch.chdir(tmp_path)
     _set_fake_ghostwriter_creds(monkeypatch)
     monkeypatch.setenv("GRISON_GIT", "commit")
     _init_repo(tmp_path)
 
-    def fake_run_sync(root, client, **kwargs):
+    def fake_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
         (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
-        return SyncResult(errors=["boom"])
+        plan = Plan(kind="gw.finding", outcome=Outcome.FAILED,
+                    path=Path("findings/library/bad.md"), reason="boom")
+        summary = KindSummary(kind="gw.finding")
+        summary.bump(Outcome.FAILED)
+        event = Event(verb="failed", path="findings/library/bad.md", detail="boom")
+        return FindingsPhaseResult(plans=[plan], events=[event], summaries={"gw.finding": summary})
 
     _stub_sync_phases(monkeypatch, run_sync=fake_run_sync)
 

@@ -49,19 +49,24 @@ class BookStackClient(BaseHttpClient):
             sleep=sleep,
         )
 
-    def _request(
+    def _request(  # noqa: PLR0913
         self,
         method: str,
         path: str,
         *,
         params: dict | None = None,
         json: dict | None = None,
+        files: dict | None = None,
+        data: dict | None = None,
         idempotent: bool | None = None,
     ) -> dict | None:
         """GET/PUT/POST/DELETE all funnel through here. ``idempotent`` defaults to
         "GET only" (see :mod:`grison.remote.http`) — a PUT/POST/DELETE call site
         that's provably safe to retry (none are, today) would pass it explicitly."""
-        resp = self._send(method, path, params=params, json=json, idempotent=idempotent)
+        resp = self._send(
+            method, path, params=params, json=json, files=files, data=data,
+            idempotent=idempotent,
+        )
         if not resp.is_success:
             raise BookStackError(
                 f"BookStack request failed: {method} {path} -> "
@@ -191,3 +196,49 @@ class BookStackClient(BaseHttpClient):
 
     def delete_page(self, page_id: int) -> None:
         self._request("DELETE", f"/api/pages/{page_id}")
+
+    # --- image gallery (D9) -----------------------------------------------------
+    #
+    # BookStack has no bulk "list a book's gallery images" filter on the read
+    # side (confirmed against tests/fixtures/bs-api-docs-26.05.json's
+    # image-gallery-list entry — no query params documented at all), so
+    # grison.adapters.bs_images fetches every gallery-type image once and filters
+    # client-side by `uploaded_to` membership in the book's own page ids.
+
+    def fetch_gallery_images(self) -> list[dict]:
+        return self._list("/api/image-gallery")
+
+    def fetch_gallery_image(self, image_id: int) -> dict:
+        return self._request("GET", f"/api/image-gallery/{image_id}")
+
+    def upload_gallery_image(
+        self, *, uploaded_to: int, filename: str, content: bytes, name: str | None = None,
+    ) -> dict:
+        """``POST /api/image-gallery`` (multipart) — ``type=gallery`` always (never
+        ``drawio``); ``uploaded_to`` is a page id the upload API requires (BookStack
+        has no "upload to a book" concept for the gallery, only "upload to a page" —
+        see :mod:`grison.adapters.bs_images`'s module docstring for how grison
+        picks one)."""
+        data = {"type": "gallery", "uploaded_to": str(uploaded_to)}
+        if name:
+            data["name"] = name
+        files = {"image": (filename, content)}
+        return self._request(
+            "POST", "/api/image-gallery", files=files, data=data, idempotent=False
+        )
+
+    def delete_gallery_image(self, image_id: int) -> None:
+        self._request("DELETE", f"/api/image-gallery/{image_id}")
+
+    def download_gallery_image(self, path: str) -> bytes:
+        """Raw bytes of a gallery image at its stored ``path`` (the relative
+        ``/uploads/images/gallery/...`` path every gallery row carries, never the
+        absolute ``url`` — BookStack serves both identically, and ``path`` is safe
+        to request against this same base URL/token). Not a JSON endpoint — the
+        one BookStack request in this client with a raw-bytes response body."""
+        resp = self._send("GET", path, idempotent=True)
+        if not resp.is_success:
+            raise BookStackError(
+                f"BookStack request failed: GET {path} -> HTTP {resp.status_code}"
+            )
+        return resp.content

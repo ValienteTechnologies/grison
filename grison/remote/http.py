@@ -71,26 +71,33 @@ class BaseHttpClient:
         self._sleep = sleep
         self._random = random_fn
 
-    def _send(
+    def _send(  # noqa: PLR0913
         self,
         method: str,
         path: str,
         *,
         params: dict[str, Any] | None = None,
         json: Any = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
         idempotent: bool | None = None,
     ) -> httpx.Response:
         """Send one request, retrying per the module docstring's policy.
         ``idempotent`` defaults to ``True`` for GET and ``False`` for everything
         else; callers (GraphQL POSTs, which are always method ``POST`` regardless
-        of query-vs-mutation) pass it explicitly."""
+        of query-vs-mutation) pass it explicitly. ``files``/``data`` are for a
+        ``multipart/form-data`` request (BookStack's image-gallery upload) —
+        mutually exclusive with ``json`` at the call site; httpx builds the
+        multipart body itself."""
         if idempotent is None:
             idempotent = method.upper() == "GET"
         attempt = 0
         while True:
             attempt += 1
             try:
-                resp = self._client.request(method, path, params=params, json=json)
+                resp = self._client.request(
+                    method, path, params=params, json=json, files=files, data=data
+                )
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 # the request never reached the server — safe to retry even a
                 # mutation, since nothing could have been applied remotely yet

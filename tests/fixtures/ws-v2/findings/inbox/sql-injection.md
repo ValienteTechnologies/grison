@@ -1,7 +1,4 @@
 ---
-grison:
-  gw:
-    table: reportedFinding
 severity: high
 finding_type: web
 cwe:

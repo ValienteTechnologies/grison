@@ -18,10 +18,12 @@ import grison.cli as cli_mod
 from grison import manifest as manifest_mod
 from grison.index import Index
 from grison.remote.bookstack import BookStackClient
+from grison.remote.compat import fingerprint_from_schema, save_cache
 from grison.remote.creds import Creds
 from grison.remote.ghostwriter import GhostwriterClient
 from tests.fakes.bs_server import FakeBookStack
 from tests.fakes.gw_server import FakeGhostwriter
+from tests.fakes.gw_server import load_schema as load_fake_gw_schema
 
 
 @pytest.fixture
@@ -65,6 +67,14 @@ def workspace(tmp_path: Path, gw_server: FakeGhostwriter, bs_server: FakeBookSta
     manifest_mod.write(root)
     manifest_mod.write_gitignore(root)
     Index(root=root).save()
+    # Pre-seed grison.remote.compat's schema-fingerprint cache from the SAME SDL
+    # FakeGhostwriter itself validates every request against
+    # (tests/fixtures/gw-schema-7.2.6.graphql via tests.fakes.gw_server.load_schema)
+    # so every e2e sync in this suite takes the warm (one-request) compat-check
+    # path by default instead of paying for a full introspection + validate-every-
+    # operation pass every single time — see tests/test_remote_compat.py for the
+    # tests that deliberately exercise the cold path instead.
+    save_cache(root, fingerprint_from_schema(load_fake_gw_schema()))
     return root
 
 

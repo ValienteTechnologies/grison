@@ -119,10 +119,8 @@ to them in full. Agents write here just as much as anywhere else in the workspac
   document, tier `inbox`: every `FND-…` rule applies (§2), with two narrow
   exceptions — no image lines (§2.5/§5.1, same as a library finding, since there is
   no report yet to hold evidence for) and no `FND-015` (severity-vs-CVSS-band; see
-  §2.3's note on why an inbox finding is exempt). An inbox finding may ALSO carry one
-  machine field forbidden everywhere else: a `grison: {gw: {table: reportedFinding}}`
-  block — the scanner-provenance identity `grison parse` writes today (see §2.1's
-  schema table). It is optional; an agent may strip it while triaging.
+  §2.3's note on why an inbox finding is exempt). It carries no machine field of any
+  kind — same as every other tier; `grison parse` writes plain v2 documents.
 - **`methodology/checklists/<engagement>/[<chapter>/]*.md`** — same shape as a real
   book (§4), validated with the full `WIKI-…` rule set including banned text (§8).
   Internal links (`WIKI-007`) and images (§5.2) resolve against the checklist's own
@@ -258,21 +256,12 @@ Frontmatter fields, all optional except `severity` and `finding_type`:
 | `cwe` | list of CWE ids (`CWE-79`, or bare `79`) | must exist in the embedded MITRE index |
 | `tags` | list of strings | no duplicates (case-insensitive), no surrounding whitespace |
 | `affected_entities` | free text | **instance/inbox tier only** |
-| `grison.gw.table` | the literal string `reportedFinding` | **inbox tier only** — optional; see below |
 
 No other frontmatter key is allowed (`FND-001`) — in particular there is no `evidence:`
 list (D1: the only authored evidence form is an image line in the body, §5), and no
-`grison:` block on a `library`/`instance` finding.
-
-**The one exception**: an `inbox` finding (only) may carry
-`grison: {gw: {table: reportedFinding}}`. This is not a reopening of "no machine
-fields" — it is the exact, closed, scanner-provenance shape `grison parse` writes
-today (see `grison/markdown/mapping.py`'s `ir_to_finding` and
-`grison/markdown/document.py`'s `finding_to_markdown`); `table` is never any value
-other than the literal `reportedFinding`, and the block is optional — an agent
-triaging the finding may strip it. It is `FND-001` on a `library`/`instance` finding,
-and a malformed `grison:` block (wrong shape, wrong `table` value) is a normal schema
-failure on any tier.
+`grison:` block on ANY tier, including `inbox`: `grison parse` writes plain v2
+documents with no machine fields at all, and a hand-added `grison:` block anywhere is
+`FND-001` like any other unrecognized frontmatter key.
 
 Body: exactly one `# {title}` line, followed by exactly these five `##` sections, in
 exactly this order, every one present exactly once:

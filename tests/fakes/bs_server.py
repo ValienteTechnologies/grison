@@ -542,6 +542,15 @@ class FakeBookStack:
 
         if method == "GET" and path == "/api/image-gallery":
             return self._list_response(list(store.gallery), params)
+        if method == "GET" and (m := re.fullmatch(r"/api/image-gallery/(\d+)/data", path)):
+            # BookStack's own docs.json: "Read the image file data ... The returned
+            # response will be a stream of image data instead of a JSON response" —
+            # this route must be checked BEFORE the plain detail route below, since
+            # both match the same numeric-id prefix.
+            img = store.gallery_image(int(m.group(1)))
+            if img is None:
+                raise BookStackFakeError(f"image {m.group(1)} not found")
+            return httpx.Response(200, content=store.gallery_bytes[img["id"]])
         if method == "GET" and (m := re.fullmatch(r"/api/image-gallery/(\d+)", path)):
             img = store.gallery_image(int(m.group(1)))
             if img is None:
@@ -549,6 +558,21 @@ class FakeBookStack:
             return httpx.Response(200, json=img)
         if method == "POST" and path == "/api/image-gallery":
             img = self._create_gallery_image(request)
+            return httpx.Response(200, json=img)
+        if method == "PUT" and (m := re.fullmatch(r"/api/image-gallery/(\d+)", path)):
+            img = store.gallery_image(int(m.group(1)))
+            if img is None:
+                raise BookStackFakeError(f"image {m.group(1)} not found")
+            content_type = request.headers.get("content-type", "")
+            fields, files = _parse_multipart(request.content, content_type)
+            if "name" in fields:
+                img["name"] = fields["name"]
+            if "image" in files:
+                filename, data = files["image"]
+                store.gallery_bytes[img["id"]] = data
+                img["name"] = fields.get("name") or filename
+            img["updated_at"] = _now()
+            store._log("update_gallery_image", {"id": img["id"], **fields})
             return httpx.Response(200, json=img)
         if method == "DELETE" and (m := re.fullmatch(r"/api/image-gallery/(\d+)", path)):
             img = store.gallery_image(int(m.group(1)))
@@ -561,6 +585,15 @@ class FakeBookStack:
 
         if method == "GET" and path == "/api/recycle-bin":
             return self._list_response(list(store.recycle_bin), params)
+
+        # Gallery image bytes are served as a plain file at the row's own `path`
+        # (not a JSON API endpoint) — grison.remote.bookstack.download_gallery_image
+        # hits this directly. Matched by full path, not the /api prefix.
+        if method == "GET" and (m := re.fullmatch(r"/uploads/images/gallery/(\d+)/.+", path)):
+            content = store.gallery_bytes.get(int(m.group(1)))
+            if content is None:
+                raise BookStackFakeError(f"gallery image {m.group(1)} has no stored bytes")
+            return httpx.Response(200, content=content)
 
         return httpx.Response(
             404,

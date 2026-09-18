@@ -282,10 +282,26 @@ class GWStore:
             "references": "",
             "replication_steps": "",
             "affectedEntities": "",
+            "position": 0,
         }
         row.update(fields)
+        if "position" not in fields:
+            row["position"] = self._end_of_band_position(row["reportId"], row["severityId"])
         self.reported_findings.append(row)
         return row
+
+    def _end_of_band_position(self, report_id: Any, severity_id: Any) -> int:
+        """BRIEF D: ``position`` is scoped per report + severity band — a real
+        Ghostwriter insert with no explicit ``position`` appends at the end of its
+        band; the fake mirrors that so grison's own "append at the end" behavior
+        round-trips (0 for the first finding in a fresh band)."""
+        siblings = [
+            r for r in self.reported_findings
+            if r["reportId"] == report_id and r["severityId"] == severity_id
+        ]
+        if not siblings:
+            return 0
+        return max(r.get("position", 0) for r in siblings) + 1
 
     def seed_evidence(self, **fields: Any) -> dict:
         """``reportId`` is required (D1: evidence belongs to a report, not a finding —
@@ -521,6 +537,8 @@ class FakeGhostwriter:
                 rows, order_by=args.get("order_by"), limit=args.get("limit"),
                 offset=args.get("offset"),
             )
+        if name == "evidence_by_pk":
+            return store._by_id(store.evidence, args["id"])
         if name == "report":
             rows = [r for r in store.reports if _matches_where(r, args.get("where"))]
             return _apply_order_limit_offset(

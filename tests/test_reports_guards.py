@@ -11,11 +11,10 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from grison.cli import WikiPhaseResult
+from grison.cli import FindingsPhaseResult, WikiPhaseResult
 from grison.remote import snapshot as snapshot_mod
 from grison.remote.repmap import section_hash
 from grison.remote.reports import ReportResult, sync_reports
-from grison.remote.sync import SyncResult
 from grison.state import StateStore
 
 
@@ -274,6 +273,16 @@ def _set_gw_and_bs_creds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GRISON_BS_URL", "https://bs.test")
     monkeypatch.setenv("GRISON_BS_TOKEN_ID", "bsid")
     monkeypatch.setenv("GRISON_BS_TOKEN_SECRET", "bssecret")
+    # This module's tests are about CLI phase isolation (one phase crashing must
+    # not stop the others), never about server compatibility, and none of them
+    # wire up a fake GraphQL transport for the client `check_ghostwriter_
+    # compatibility` would otherwise need a real (or faked) Ghostwriter to
+    # answer — so it's stubbed out here, same pattern as tests/test_cli.py's
+    # `_stub_sync_phases`, rather than every phase-isolation test growing its
+    # own fake server just to get past a gate none of them are testing.
+    import grison.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
 
 
 # tests changed on purpose: the third sync phase is now "wiki" (engine-managed,
@@ -292,8 +301,7 @@ def test_cli_isolates_findings_phase_crash_reports_and_wiki_still_run(
 
     calls: list[str] = []
 
-    def boom_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None,
-                       on_event=None):
+    def boom_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
         calls.append("findings")
         raise RuntimeError("findings blew up")
 
@@ -306,13 +314,19 @@ def test_cli_isolates_findings_phase_crash_reports_and_wiki_still_run(
         calls.append("wiki")
         return WikiPhaseResult()
 
-    monkeypatch.setattr(cli_mod, "run_sync", boom_run_sync)
+    monkeypatch.setattr(cli_mod, "_run_findings_phase", boom_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", ok_sync_reports)
     monkeypatch.setattr(cli_mod, "_run_wiki_phase", ok_run_wiki_phase)
 
     r = CliRunner().invoke(cli_mod.app, ["sync"])
 
-    assert calls == ["findings", "report", "wiki"]  # later phases ran despite the crash
+    # test changed on purpose: cli.py runs report BEFORE findings (a brand-new
+    # report only becomes an indexed gw.report directory during the report
+    # phase, so a reported finding belonging to it can only land there once
+    # that indexing has happened — see grison/cli.py's `sync` docstring/comment
+    # on this ordering) — this test only cares that EVERY phase still ran
+    # despite the findings crash, not the order.
+    assert calls == ["report", "findings", "wiki"]  # later phases ran despite the crash
     assert r.exit_code == 1
     assert "findings sync failed" in r.output and "findings blew up" in r.output
 
@@ -325,9 +339,8 @@ def test_cli_isolates_wiki_phase_crash_after_clean_findings_and_reports(
     monkeypatch.chdir(tmp_path)
     _set_gw_and_bs_creds(monkeypatch)
 
-    def ok_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None,
-                     on_event=None):
-        return SyncResult()
+    def ok_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        return FindingsPhaseResult()
 
     def ok_sync_reports(root, client, *, dry_run=False, force_local=None, force_remote=None,
                          on_event=None):
@@ -336,7 +349,7 @@ def test_cli_isolates_wiki_phase_crash_after_clean_findings_and_reports(
     def boom_run_wiki_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
         raise RuntimeError("wiki blew up")
 
-    monkeypatch.setattr(cli_mod, "run_sync", ok_run_sync)
+    monkeypatch.setattr(cli_mod, "_run_findings_phase", ok_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", ok_sync_reports)
     monkeypatch.setattr(cli_mod, "_run_wiki_phase", boom_run_wiki_phase)
 
@@ -360,10 +373,9 @@ def test_cli_exits_nonzero_on_report_scope_failures_without_aborting_other_phase
 
     calls: list[str] = []
 
-    def ok_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None,
-                     on_event=None):
+    def ok_run_sync(root, client, *, dry_run=False, force_local=None, force_remote=None):
         calls.append("findings")
-        return SyncResult()
+        return FindingsPhaseResult()
 
     def scope_failing_sync_reports(root, client, *, dry_run=False, force_local=None,
                                     force_remote=None, on_event=None):
@@ -376,12 +388,13 @@ def test_cli_exits_nonzero_on_report_scope_failures_without_aborting_other_phase
         calls.append("wiki")
         return WikiPhaseResult()
 
-    monkeypatch.setattr(cli_mod, "run_sync", ok_run_sync)
+    monkeypatch.setattr(cli_mod, "_run_findings_phase", ok_run_sync)
     monkeypatch.setattr(cli_mod, "sync_reports", scope_failing_sync_reports)
     monkeypatch.setattr(cli_mod, "_run_wiki_phase", ok_run_wiki_phase)
 
     r = CliRunner().invoke(cli_mod.app, ["sync"])
 
-    assert calls == ["findings", "report", "wiki"]  # wiki phase still ran
+    # test changed on purpose: same report-before-findings ordering as above.
+    assert calls == ["report", "findings", "wiki"]  # wiki phase still ran
     assert r.exit_code == 1
     assert "no scope defined" in r.output

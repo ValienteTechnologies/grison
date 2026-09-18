@@ -14,8 +14,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from grison.formats.finding import FindingDoc
 from grison.markdown import default_finding_type, ir_to_finding
-from grison.model import Finding, FindingType
+from grison.model import FindingType
 from grison.scanners import ImportOptions, detect, scanner_for
 from grison.scanners.ir import parse_severity_filter
 from grison.sinks.file_sink import FileSink, SinkResult
@@ -25,7 +26,7 @@ from grison.sinks.file_sink import FileSink, SinkResult
 class ParseSummary:
     files_parsed: dict[str, int] = field(default_factory=dict)  # scanner -> file count
     skipped_files: list[tuple[Path, str]] = field(default_factory=list)  # (path, reason)
-    findings: list[Finding] = field(default_factory=list)
+    findings: list[FindingDoc] = field(default_factory=list)
     keys: list[str] = field(default_factory=list)  # dedupe key per finding (parallel)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)  # per-finding validation failures

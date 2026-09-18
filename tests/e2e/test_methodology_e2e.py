@@ -7,15 +7,12 @@ Format v2 (BRIEF D3/D4): a page file carries NO machine fields at all — no id,
 ``grison:`` block, no ``book``/``chapter`` frontmatter keys. Identity lives in
 ``.grison/index.json``; a page's book/chapter come from its directory only.
 
-Every ``run_grison("sync")`` here also runs the findings phase, which today fails
-unconditionally (see ``tests/e2e/test_findings_e2e.py`` — ``GhostwriterClient
-.fetch_evidence`` selects a field the real 7.2.6 schema rejects, regardless of
-data). That failure is isolated per phase (``grison.cli._run_phase``) and always
-makes the *overall* process exit 1 and print "findings sync failed: …", even when
-the wiki phase itself is perfectly clean — so these tests assert the wiki phase's
-own success signals (its own summary line, the BookStack operation log, the files on
-disk) rather than the overall exit code. This is today's real, documented
-cross-phase coupling, not a gap in the fakes.
+Every ``run_grison("sync")`` here also runs the findings phase (engine-managed —
+see ``tests/e2e/test_findings_e2e.py``), which is clean by default since these
+tests never seed any library/reported findings. These tests still assert the
+wiki phase's own success signals (its own summary line, the BookStack operation
+log, the files on disk) rather than assuming anything about the overall exit
+code, since a test here is about the wiki phase specifically.
 
 Tests changed on purpose (BRIEF D3/D6/D7, ENGINE.md "Identity"/"classification
 table"/apply loop §8) vs. the module this replaces (``grison/remote/methodology.py``,

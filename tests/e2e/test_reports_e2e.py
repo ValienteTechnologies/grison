@@ -2,12 +2,11 @@
 inspection API only. No import from ``grison.remote.reports``/``sync``/``state``, no
 assertion on private state-file contents.
 
-Every ``run_grison("sync")`` also runs the findings phase, which today fails
-unconditionally before touching any record (see ``tests/e2e/test_findings_e2e.py``) —
-that failure is isolated per phase and always makes the *overall* exit code 1 and
-prints "findings sync failed: …", even when the reports phase itself is perfectly
-clean. These tests assert the reports phase's own summary line, the Ghostwriter
-operation log, and the files on disk rather than the overall exit code.
+Every ``run_grison("sync")`` also runs the findings phase (engine-managed now —
+see ``tests/e2e/test_findings_e2e.py``), which is clean by default whenever a
+scenario here doesn't seed any library/reported findings itself. These tests
+assert the reports phase's own summary line, the Ghostwriter operation log, and
+the files on disk, rather than assuming anything about the overall exit code.
 """
 
 from __future__ import annotations
@@ -538,12 +537,18 @@ def test_stale_push_guard_aborts_push_as_collision_on_concurrent_edit(run_grison
         report = next(r for r in gw_server.store.reports if r["id"] == 7)
         report["extraFields"]["methodology"] = "<p>m2 concurrent</p>"
 
-    # The guard's pre-push refetch is the 3rd "report" call THIS sync makes
-    # (findings phase's own fetch_reports, this phase's top-of-run snapshot, then
-    # the guard's refetch) — targeted relative to the baseline already spent by
-    # the first sync above, rather than a hardcoded absolute count.
+    # tests changed on purpose (task step 3): the CLI now runs the report phase
+    # BEFORE findings (a brand-new report only becomes an indexed gw.report
+    # directory during the report phase — see grison/cli.py's `sync`), and the
+    # findings phase itself never queries "report" at all (gw.finding/
+    # gw.reportedFinding carry their own reportId, no separate report fetch) —
+    # so the guard's pre-push refetch is the 2nd "report" call THIS sync makes
+    # (this phase's own top-of-run snapshot, then the guard's refetch), not the
+    # 3rd a findings-phase report fetch used to make it — targeted relative to
+    # the baseline already spent by the first sync above, rather than a
+    # hardcoded absolute count.
     baseline = gw_server.call_count("report")
-    gw_server.on_request("report", concurrent_edit, call_number=baseline + 3)
+    gw_server.on_request("report", concurrent_edit, call_number=baseline + 2)
 
     result = run_grison("sync")
 
@@ -569,7 +574,7 @@ def test_stale_push_guard_withholds_push_when_report_vanishes_mid_run(run_grison
         gw_server.store.reports[:] = [r for r in gw_server.store.reports if r["id"] != 7]
 
     baseline = gw_server.call_count("report")  # see call-count note above
-    gw_server.on_request("report", vanish, call_number=baseline + 3)
+    gw_server.on_request("report", vanish, call_number=baseline + 2)
 
     result = run_grison("sync")
 
@@ -678,8 +683,8 @@ def test_push_merges_over_a_fresh_fetch_not_the_stale_top_of_run_snapshot(run_gr
         report = next(r for r in gw_server.store.reports if r["id"] == 7)
         report["extraFields"]["new_field"] = "<p>brand new</p>"
 
-    baseline = gw_server.call_count("report")
-    gw_server.on_request("report", add_brand_new_field, call_number=baseline + 3)
+    baseline = gw_server.call_count("report")  # see call-count note above
+    gw_server.on_request("report", add_brand_new_field, call_number=baseline + 2)
 
     result = run_grison("sync")
 

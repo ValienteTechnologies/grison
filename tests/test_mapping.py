@@ -1,12 +1,16 @@
-"""Phase-4 tests: scanner IR → house Finding mapping rules."""
+"""Phase-4 tests: scanner IR → format-v2 inbox finding mapping rules."""
 
 from __future__ import annotations
 
-from grison.markdown.document import finding_to_markdown, markdown_to_finding
+from pathlib import Path
+
+from grison.formats import finding as finding_fmt
 from grison.markdown.mapping import default_finding_type, ir_to_finding
 from grison.model import FindingType, Severity
 from grison.scanners.ir import ScanFinding
 from grison.scanners.ir import Severity as IRSeverity
+
+_INBOX_PATH = Path("findings/inbox/x.md")
 
 
 def _ir(**over: object) -> ScanFinding:
@@ -33,8 +37,6 @@ def test_mapping_core_rules() -> None:
     assert res.warnings == []
     assert f.severity is Severity.HIGH  # 1:1 from IR severity value
     assert f.finding_type is FindingType.WEB
-    assert f.grison.tier == "instance"  # proto-instance
-    assert f.grison.gw.id is None
     # affected_components -> affected_entities (one per line), NOT into replication_steps
     assert f.affected_entities == "https://a.example/\nhttps://b.example/"
     assert f.replication_steps == ""
@@ -70,8 +72,9 @@ def test_mapped_finding_serializes_and_roundtrips() -> None:
         _ir(description="<p>plain <em>note</em></p>", affected_components=["h1"]),
         finding_type=FindingType.WEB,
     )
-    md = finding_to_markdown(res.finding)
-    assert markdown_to_finding(md) == res.finding
+    md = finding_fmt.dump(res.finding)
+    assert finding_fmt.parse(md, path=_INBOX_PATH) == res.finding
+    assert "grison:" not in md  # no machine field on grison parse output (engine step 3 item E)
 
 
 def test_table_fallback_keeps_cells_separated() -> None:

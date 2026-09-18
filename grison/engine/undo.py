@@ -18,6 +18,7 @@ writes leaves no snapshot at all.
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -28,7 +29,7 @@ from typing import Any
 from grison.engine.adapter import CreateUndoAdapter, RestorableUndoAdapter
 from grison.engine.events import verb_for_outcome
 from grison.engine.state import StateStore
-from grison.fsio import atomic_write_text, ensure_private_dir
+from grison.fsio import atomic_write_bytes, atomic_write_text, ensure_private_dir
 from grison.index import Index, IndexKind
 
 SNAPSHOTS_DIR = ".grison/snapshots"
@@ -152,6 +153,27 @@ def _emit(on_event: Callable[[str], None] | None, msg: str) -> None:
         on_event(msg)
 
 
+def _restore_local_mirror(target: Path, adapter: Any, restored: Any, op: UndoOp) -> None:
+    """Write back the local file a DELETE_REMOTE undo brings a record back for.
+    Two shapes of local content exist: a file-set record's (``gw.evidence``,
+    ``bs.image``) pre-image carries the exact bytes it was deleted with
+    (``body_b64`` — see :func:`grison.engine.filesets._preimage`, "deletes keep
+    the bytes in the snapshot"), so those are written back verbatim; every other
+    kind is a text document rendered fresh from the restored record via the full
+    ``Adapter``'s ``render_local`` (``bs.page``, ``gw.finding``,
+    ``gw.reportedFinding``). A structure kind (``bs.book``/``bs.chapter``) never
+    records a delete_remote op in the first place (:class:`CreateUndoAdapter` has
+    neither ``render_local`` nor a bytes pre-image), so neither branch fires for
+    it — this is defense in depth, not a stub."""
+    body_b64 = op.remote_preimage.get("body_b64") if isinstance(op.remote_preimage, dict) else None
+    if body_b64 is not None:
+        atomic_write_bytes(target, base64.b64decode(body_b64))
+        return
+    render_local = getattr(adapter, "render_local", None)
+    if callable(render_local):
+        atomic_write_text(target, render_local(restored.data, path=PurePosixPath(op.path)))
+
+
 def _replay_one(  # noqa: PLR0912
     root: Path, op: UndoOp, adapter: CreateUndoAdapter | None, ctx: Any, index: Index,
     state: StateStore, problems: list[str], on_event: Callable[[str], None] | None,
@@ -205,13 +227,8 @@ def _replay_one(  # noqa: PLR0912
             # collision); undoing it must restore that local mirror too, or the very
             # next ordinary sync would see "missing, indexed" again and immediately
             # re-delete (or collide on) the record this undo just brought back.
-            # render_local is only on the full Adapter (RestorableUndoAdapter alone
-            # doesn't have it) — a structure kind like bs.book/bs.chapter never
-            # records a delete_remote op in the first place, so this is never
-            # reached for those; the getattr is defense in depth, not a stub.
-            render_local = getattr(adapter, "render_local", None)
             target = root / op.path
-            if callable(render_local) and not target.exists():
-                atomic_write_text(target, render_local(restored.data, path=PurePosixPath(op.path)))
+            if not target.exists():
+                _restore_local_mirror(target, adapter, restored, op)
         _emit(on_event, f"create {op.path} — restored after delete")
         return

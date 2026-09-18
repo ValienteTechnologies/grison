@@ -8,6 +8,7 @@ and methodology with BookStack (push/pull/collision derived per record).
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import functools
 import json
@@ -23,12 +24,19 @@ import typer
 from grison import gitdrive
 from grison.adapters import bs_structure
 from grison.adapters._bs_common import build_context
+from grison.adapters._gw_common import GWContext
+from grison.adapters.bs_images import BsImagesAdapter, page_ids_in_book
 from grison.adapters.bs_pages import BsPageAdapter
+from grison.adapters.gw_evidence import GwEvidenceAdapter
+from grison.adapters.gw_findings import GwLibraryFindingAdapter, GwReportedFindingAdapter
 from grison.engine import events as engine_events
 from grison.engine.adapter import CreateUndoAdapter
 from grison.engine.apply import RunOptions
 from grison.engine.apply import run as engine_run
-from grison.engine.model import Event, KindSummary, Plan
+from grison.engine.filesets import RunOptions as FilesetRunOptions
+from grison.engine.filesets import rewrite_captions
+from grison.engine.filesets import sync_fileset as engine_sync_fileset
+from grison.engine.model import Event, KindSummary, Plan, RemoteRecord
 from grison.engine.offline_status import StatusEntry, compute_offline_status
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
@@ -36,17 +44,16 @@ from grison.engine.undo import describe_snapshot as engine_describe_snapshot
 from grison.engine.undo import list_snapshots as engine_list_snapshots
 from grison.engine.undo import replay as engine_undo_replay
 from grison.errors import GrisonError
-from grison.fsio import ensure_private_dir, open_private
-from grison.index import Index
+from grison.fsio import atomic_write_text, ensure_private_dir, open_private
+from grison.index import Index, IndexKind
 from grison.model import FindingType
 from grison.remote.bookstack import BookStackClient
 from grison.remote.bootstrap import bootstrap_workspace
+from grison.remote.compat import SchemaCompatibilityError, check_ghostwriter_compatibility
 from grison.remote.creds import Creds, MissingCreds, Settings, load_settings
 from grison.remote.creds import load as load_creds
 from grison.remote.ghostwriter import GhostwriterClient
 from grison.remote.reports import ReportResult, sync_reports
-from grison.remote.sync import SyncResult
-from grison.remote.sync import sync as run_sync
 from grison.sinks import ParseSummary, run_parse
 from grison.validator import find_workspace_root, validate_workspace
 from grison.workspace import bootstrap_tree, inbox_dir
@@ -200,15 +207,25 @@ def status(
     last_sync = state.load_last_sync()
     phases = last_sync.get("phases", {}) if last_sync else {}
 
-    findings_lib = root / "findings" / "library"
-    findings_reports = root / "findings" / "reports"
-    lib_count = len(list(findings_lib.glob("*.md"))) if findings_lib.is_dir() else 0
-    report_dirs = sorted(p for p in findings_reports.iterdir() if p.is_dir()) \
-        if findings_reports.is_dir() else []
-
     index = Index.load(root)
+    findings_failures = [f for f in failures if f.path.startswith("findings")]
     wiki_failures = [f for f in failures if f.path.startswith("methodology")]
     offline = compute_offline_status(root, BsPageAdapter(), index, state, wiki_failures)
+    lib_offline = compute_offline_status(
+        root, GwLibraryFindingAdapter(), index, state, findings_failures,
+    )
+    rf_offline = compute_offline_status(
+        root, GwReportedFindingAdapter(index=index, evidence_by_report={}), index, state,
+        findings_failures,
+    )
+    evidence_file_counts = {
+        d: len(list((root / d / "evidence").glob("*")))
+        for d in _report_dirs_for_status(index) if (root / d / "evidence").is_dir()
+    }
+    image_file_counts = {
+        d: len(list((root / d / "images").glob("*")))
+        for d in _book_dirs(index) if (root / d / "images").is_dir()
+    }
 
     remote_summary: KindSummary | None = None
     remote_error: str | None = None
@@ -234,6 +251,8 @@ def status(
 
     offline_problems = bool(
         offline.counts["invalid"] or offline.counts["unknown"] or offline.collision_sidecars
+        or lib_offline.counts["invalid"] or lib_offline.counts["unknown"]
+        or rf_offline.counts["invalid"] or rf_offline.counts["unknown"]
     )
     problems = offline_problems or (
         remote_summary is not None
@@ -242,12 +261,23 @@ def status(
 
     if json_output:
         payload = {
-            "findings": {"managed": False, "library_files": lib_count,
-                        "report_dirs": len(report_dirs)},
+            "findings": {
+                "managed": True,
+                "library": {
+                    "counts": lib_offline.counts,
+                    "non_clean": [_entry_json(e) for e in lib_offline.non_clean],
+                },
+                "reports": {
+                    "counts": rf_offline.counts,
+                    "non_clean": [_entry_json(e) for e in rf_offline.non_clean],
+                    "evidence_files": {str(d): n for d, n in evidence_file_counts.items()},
+                },
+            },
             "methodology": {
                 "managed": True, "counts": offline.counts,
                 "non_clean": [_entry_json(e) for e in offline.non_clean],
                 "collision_sidecars": [str(p) for p in offline.collision_sidecars],
+                "images_files": {str(d): n for d, n in image_file_counts.items()},
             },
             "remote": (
                 {"counts": remote_summary.counts, "problem_paths": remote_summary.problem_paths}
@@ -261,10 +291,16 @@ def status(
             raise typer.Exit(code=1)
         return
 
-    typer.echo(
-        f"findings: {lib_count} library file(s), {len(report_dirs)} report dir(s) "
-        "— not yet engine-managed"
-    )
+    lib_line = ", ".join(f"{b} {n}" for b, n in lib_offline.counts.items() if n)
+    rf_line = ", ".join(f"{b} {n}" for b, n in rf_offline.counts.items() if n)
+    typer.echo(f"findings (library): {lib_line or 'clean'}")
+    typer.echo(f"findings (reports): {rf_line or 'clean'}")
+    if evidence_file_counts:
+        ev_summary = ", ".join(f"{d} {n}" for d, n in sorted(evidence_file_counts.items()))
+        typer.echo(f"evidence: {ev_summary}")
+    if image_file_counts:
+        img_summary = ", ".join(f"{d} {n}" for d, n in sorted(image_file_counts.items()))
+        typer.echo(f"images: {img_summary}")
     counts_line = ", ".join(f"{b} {n}" for b, n in offline.counts.items() if n)
     typer.echo(f"methodology: {counts_line or 'clean'}")
     if offline.collision_sidecars:
@@ -435,14 +471,26 @@ def sync(
         if not dry_run:  # checkpoint whatever was dirty before we touch anything
             _git_commit_or_warn(root, settings, "grison: pre-sync checkpoint")
         with _make_gw_client(creds) as client:
-            result = _run_phase(
-                "findings",
-                lambda: run_sync(
-                    root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
-                    on_event=lambda msg: typer.secho(msg, dim=True),
-                ),
-                phase_errors,
-            )
+            # ENGINE.md "check server compatibility" — BEFORE the first fetch of any
+            # phase: one cheap fingerprint request compared against
+            # .grison/state/schema.json; only a changed/absent fingerprint pays for
+            # the full introspection + validate-every-operation pass (BRIEF task F —
+            # see grison.remote.compat's module docstring). A mismatch here is
+            # "could not run" (exit 2), never a per-phase failure, so it must never
+            # be swallowed by `_run_phase`.
+            try:
+                check_ghostwriter_compatibility(client, root)
+            except SchemaCompatibilityError as e:
+                typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
+                raise typer.Exit(code=2) from None
+
+            # Report BEFORE findings: a brand-new report only becomes an indexed
+            # gw.report directory during the report phase -- a reported finding
+            # belonging to it can only resolve/land in that directory (BRIEF D:
+            # "a reported finding belongs to the report whose indexed directory
+            # it sits in") once that indexing has happened, so this order lets a
+            # first sync pull a report AND its findings in one run instead of
+            # needing two.
             rep = _run_phase(
                 "report",
                 lambda: sync_reports(
@@ -451,14 +499,21 @@ def sync(
                 ),
                 phase_errors,
             )
+            result = _run_phase(
+                "findings",
+                lambda: _run_findings_phase(
+                    root, client, dry_run=dry_run, force_local=fl, force_remote=fr,
+                ),
+                phase_errors,
+            )
         if result is not None:
-            _print_sync_summary(result, dry_run=dry_run)
+            if json_output:
+                typer.echo(_findings_json(result))
+            else:
+                _print_findings_summary(result, dry_run=dry_run, verbose=verbose)
         if rep is not None:
             _print_report_summary(rep, dry_run=dry_run)
-        findings_ok = result is not None and not bool(
-            result.collisions or result.invalid or result.corrupt
-            or result.mass_change_blocked or result.errors
-        )
+        findings_ok = result is not None and result.exit_code == 0
         report_ok = rep is not None and not bool(
             rep.collisions or rep.mass_change_blocked or rep.errors or rep.scope_failures
         )
@@ -512,15 +567,6 @@ def sync(
 def _phase_error(phase_errors: list[str], name: str) -> str | None:
     prefix = f"{name} sync failed: "
     return next((m[len(prefix) :] for m in phase_errors if m.startswith(prefix)), None)
-
-
-def _findings_last_sync_summary(result: SyncResult) -> dict[str, Any]:
-    return {
-        "pulled": len(result.pulled), "pushed": len(result.pushed),
-        "inserted": len(result.inserted), "repaired": len(result.repaired),
-        "collisions": len(result.collisions), "invalid": len(result.invalid),
-        "corrupt": len(result.corrupt), "errors": len(result.errors),
-    }
 
 
 def _report_last_sync_summary(rep: ReportResult) -> dict[str, Any]:
@@ -583,6 +629,186 @@ class WikiPhaseResult:
         return 0
 
 
+def _findings_relative_force_set(root: Path, paths: set[Path]) -> frozenset[PurePosixPath]:
+    out: set[PurePosixPath] = set()
+    for p in paths:
+        try:
+            rel = p.relative_to(root)
+        except ValueError:
+            continue
+        if rel.parts and rel.parts[0] == "findings":
+            out.add(PurePosixPath(rel.as_posix()))
+    return frozenset(out)
+
+
+@dataclass
+class FindingsPhaseResult:
+    """The findings phase's result: library findings + reported findings (both
+    through :mod:`grison.engine.apply`) and, per indexed report, its evidence
+    file set (through :mod:`grison.engine.filesets` — BRIEF task A/B)."""
+
+    plans: list[Plan] = field(default_factory=list)
+    events: list[Event] = field(default_factory=list)
+    summaries: dict[str, KindSummary] = field(default_factory=dict)
+    snapshot_dir: Path | None = None
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if any(p.is_problem for p in self.plans) else 0
+
+
+def _report_finding_bodies(root: Path, report_dir: PurePosixPath) -> dict[PurePosixPath, str]:
+    """Every reported-finding document currently on disk in ``report_dir`` (top
+    level only — narrative/notes/evidence are different record types), for
+    :func:`grison.engine.filesets.collect_captions`'s caption-agreement scan."""
+    out: dict[PurePosixPath, str] = {}
+    d = root / report_dir
+    if not d.is_dir():
+        return out
+    for md in d.glob("*.md"):
+        if md.name.endswith(".remote.md"):
+            continue
+        out[PurePosixPath(md.relative_to(root).as_posix())] = md.read_text(encoding="utf-8")
+    return out
+
+
+def _apply_caption_rewrites(
+    root: Path, doc_bodies: dict[PurePosixPath, str], resolved: dict[str, tuple[str, str]],
+    *, folder_name: str,
+) -> None:
+    """The PULL-side half of D1's caption rule (module docstring of
+    :mod:`grison.engine.filesets`): rewrite every embed's alt/title in every
+    referencing document to match the evidence set's resolved caption. Never
+    touches state/index — a referencing document's canonical payload excludes
+    captions by construction, so this can never make it look edited."""
+    for path, body in doc_bodies.items():
+        rewritten = rewrite_captions(body, resolved, folder_name=folder_name)
+        if rewritten != body:
+            atomic_write_text(root / path, rewritten)
+
+
+def _run_findings_phase(
+    root: Path, client: GhostwriterClient, *, dry_run: bool, force_local: set[Path],
+    force_remote: set[Path],
+) -> FindingsPhaseResult:
+    """The findings phase (BRIEF engine step 3): each indexed report's
+    ``evidence/`` file set first (so a fresh upload/reupload's id is visible to
+    the finding canonicalization that follows), then library findings, then
+    reported findings across every report (one adapter/kind — see
+    :mod:`grison.adapters.gw_findings`'s module docstring on cross-report
+    moves). Validation is scoped to ``findings/`` here, same pattern as the wiki
+    phase's own ``methodology/`` scoping."""
+    index = Index.load(root)
+    state = StateStore(root)
+    snapshot = Snapshot()
+    ctx = GWContext.build(client, index)
+
+    all_failures = validate_workspace(root, paths=[root / "findings"])
+    findings_failures = [f for f in all_failures if f.path.startswith("findings")]
+
+    fl = _findings_relative_force_set(root, force_local)
+    fr = _findings_relative_force_set(root, force_remote)
+    fs_options = FilesetRunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
+    options = RunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
+
+    events: list[Event] = []
+    summaries: dict[str, KindSummary] = {}
+    evidence_plans: list[Plan] = []
+
+    for report_dir in sorted(ctx.report_dirs):
+        report_id = ctx.report_dirs[report_dir]
+        evidence_adapter = GwEvidenceAdapter(report_id=report_id)
+        doc_bodies = _report_finding_bodies(root, report_dir)
+        result = engine_sync_fileset(
+            root, ctx, evidence_adapter, report_dir / "evidence", index=index, state=state,
+            snapshot=snapshot, doc_bodies=doc_bodies, options=fs_options,
+        )
+        # a fileset's own problems (collision/failed/withheld evidence) must count
+        # toward this phase's exit code exactly like a finding's would — folded
+        # into the SAME plans list FindingsPhaseResult.exit_code reads, not just
+        # reported as text/JSON events that a bad run's exit code would then miss.
+        evidence_plans.extend(result.plans)
+        events.extend(result.events)
+        key = f"gw.evidence[{report_dir}]"
+        summaries[key] = result.summary
+        if not dry_run and result.resolved_captions:
+            _apply_caption_rewrites(root, doc_bodies, result.resolved_captions,
+                                    folder_name="evidence")
+
+    # Evidence rows, re-fetched fresh (post-write) for every report, so the
+    # findings adapters' RefResolver sees ids/captions/friendly-names as they
+    # actually are right now, not as of the start of this sync.
+    evidence_by_report: dict[int, dict[int, dict[str, Any]]] = {}
+    for report_id in ctx.report_dirs.values():
+        rows = GwEvidenceAdapter(report_id=report_id).list_remote(ctx)
+        evidence_by_report[report_id] = {i: r.data for i, r in rows.items()}
+
+    lib_plans, lib_events, lib_summary = engine_run(
+        root, client, GwLibraryFindingAdapter(), index=index, state=state, snapshot=snapshot,
+        failures=findings_failures, options=options,
+    )
+    events.extend(lib_events)
+    summaries[GwLibraryFindingAdapter.kind] = lib_summary
+
+    rf_adapter = GwReportedFindingAdapter(index=index, evidence_by_report=evidence_by_report)
+    rf_plans, rf_events, rf_summary = engine_run(
+        root, ctx, rf_adapter, index=index, state=state, snapshot=snapshot,
+        failures=findings_failures, options=options,
+    )
+    events.extend(rf_events)
+    summaries[GwReportedFindingAdapter.kind] = rf_summary
+
+    snapshot_dir: Path | None = None
+    if not dry_run:
+        index.save()
+        if not snapshot.empty:
+            snapshot_dir = snapshot.persist(root)
+
+    return FindingsPhaseResult(
+        plans=[*evidence_plans, *lib_plans, *rf_plans], events=events, summaries=summaries,
+        snapshot_dir=snapshot_dir,
+    )
+
+
+def _findings_json(findings: FindingsPhaseResult) -> str:
+    summary = {
+        "kinds": {k: {"counts": s.counts, "problem_paths": s.problem_paths}
+                 for k, s in findings.summaries.items()},
+        "snapshot_dir": str(findings.snapshot_dir) if findings.snapshot_dir else None,
+        "exit_code": findings.exit_code,
+    }
+    return engine_events.render_json(findings.events, summary=summary)
+
+
+def _print_findings_summary(
+    findings: FindingsPhaseResult, *, dry_run: bool, verbose: bool = False,
+) -> None:
+    for line in engine_events.render_text_lines(findings.events, verbose=verbose):
+        color = None
+        if line.startswith(("collision", "invalid", "failed", "withheld")):
+            color = typer.colors.RED
+        elif line.startswith("skip"):
+            color = typer.colors.YELLOW
+        typer.secho(line, fg=color, dim=color is None)
+    for kind, summary in findings.summaries.items():
+        counts = ", ".join(f"{k} {v}" for k, v in sorted(summary.counts.items()))
+        typer.secho(f"findings ({kind}): {counts or 'clean'}", fg=typer.colors.GREEN)
+        if summary.counts.get("withheld"):
+            typer.secho(
+                f"MASS-CHANGE GUARD tripped on {kind} — writes withheld.", fg=typer.colors.RED
+            )
+    if findings.snapshot_dir:
+        typer.echo(f"snapshot: {findings.snapshot_dir}")
+
+
+def _findings_last_sync_summary(findings: FindingsPhaseResult) -> dict[str, Any]:
+    return {
+        "kinds": {k: {"counts": s.counts, "problem_paths": s.problem_paths}
+                 for k, s in findings.summaries.items()},
+        "snapshot_dir": str(findings.snapshot_dir) if findings.snapshot_dir else None,
+    }
+
+
 def _wiki_relative_force_set(root: Path, paths: set[Path]) -> frozenset[PurePosixPath]:
     out: set[PurePosixPath] = set()
     for p in paths:
@@ -626,10 +852,40 @@ def _run_wiki_phase(
         force_local=_wiki_relative_force_set(root, force_local),
         force_remote=_wiki_relative_force_set(root, force_remote),
     )
-    plans, events, summary = engine_run(
+    fs_options = FilesetRunOptions(
+        dry_run=dry_run,
+        force_local=_wiki_relative_force_set(root, force_local),
+        force_remote=_wiki_relative_force_set(root, force_remote),
+    )
+
+    # D9/BRIEF task C: each book's images/ folder BEFORE its pages, so a fresh
+    # upload's gallery URL is visible to the page push that follows (same
+    # ordering reason as gw_evidence-before-findings, see _run_findings_phase).
+    events: list[Event] = []
+    summaries: dict[str, KindSummary] = {}
+    image_plans: list[Plan] = []
+    for book_dir, book_id in sorted(_book_dirs(index).items()):
+        page_ids = page_ids_in_book(client, ctx, book_id)
+        book_pages = [p for p in ctx.client.fetch_pages() if p["id"] in page_ids]
+        anchor_page_id = min((p["id"] for p in book_pages), default=None)
+        images_adapter = BsImagesAdapter(
+            book_id=book_id, page_ids=page_ids, anchor_page_id=anchor_page_id,
+        )
+        result = engine_sync_fileset(
+            root, ctx, images_adapter, book_dir / "images", index=index, state=state,
+            snapshot=snapshot, options=fs_options,
+        )
+        events.extend(result.events)
+        summaries[f"bs.image[{book_dir}]"] = result.summary
+        image_plans.extend(result.plans)
+
+    plans, page_events, summary = engine_run(
         root, ctx, BsPageAdapter(), index=index, state=state, snapshot=snapshot,
         failures=wiki_failures, options=options,
     )
+    events.extend(page_events)
+    summaries[BsPageAdapter.kind] = summary
+    plans = [*image_plans, *plans]
 
     snapshot_dir: Path | None = None
     if not dry_run:
@@ -638,9 +894,23 @@ def _run_wiki_phase(
             snapshot_dir = snapshot.persist(root)
 
     return WikiPhaseResult(
-        plans=plans, events=events, summaries={BsPageAdapter.kind: summary},
+        plans=plans, events=events, summaries=summaries,
         structure=structure, snapshot_dir=snapshot_dir,
     )
+
+
+def _book_dirs(index: Index) -> dict[PurePosixPath, int]:
+    return {
+        PurePosixPath(p): rec.id for p, rec in index.records.items()
+        if rec.kind is IndexKind.BS_BOOK
+    }
+
+
+def _report_dirs_for_status(index: Index) -> dict[PurePosixPath, int]:
+    return {
+        PurePosixPath(p): rec.id for p, rec in index.records.items()
+        if rec.kind is IndexKind.GW_REPORT
+    }
 
 
 def _wiki_json(wiki: WikiPhaseResult) -> str:
@@ -691,6 +961,43 @@ def _print_wiki_summary(wiki: WikiPhaseResult, *, dry_run: bool, verbose: bool =
         typer.echo(f"snapshot: {wiki.snapshot_dir}")
 
 
+@dataclass
+class _BoundAdapter:
+    """Ignores whatever ``ctx`` :func:`grison.engine.undo.replay` passes in and
+    always uses its own closed-over remote context instead — ``replay`` calls
+    every adapter with the SAME ``ctx`` object regardless of kind, but a
+    Ghostwriter adapter's ``ctx.client`` and a BookStack adapter's ``ctx.client``
+    are different client types; this wrapper is how ``undo`` lets both remotes'
+    adapters share one snapshot replay without forcing one shared ctx shape onto
+    both. :func:`grison.engine.undo.replay` calls ``refetch``/``delete``/``restore``
+    on every undo-time adapter, plus ``render_local`` (no ``ctx`` needed — it is a
+    pure formatter) when a DELETE_REMOTE undo must also restore the local mirror
+    file — never ``create``/``update``/``fetch_remote``/etc."""
+
+    inner: Any
+    bound_ctx: Any
+
+    @property
+    def kind(self) -> str:
+        return str(self.inner.kind)
+
+    def refetch(self, ctx: Any, id: int) -> RemoteRecord | None:
+        del ctx
+        return self.inner.refetch(self.bound_ctx, id)
+
+    def delete(self, ctx: Any, id: int) -> None:
+        del ctx
+        self.inner.delete(self.bound_ctx, id)
+
+    def restore(self, ctx: Any, preimage: Any) -> RemoteRecord:
+        del ctx
+        return self.inner.restore(self.bound_ctx, preimage)
+
+    def render_local(self, data: Any, *, path: PurePosixPath) -> str:
+        render = self.inner.render_local
+        return str(render(data, path=path))
+
+
 @app.command()
 @_guarded
 def undo(
@@ -702,7 +1009,8 @@ def undo(
         bool, typer.Option("--list", help="List available snapshots, newest first, and exit."),
     ] = False,
 ) -> None:
-    """Reverse a sync's wiki writes from its undo snapshot (``.grison/snapshots/``).
+    """Reverse a sync's remote writes from its undo snapshot (``.grison/snapshots/``)
+    — findings (Ghostwriter) or wiki (BookStack), whichever this snapshot holds.
 
     Replays the snapshot's inverse operations through the adapters, newest write
     first, each one guarded by the same pre-write re-fetch check ``grison sync``
@@ -727,16 +1035,50 @@ def undo(
         raise typer.Exit(code=2)
 
     creds = load_creds(root)
-    creds.require_bookstack()
-    with _make_bs_client(creds) as client:
-        ctx = build_context(client, StateStore(root))
-        adapters: dict[str, CreateUndoAdapter] = {
-            BsPageAdapter.kind: BsPageAdapter(),
-            bs_structure.BookUndoAdapter.kind: bs_structure.BookUndoAdapter(client),
-            bs_structure.ChapterUndoAdapter.kind: bs_structure.ChapterUndoAdapter(client),
-        }
+    have_gw = bool(creds.gw_url and creds.gw_token)
+    have_bs = bool(creds.bs_url and creds.bs_token_id and creds.bs_token_secret)
+    if not have_gw and not have_bs:
+        typer.secho("error: no Ghostwriter or BookStack credentials configured",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    state = StateStore(root)
+    index = Index.load(root)
+    with contextlib.ExitStack() as stack:
+        # A single snapshot's ops all come from ONE phase (findings XOR wiki — each
+        # phase builds its own Snapshot), but `undo.replay` takes one `ctx` for
+        # every adapter it calls regardless of kind, and a GW adapter's `ctx.client`
+        # and a BS adapter's `ctx.client` are different types — so every adapter
+        # below is a thin wrapper that closes over its OWN remote's real context
+        # and ignores whatever `ctx` `replay` happens to pass it, rather than
+        # forcing one shared ctx shape onto both remotes.
+        adapters: dict[str, CreateUndoAdapter] = {}
+        if have_gw:
+            gw_client = stack.enter_context(_make_gw_client(creds))
+            gw_ctx = GWContext.build(gw_client, index)
+            # the library adapter's ctx is the bare client (no report scoping —
+            # see its class docstring), the other two take the GWContext.
+            adapters[GwLibraryFindingAdapter.kind] = _BoundAdapter(
+                GwLibraryFindingAdapter(), gw_client,
+            )
+            adapters[GwReportedFindingAdapter.kind] = _BoundAdapter(
+                GwReportedFindingAdapter(index=index, evidence_by_report={}), gw_ctx,
+            )
+            adapters["gw.evidence"] = _BoundAdapter(GwEvidenceAdapter(report_id=0), gw_ctx)
+        if have_bs:
+            bs_client = stack.enter_context(_make_bs_client(creds))
+            bs_ctx = build_context(bs_client, state)
+            all_page_ids = frozenset(p["id"] for p in bs_client.fetch_pages())
+            adapters[BsPageAdapter.kind] = _BoundAdapter(BsPageAdapter(), bs_ctx)
+            adapters[bs_structure.BookUndoAdapter.kind] = bs_structure.BookUndoAdapter(bs_client)
+            adapters[bs_structure.ChapterUndoAdapter.kind] = bs_structure.ChapterUndoAdapter(
+                bs_client
+            )
+            adapters["bs.image"] = _BoundAdapter(
+                BsImagesAdapter(book_id=0, page_ids=all_page_ids, anchor_page_id=None), bs_ctx,
+            )
         problems = engine_undo_replay(
-            root, target, ctx=ctx, adapters=adapters,
+            root, target, ctx=None, adapters=adapters,
             on_event=lambda msg: typer.secho(msg, dim=True),
         )
     for p in problems:
@@ -801,9 +1143,17 @@ def _scanner_label(summary: ParseSummary) -> str:
     return "+".join(sorted(summary.files_parsed)) or "(no files)"
 
 
+def _findings_pull_push_counts(result: FindingsPhaseResult) -> tuple[int, int]:
+    pulled = sum(s.counts.get("pull", 0) + s.counts.get("pull_new", 0)
+                for s in result.summaries.values())
+    pushed = sum(s.counts.get("push", 0) + s.counts.get("create", 0)
+                for s in result.summaries.values())
+    return pulled, pushed
+
+
 def _git_sync_message(
     bad: bool,
-    result: SyncResult | None,
+    result: FindingsPhaseResult | None,
     rep: ReportResult | None,
     wiki: WikiPhaseResult | None,
 ) -> str:
@@ -814,7 +1164,8 @@ def _git_sync_message(
     if bad:
         bits.append("with failures")
     if result is not None:
-        bits.append(f"findings: pull {len(result.pulled)} push {len(result.pushed)}")
+        pulled, pushed = _findings_pull_push_counts(result)
+        bits.append(f"findings: pull {pulled} push {pushed}")
     if rep is not None:
         bits.append(f"reports: pull {len(rep.pulled)} push {len(rep.pushed)}")
     if wiki is not None:
@@ -854,54 +1205,6 @@ def _print_report_summary(rep: ReportResult, *, dry_run: bool) -> None:
     for e in rep.errors:
         typer.secho(f"  error: {e}", fg=typer.colors.RED)
     for w in rep.warnings:
-        typer.secho(f"  warning: {w}", dim=True)
-
-
-def _print_sync_summary(result: SyncResult, *, dry_run: bool) -> None:
-    tense = "would " if dry_run else ""
-    ev = ""
-    if result.evidence_up or result.evidence_down or result.evidence_deleted:
-        ev = f"  [evidence ↑{result.evidence_up} ↓{result.evidence_down}"
-        if result.evidence_deleted:
-            ev += f" ✕{result.evidence_deleted}"
-        ev += "]"
-    typer.secho(
-        f"{tense}pull {len(result.pulled)}, {tense}push {len(result.pushed)}, "
-        f"{tense}insert {len(result.inserted)}  ({len(result.unchanged)} clean, "
-        f"{len(result.repaired)} repaired){ev}",
-        fg=typer.colors.GREEN,
-    )
-    if result.snapshot_dir:
-        typer.echo(f"snapshot: {result.snapshot_dir}")
-    if result.mass_change_blocked:
-        typer.secho(
-            "MASS-CHANGE GUARD tripped — remote writes withheld. Re-run a narrower path "
-            "or confirm with a targeted sync.",
-            fg=typer.colors.RED,
-        )
-    if result.collisions:
-        typer.secho(
-            f"{len(result.collisions)} collision(s) — hand-merge then --force-local/-remote:",
-            fg=typer.colors.RED,
-        )
-        for p in result.collisions:
-            typer.echo(f"  ! {p}  (remote at {p.with_suffix('.remote.md').name})")
-    if result.invalid:
-        typer.secho(f"{len(result.invalid)} broken link(s) (id set, no sync base) — re-link with "
-                    "--force-remote/--force-local:", fg=typer.colors.RED)
-        for p in result.invalid:
-            typer.echo(f"  ? {p}")
-    if result.corrupt:
-        typer.secho(
-            f"{len(result.corrupt)} corrupt local file(s) — fix and re-sync:", fg=typer.colors.RED
-        )
-        for p, msg in result.corrupt:
-            typer.echo(f"  ✕ {p}: {msg}")
-    for p, reason in result.skipped:
-        typer.secho(f"skipped  {p}: {reason}", fg=typer.colors.YELLOW)
-    for e in result.errors:
-        typer.secho(f"  error: {e}", fg=typer.colors.RED)
-    for w in result.warnings:
         typer.secho(f"  warning: {w}", dim=True)
 
 
