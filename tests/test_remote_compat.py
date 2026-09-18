@@ -154,6 +154,35 @@ def test_per_sync_cost_with_a_warm_cache_stays_well_under_a_second(
     assert elapsed < 0.5, f"warm compat check took {elapsed:.3f}s against the fake"
 
 
+def test_introspection_denied_is_wrapped_as_a_compat_error(
+    gw: FakeGhostwriter, gw_client: GhostwriterClient, tmp_path: Path,
+) -> None:
+    """Bug fix: BEFORE the fix, a ``GhostwriterError`` raised by
+    ``introspect_schema()`` (a GraphQL authorization error, e.g. a restricted API
+    token) escaped ``check_ghostwriter_compatibility`` unwrapped — ``grison.cli``'s
+    ``sync`` only catches ``SchemaCompatibilityError`` narrowly (ENGINE.md §10: a
+    failed compat check is "could not run", exit 2), so the bare
+    ``GhostwriterError`` fell through to the catch-all and exited 1 instead. It is
+    now wrapped into ``SchemaCompatibilityError`` here, carrying the cause's own
+    message."""
+    assert load_cache(tmp_path) is None  # no cache -> always the cold path
+    gw.inject_graphql_error("__schema", "not authorized to introspect this schema")
+    with pytest.raises(SchemaCompatibilityError, match="not authorized to introspect"):
+        check_ghostwriter_compatibility(gw_client, tmp_path)
+
+
+def test_transport_failure_during_the_probe_is_wrapped_as_a_compat_error(
+    gw: FakeGhostwriter, gw_client: GhostwriterClient, tmp_path: Path,
+) -> None:
+    """Same fix: a transport failure surviving retries (four straight HTTP 503s,
+    exhausting the client's default ``max_attempts``) on the cheap
+    ``fingerprint_probe()`` request — the very first thing this check does,
+    warm-cache or not — is wrapped too."""
+    gw.inject_http_status(503, times=4)
+    with pytest.raises(SchemaCompatibilityError, match="503"):
+        check_ghostwriter_compatibility(gw_client, tmp_path)
+
+
 def test_fingerprint_of_is_order_independent_of_dict_construction() -> None:
     """Sanity check on the hashing seam: fingerprint_of hashes canonically (used
     by grison.hashing.digest, sort_keys=True), so equal content always yields
