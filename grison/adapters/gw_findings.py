@@ -464,7 +464,8 @@ class GwReportedFindingAdapter:
             return {"_invalid": True}
         resolver = self._resolver(None, doc.report_dir)
         return {**_plain_canonical(doc.doc), "affected_entities": doc.doc.affected_entities or "",
-                "sections": _sections_canonical(doc.doc, resolver)}
+                "sections": _sections_canonical(doc.doc, resolver),
+                "report": str(doc.report_dir)}
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
         report_dir = self.index.path_of(IndexKind.GW_REPORT, data["reportId"])
@@ -474,7 +475,16 @@ class GwReportedFindingAdapter:
         return {**_remote_plain_canonical(data, tags),
                 "affected_entities": _affected_entities_from_html(data.get("affectedEntities")
                                                                    or ""),
-                "sections": _remote_sections_canonical(data, resolver)}
+                "sections": _remote_sections_canonical(data, resolver),
+                # Report membership must be part of the hash, exactly like
+                # BsPageAdapter includes book/chapter (grison/adapters/bs_pages.py):
+                # without it, a cross-report MOVE with byte-identical content makes
+                # `_apply_move`'s `needs_write` compare equal and the finding keeps
+                # its OLD reportId on Ghostwriter forever, silently — the bug this
+                # field closes. `report_dir` is None only for a reportId the index
+                # no longer knows (orphaned data); falling back to "" still makes a
+                # real reparent (known dir -> unknown) compare unequal.
+                "report": report_dir or ""}
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         from grison.markdown.converter import html_to_md

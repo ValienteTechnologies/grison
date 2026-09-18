@@ -387,3 +387,176 @@ def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
     # ...and report-a's own (clean) evidence set was not skipped either.
     assert "gw.evidence[findings/reports/report-a])" in result.output, result.output
     assert result.exit_code == 1, result.output  # still a problem — just correctly attributed
+
+
+# --- identity: cross-report moves, copies, simultaneous renames, position -------
+
+
+def test_cross_report_move_with_identical_content_reparents(run_grison, gw_server, workspace):
+    """Bug fix: :meth:`GwReportedFindingAdapter.canonical_local`/``canonical_remote``
+    now include report membership, the same way
+    :meth:`~grison.adapters.bs_pages.BsPageAdapter.canonical_local`/``canonical_remote``
+    include ``book``/``chapter`` — moving a finding FILE to another report
+    directory with byte-identical content must still write the new ``reportId``
+    to Ghostwriter, and a third sync must come back clean. BEFORE the fix,
+    ``apply.py::_apply_move``'s ``needs_write`` compared the two canonical
+    payloads equal (report membership was invisible to both), so the finding
+    kept its OLD ``reportId`` on Ghostwriter forever, silently."""
+    report_a = gw_server.store.seed_report(id=7, title="Report A",
+                                           project={"scopes": REPORT_SCOPES})
+    report_b = gw_server.store.seed_report(id=8, title="Report B",
+                                           project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report_a["id"], title="Finding One", severityId=3, findingTypeId=4,
+    )
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+
+    src = _rdir(workspace, "report-a") / "finding-one.md"
+    dst = _rdir(workspace, "report-b") / "finding-one.md"
+    dst.write_bytes(src.read_bytes())
+    src.unlink()
+
+    second = run_grison("sync")
+
+    assert "move" in second.output, second.output
+    row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert row is not None and row["reportId"] == report_b["id"]
+    index = Index.load(workspace)
+    assert index.get("findings/reports/report-b/finding-one.md").id == 50
+    assert index.get("findings/reports/report-a/finding-one.md") is None
+
+    third = run_grison("sync")
+
+    assert third.exit_code == 0, third.output
+    assert "findings (gw.reportedFinding): clean" in third.output, third.output
+
+
+def test_cross_report_move_and_edit_reparents(run_grison, gw_server, workspace):
+    """Same fix, the MOVE+EDIT path: content changed AND the directory changed in
+    the same sync — both the edit and the reparent must land in one write."""
+    report_a = gw_server.store.seed_report(id=7, title="Report A",
+                                           project={"scopes": REPORT_SCOPES})
+    report_b = gw_server.store.seed_report(id=8, title="Report B",
+                                           project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report_a["id"], title="Finding One", severityId=3, findingTypeId=4,
+        description="<p>old text</p>",
+    )
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+
+    src = _rdir(workspace, "report-a") / "finding-one.md"
+    edited = src.read_text(encoding="utf-8").replace("old text", "brand new text")
+    dst = _rdir(workspace, "report-b") / "finding-one.md"
+    dst.write_text(edited, encoding="utf-8")
+    src.unlink()
+
+    result = run_grison("sync")
+
+    assert "move" in result.output, result.output
+    row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert row is not None
+    assert row["reportId"] == report_b["id"]
+    assert "brand new text" in row["description"]
+
+
+def test_library_to_report_move_is_create_and_delete_never_a_pair(run_grison, gw_server, workspace):
+    """D3/module docstring: a library<->report move is NOT a pairing move —
+    ``gw.finding`` and ``gw.reportedFinding`` are different kinds/scan roots, so
+    :mod:`grison.engine.identity` never even considers pairing across them. The
+    file landing in ``findings/reports/<dir>/`` is a fresh CREATE and the old
+    library path a DELETE_REMOTE — never a guessed move."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_finding(id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4)
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+
+    src = workspace / "findings" / "library" / "weak-tls-ciphers.md"
+    dst = _rdir(workspace) / "weak-tls-ciphers.md"
+    dst.write_bytes(src.read_bytes())
+    src.unlink()
+
+    result = run_grison("sync")
+
+    assert "findings (gw.finding): delete_remote 1" in result.output, result.output
+    assert "findings (gw.reportedFinding): create 1" in result.output, result.output
+    assert gw_server.store._by_id(gw_server.store.findings, 1) is None
+    assert len(gw_server.store.reported_findings) == 1
+    assert gw_server.store.reported_findings[0]["reportId"] == report["id"]
+
+
+def test_copying_a_finding_file_yields_a_second_record(run_grison, gw_server, workspace):
+    """Copying (not moving) a finding file leaves the original path indexed and
+    present — never an "M" — so the copy is unpaired and becomes CREATE: a
+    second Ghostwriter record, never guessed as a move of the original."""
+    gw_server.store.seed_finding(id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4)
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+
+    src = workspace / "findings" / "library" / "weak-tls-ciphers.md"
+    dst = src.parent / "weak-tls-ciphers-copy.md"
+    dst.write_bytes(src.read_bytes())
+
+    result = run_grison("sync")
+
+    assert "create 1" in result.output, result.output
+    assert len(gw_server.store.findings) == 2
+
+
+def test_two_simultaneous_renames_pair_one_to_one(run_grison, gw_server, workspace):
+    """Two files renamed within the same report in one sync must each pair with
+    their OWN record — :func:`grison.engine.identity.pair`'s one-to-one matching,
+    never cross-paired just because both are "some M" and "some U" of the same
+    kind."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        description="<p>alpha</p>",
+    )
+    gw_server.store.seed_reported_finding(
+        id=51, reportId=report["id"], title="Finding Two", severityId=3, findingTypeId=4,
+        description="<p>beta</p>",
+    )
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+
+    report_dir = _rdir(workspace)
+    (report_dir / "finding-one.md").rename(report_dir / "renamed-one.md")
+    (report_dir / "finding-two.md").rename(report_dir / "renamed-two.md")
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 0, result.output
+    index = Index.load(workspace)
+    assert index.get("findings/reports/report-a/renamed-one.md").id == 50
+    assert index.get("findings/reports/report-a/renamed-two.md").id == 51
+    assert gw_server.store._by_id(gw_server.store.reported_findings, 50)["description"] == \
+        "<p>alpha</p>"
+    assert gw_server.store._by_id(gw_server.store.reported_findings, 51)["description"] == \
+        "<p>beta</p>"
+
+
+def test_position_preserved_across_plain_content_push(run_grison, gw_server, workspace):
+    """``position`` is deliberately never in the update payload (module
+    docstring) — a content-only push must not disturb the server's own position
+    for the record."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        description="<p>old text</p>", position=7,
+    )
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+
+    path = _rdir(workspace) / "finding-one.md"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("old text", "brand new text"),
+        encoding="utf-8",
+    )
+
+    result = run_grison("sync")
+
+    assert "gw.reportedFinding): push 1" in result.output, result.output
+    row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert row is not None and row["position"] == 7

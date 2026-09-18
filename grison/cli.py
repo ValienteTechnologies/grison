@@ -149,7 +149,15 @@ def parse(
     """Turn scanner export(s) into markdown findings in findings/inbox/ (offline)."""
     root = Path.cwd()
     if out is None:
-        bootstrap_tree(root)  # the binary scaffolds; no init
+        # The binary scaffolds; no init. A full workspace, not just the bare
+        # directory tree (spec §10 / bootstrap.py's own docstring: "a first
+        # `grison sync`/`grison parse` in an empty directory yields a complete,
+        # valid, self-contained workspace") — bootstrap_workspace is credential-
+        # free (it only ever writes a template env, never contacts a remote), so
+        # `parse` staying fully offline is unaffected. Without this, `grison parse`
+        # in an empty directory left no manifest.yml/index.json behind and the very
+        # next `grison validate` exited 2 "no grison workspace found".
+        bootstrap_workspace(root)
         out_dir = inbox_dir(root)
     else:
         out_dir = out

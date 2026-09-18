@@ -153,8 +153,23 @@ def check_ghostwriter_compatibility(client: GhostwriterClient, root: Path) -> No
     path (fingerprint absent or changed): full introspection + validate every
     operation, then cache the new fingerprint on success. Raises
     :class:`SchemaCompatibilityError` naming the first offending field/argument
-    on any mismatch; returns silently otherwise."""
-    fingerprint = fingerprint_of(client.fingerprint_probe())
+    on any mismatch; returns silently otherwise.
+
+    Any other :class:`~grison.errors.GrisonError` the probe/introspection calls
+    raise (introspection denied, a transport failure surviving retries, …) is
+    wrapped into :class:`SchemaCompatibilityError` too, carrying the cause's own
+    message — ENGINE.md §10: a failed compatibility check is "could not run"
+    (exit code 2), the same as an incompatible schema, never a per-phase
+    failure (exit 1, ``grison.cli``'s ``_guarded`` catch-all). Wrapping it HERE
+    means the CLI's own narrow ``except SchemaCompatibilityError`` around the
+    call to this function is already correct; it never needs to widen to catch
+    every possible ``GrisonError`` a probe/introspection call might raise."""
+    try:
+        fingerprint = fingerprint_of(client.fingerprint_probe())
+    except SchemaCompatibilityError:
+        raise
+    except GrisonError as e:
+        raise SchemaCompatibilityError(str(e)) from e
     cached = load_cache(root)
     if cached is not None and cached.fingerprint == fingerprint:
         return
@@ -163,7 +178,12 @@ def check_ghostwriter_compatibility(client: GhostwriterClient, root: Path) -> No
 
 
 def _validate_every_operation(client: GhostwriterClient) -> None:
-    raw = client.introspect_schema()
+    try:
+        raw = client.introspect_schema()
+    except SchemaCompatibilityError:
+        raise
+    except GrisonError as e:
+        raise SchemaCompatibilityError(str(e)) from e
     schema = build_client_schema(cast(IntrospectionQuery, raw))
     operations = _module_level_operations()
     for name, source in sorted(operations.items()):

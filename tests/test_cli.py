@@ -104,6 +104,15 @@ def test_parse_bootstraps_and_status_reports_valid(
     # parse`'s own output is still v1-shaped, see grison/remote/methodology.py's
     # sibling modules for findings), so `grison status` reports them as a plain file
     # count, not a validity verdict.
+    #
+    # tests changed on purpose (bug fix): `grison parse` in an empty directory now
+    # scaffolds the COMPLETE workspace via `bootstrap_workspace` (spec §10 /
+    # bootstrap.py's own docstring: "a first `grison sync`/`grison parse` in an
+    # empty directory yields a complete, valid, self-contained workspace") — it is
+    # still fully offline/credential-free (bootstrap_workspace never contacts a
+    # remote, it only ever writes a template env), so `.grison/manifest.yml` and
+    # `index.json` exist right after `parse` with no manual `.grison` mkdir needed
+    # before `status`/`validate` can run.
     scans = tmp_path / "scans"
     scans.mkdir()
     for name in ("burp_sample.xml", "nessus_sample.xml", "sslyze_sample.json"):
@@ -117,17 +126,36 @@ def test_parse_bootstraps_and_status_reports_valid(
     assert (tmp_path / "findings" / "library").is_dir()  # full tree scaffolded
     md_files = list(inbox.glob("*.md"))
     assert md_files
-
-    # `parse` alone never creates .grison/ (it stays fully offline and credential-free
-    # — only `sync`'s bootstrap does); `status` needs a workspace marker to run at all,
-    # same as `validate`, so give it the bare minimum by hand rather than pull in the
-    # whole credentialed sync path just for this offline check.
-    (tmp_path / ".grison").mkdir()
+    assert (tmp_path / ".grison" / "manifest.yml").is_file()
+    assert (tmp_path / ".grison" / "index.json").is_file()
 
     r2 = _runner.invoke(app, ["status"])
     assert r2.exit_code == 0, r2.output
     assert "findings" in r2.output  # findings are now engine-managed too (task step 3)
     assert "methodology:" in r2.output
+
+
+def test_parse_in_empty_dir_then_validate_exits_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug fix: BEFORE the fix, `grison parse` in a brand-new empty directory used
+    the bare `bootstrap_tree` helper, so no `.grison/manifest.yml`/`index.json` ever
+    got written and the very next `grison validate` exited 2 "no grison workspace
+    found" — even though `parse` itself reported success. `grison validate` must
+    exit 0 straight after, and the parsed inbox document must carry no `grison:`
+    frontmatter block (D3: documents carry no machine fields, inbox included)."""
+    monkeypatch.chdir(tmp_path)
+
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml")])
+    assert r.exit_code == 0, r.output
+
+    inbox_files = list((tmp_path / "findings" / "inbox").glob("*.md"))
+    assert inbox_files
+    for f in inbox_files:
+        assert "grison:" not in f.read_text(encoding="utf-8")
+
+    r2 = _runner.invoke(app, ["validate"])
+    assert r2.exit_code == 0, r2.output
 
 
 def test_parse_skips_unrecognized(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
