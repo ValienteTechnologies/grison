@@ -20,6 +20,7 @@ same run, pulls whatever findings/evidence were also seeded into it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from grison.index import Index, IndexKind
@@ -264,3 +265,71 @@ def test_undo_reverses_a_library_push_and_an_evidence_upload(run_grison, gw_serv
     assert undone.exit_code == 0, undone.output
     assert gw_server.store.evidence == []  # the create was reversed (delete_evidence_by_pk)
     assert "old text" in gw_server.store._by_id(gw_server.store.findings, 1)["description"]
+
+
+def test_n_new_evidence_uploads_fetch_the_org_wide_evidence_list_only_once(
+    run_grison, gw_server, workspace,
+):
+    """Regression for the fetch_evidence() thundering herd: BEFORE the fix,
+    GwEvidenceAdapter._dedupe_friendly_name_for called the org-wide
+    ``fetch_evidence()`` query once per uploaded file, and cli.py's post-sync
+    ``evidence_by_report`` rebuild called ``list_remote()`` (another org-wide
+    query) once per report — N uploads cost N-or-more fetches. Fixed by GWContext
+    caching the evidence list for the run (:meth:`GWContext.all_evidence`) and
+    GwEvidenceAdapter keeping it updated locally as it uploads."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    report_dir = _rdir(workspace)
+    run_grison("sync")  # creates the report directory
+
+    (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        (report_dir / "evidence" / f"shot-{i}.png").write_bytes(f"bytes-{i}".encode())
+
+    before = len(gw_server.request_log)
+    result = run_grison("sync")
+
+    assert "gw.evidence[findings/reports/report-a]): create 3" in result.output, result.output
+    assert len(gw_server.store.evidence) == 3
+    evidence_fetches = [op for op in gw_server.request_log[before:] if op.name == "evidence"]
+    assert len(evidence_fetches) == 1, evidence_fetches
+
+
+def test_undo_refuses_to_guess_the_report_for_an_evidence_restore_with_no_reportid(
+    run_grison, gw_server, workspace,
+):
+    """D3/undo safety: grison.engine.undo.replay's adapter map holds ONE
+    GwEvidenceAdapter per bare kind string (bound to report_id=0 — see
+    grison/cli.py's undo wiring), so GwEvidenceAdapter.restore can never trust
+    self.report_id; the scope must come from the preimage alone. A preimage with
+    no reportId at all (a corrupt or pre-D1 snapshot) must be refused with a
+    GrisonError naming the file, never silently restored into report_id=0 or any
+    other guessed scope."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    report_dir = _rdir(workspace)
+    run_grison("sync")  # creates the report directory
+    (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    (report_dir / "evidence" / "shot.png").write_bytes(b"\x89PNG-fake-bytes")
+    run_grison("sync")  # uploads the evidence row
+    assert len(gw_server.store.evidence) == 1
+
+    # a locally-deleted (indexed) evidence file deletes the remote row too (D1(a))
+    # -- the delete_remote undo op's preimage is what gets corrupted below.
+    (report_dir / "evidence" / "shot.png").unlink()
+    run_grison("sync")
+    assert gw_server.store.evidence == []
+
+    snapshots_dir = workspace / ".grison" / "snapshots"
+    snapshot_name = sorted(p.name for p in snapshots_dir.iterdir())[-1]
+    ops_path = snapshots_dir / snapshot_name / "ops.json"
+    ops = json.loads(ops_path.read_text(encoding="utf-8"))
+    evidence_op = next(
+        o for o in ops if o["kind"] == "gw.evidence" and o["outcome"] == "delete_remote"
+    )
+    evidence_op["remote_preimage"]["reportId"] = None
+    ops_path.write_text(json.dumps(ops), encoding="utf-8")
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 1, result.output
+    assert "shot.png" in result.output
+    assert gw_server.store.evidence == []  # never silently restored into a guessed scope

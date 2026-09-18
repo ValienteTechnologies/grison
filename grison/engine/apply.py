@@ -11,6 +11,7 @@ collision sidecars.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -392,30 +393,57 @@ def _apply_create(  # noqa: PLR0913
     events.append(Event(verb="create", path=str(p.path)))
 
 
+def refetch_guard(
+    *,
+    refetch: Callable[[], RemoteRecord | None],
+    expected_hash: str | None,
+    canonical_hash: Callable[[RemoteRecord], str],
+    forced: bool,
+) -> tuple[RemoteRecord | None, bool]:
+    """The ONE pre-write re-fetch guard (ENGINE.md §3), record-type-agnostic:
+    re-fetch the one record about to be written and compare a canonical hash of
+    what's there now against what classification saw. Returns ``(fresh,
+    drifted)``; ``drifted`` True means the caller must treat the plan as a
+    COLLISION instead of writing.
+
+    Shared by :func:`grison.engine.apply._refetch_guard` (the document
+    :class:`~grison.engine.adapter.Adapter` shape — ``refetch``/``canonical_remote``
+    take a bare id/dict) and :mod:`grison.engine.filesets` (whose
+    :class:`~grison.engine.filesets.FileSetAdapter` has a different ``refetch``
+    signature and no ``canonical_remote`` at all — a body's bytes can never
+    silently change under an id, so its own canonical hash only needs fresh
+    metadata, not a re-download): each passes in its own way to refetch one
+    record and hash it, and gets back the exact same comparison semantics —
+    including ``expected_hash is None`` (nothing to compare against, e.g. no
+    remote record at classification time) always meaning "not drifted"."""
+    fresh = refetch()
+    if fresh is None:
+        return None, not forced
+    if expected_hash is not None and not forced:
+        if expected_hash != canonical_hash(fresh):
+            return fresh, True
+    return fresh, False
+
+
 def _refetch_guard(
     ctx: Any, adapter: Adapter, p: Plan, options: RunOptions,
 ) -> tuple[RemoteRecord | None, bool]:
-    """Returns ``(fresh, drifted)``. ``drifted`` is True when the remote changed since
-    classification AND this path is not force-overridden — the caller must then treat
-    the plan as a collision instead of writing.
-
-    Compares CANONICAL hashes, not raw dicts: ``p.remote`` may be a skip-detail-fetch
-    placeholder (a small sentinel dict, missing most fields — see the adapter's own
-    ``fetch_remote``), which would never equal a freshly fetched full record even
-    when nothing actually changed. ``_remote_hash`` already knows how to read that
-    placeholder's ``cached_hash`` instead of hashing its sentinel content."""
+    """The document-adapter binding of :func:`refetch_guard`: ``p.remote`` may be a
+    skip-detail-fetch placeholder (a small sentinel dict, missing most fields — see
+    the adapter's own ``fetch_remote``), which would never equal a freshly fetched
+    full record even when nothing actually changed — ``_remote_hash`` already knows
+    to read that placeholder's ``cached_hash`` instead of hashing its sentinel
+    content."""
     if p.id is None:
         return None, False
-    fresh = adapter.refetch(ctx, p.id)
+    rid = p.id
     forced = p.path is not None and p.path in options.force_local
-    if fresh is None:
-        return None, not forced
-    if p.remote is not None and not forced:
-        classify_time_hash = _remote_hash(adapter, p.remote)
-        fresh_hash = digest(adapter.canonical_remote(fresh.data))
-        if classify_time_hash != fresh_hash:
-            return fresh, True
-    return fresh, False
+    return refetch_guard(
+        refetch=lambda: adapter.refetch(ctx, rid),
+        expected_hash=_remote_hash(adapter, p.remote) if p.remote is not None else None,
+        canonical_hash=lambda fresh: digest(adapter.canonical_remote(fresh.data)),
+        forced=forced,
+    )
 
 
 def _apply_update(  # noqa: PLR0913

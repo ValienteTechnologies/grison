@@ -8,6 +8,7 @@ gallery has no caption column at all — the alt text lives only in the page bod
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -131,3 +132,134 @@ def test_chapter_page_image_reference_uses_the_dotdot_spelling(run_grison, bs_se
     row = bs_server.store.gallery[0]
     assert row["url"] in pushed_markdown
     assert "../images/scan.png" not in pushed_markdown
+
+
+def test_new_image_anchors_to_the_page_that_references_it_not_the_books_first_page(
+    run_grison, bs_server,
+):
+    """BRIEF C: :attr:`~grison.adapters.bs_images.BsImagesAdapter.anchor_for` used to
+    be built into the adapter but never populated by ``cli.py`` — every new upload
+    fell through to the "book's first page" fallback regardless of which page
+    actually referenced it. Fixed by scanning every already-indexed page's body
+    (:mod:`grison.markdown.refscan`, not a regex) for ``images/<file>`` embeds
+    before building the adapter (``grison/cli.py::_anchor_for_book``)."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page_a = bs_server.store.seed_page(
+        book_id=book["id"], name="Overview", markdown="# Overview\n",
+    )
+    page_b = bs_server.store.seed_page(
+        book_id=book["id"], name="Recon", markdown="# Recon\n",
+    )
+    assert page_a["id"] < page_b["id"]  # the old first-page fallback would pick page_a
+    run_grison("sync")  # pull both pages down first
+
+    images_dir = Path.cwd() / "methodology/library/playbook/images"
+    images_dir.mkdir(parents=True)
+    (images_dir / "diagram.png").write_bytes(b"\x89PNG-fake-bytes")
+    recon_path = Path.cwd() / "methodology/library/playbook/recon.md"
+    recon_path.write_text(
+        "---\ntitle: Recon\n---\n\n![Network diagram](images/diagram.png)\n",
+        encoding="utf-8",
+    )
+
+    run_grison("sync")
+
+    assert len(bs_server.store.gallery) == 1
+    row = bs_server.store.gallery[0]
+    assert row["uploaded_to"] == page_b["id"]  # anchored to Recon, not Overview
+
+
+def test_page_push_reuses_the_per_run_gallery_cache_not_one_fetch_per_page(
+    run_grison, bs_server,
+):
+    """grison/adapters/bs_pages.py::_remote_body_for_push (and the pre-write
+    re-fetch guard's own URL localization) used to call ``_gallery_by_name_for_book``
+    fresh on every push — a full page-list + gallery-list refetch per page pushed.
+    ``fetch_remote`` already cached this per book; the fix (``ctx.gallery_cache``)
+    makes create/update/refetch reuse that SAME per-run cache, so the request count
+    for a push sync no longer grows with the number of pages pushed."""
+    book = bs_server.store.seed_book(name="Playbook")
+    pages = [
+        bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"# Page {i}\n")
+        for i in range(4)
+    ]
+    image = bs_server.store.seed_gallery_image(
+        name="diagram.png", uploaded_to=pages[0]["id"], content=b"bytes",
+    )
+    for i, page in enumerate(pages):
+        bs_server.store.edit_page(
+            page["id"], markdown=f"# Page {i}\n\n![Diagram]({image['url']})\n",
+        )
+    run_grison("sync")  # pull all 4 pages + the image down (localizes the URL)
+
+    def _edit(i: int) -> None:
+        p = Path.cwd() / f"methodology/library/playbook/page-{i}.md"
+        p.write_text(p.read_text(encoding="utf-8") + f"\nEdited {i}.\n", encoding="utf-8")
+
+    def _gallery_and_page_list_gets(before: int) -> tuple[int, int]:
+        new = bs_server.request_log[before:]
+        gallery = [r for r in new if r.method == "GET" and r.path == "/api/image-gallery"]
+        pages_ = [r for r in new if r.method == "GET" and r.path == "/api/pages"]
+        return len(gallery), len(pages_)
+
+    _edit(0)
+    before_one = len(bs_server.request_log)
+    run_grison("sync")  # pushes exactly 1 page
+    one_gallery, one_pages = _gallery_and_page_list_gets(before_one)
+
+    for i in range(1, 4):
+        _edit(i)
+    before_many = len(bs_server.request_log)
+    run_grison("sync")  # pushes 3 more pages in one run
+    many_gallery, many_pages = _gallery_and_page_list_gets(before_many)
+
+    assert one_gallery == many_gallery, (one_gallery, many_gallery)
+    assert one_pages == many_pages, (one_pages, many_pages)
+
+
+def test_undo_refuses_to_guess_the_book_for_an_image_restore_with_no_uploaded_to(
+    run_grison, bs_server,
+):
+    """Same undo-safety fix as ``GwEvidenceAdapter.restore`` (D3):
+    ``grison.engine.undo.replay``'s adapter map holds ONE ``BsImagesAdapter`` per
+    bare kind string (bound to an empty page-id filter for undo — see
+    ``grison/cli.py``'s undo wiring), so ``restore()`` can never trust
+    ``self.anchor_page_id``. A preimage with no ``uploaded_to`` at all (a corrupt
+    snapshot) must be refused, never silently re-uploaded anchored to a guessed
+    page."""
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi\n")
+    run_grison("sync")
+
+    images_dir = Path.cwd() / "methodology/library/playbook/images"
+    images_dir.mkdir(parents=True)
+    (images_dir / "diagram.png").write_bytes(b"\x89PNG-fake-bytes")
+    page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
+    page_path.write_text(
+        "---\ntitle: Getting Started\n---\n\n![Diagram](images/diagram.png)\n",
+        encoding="utf-8",
+    )
+    run_grison("sync")  # uploads the image
+    assert len(bs_server.store.gallery) == 1
+
+    # D1(a): a locally-deleted (indexed) file's remote row is deleted too, whether
+    # or not anything still references it -- this is what gives us a delete_remote
+    # undo op to corrupt below.
+    page_path.write_text("---\ntitle: Getting Started\n---\n\n# Hi\n", encoding="utf-8")
+    (images_dir / "diagram.png").unlink()
+    run_grison("sync")
+    assert bs_server.store.gallery == []
+
+    snapshots_dir = Path.cwd() / ".grison" / "snapshots"
+    snapshot_name = sorted(p.name for p in snapshots_dir.iterdir())[-1]
+    ops_path = snapshots_dir / snapshot_name / "ops.json"
+    ops = json.loads(ops_path.read_text(encoding="utf-8"))
+    image_op = next(o for o in ops if o["kind"] == "bs.image" and o["outcome"] == "delete_remote")
+    image_op["remote_preimage"]["uploaded_to"] = None
+    ops_path.write_text(json.dumps(ops), encoding="utf-8")
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 1, result.output
+    assert "diagram.png" in result.output
+    assert bs_server.store.gallery == []  # never silently restored into a guessed page

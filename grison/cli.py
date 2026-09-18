@@ -50,6 +50,7 @@ from grison.engine.undo import snapshot_kinds as engine_snapshot_kinds
 from grison.errors import GrisonError
 from grison.fsio import atomic_write_text, ensure_private_dir, open_private
 from grison.index import Index, IndexKind
+from grison.markdown.refscan import scan_refs
 from grison.model import FindingType
 from grison.remote.bookstack import BookStackClient
 from grison.remote.bootstrap import bootstrap_workspace
@@ -1055,6 +1056,7 @@ def _run_wiki_phase(
             book_id=book_id,
             page_ids=page_ids,
             anchor_page_id=anchor_page_id,
+            anchor_for=_anchor_for_book(root, index, book_dir),
         )
         result = engine_sync_fileset(
             root,
@@ -1105,6 +1107,41 @@ def _book_dirs(index: Index) -> dict[PurePosixPath, int]:
         for p, rec in index.records.items()
         if rec.kind is IndexKind.BS_BOOK
     }
+
+
+def _anchor_for_book(root: Path, index: Index, book_dir: PurePosixPath) -> dict[str, int]:
+    """BRIEF C: a new gallery upload anchors to the page that already embeds it, not
+    always the book's first page — :class:`~grison.adapters.bs_images.BsImagesAdapter`
+    only falls back to ``anchor_page_id`` for a file no page references yet. Scans
+    every ALREADY-INDEXED page's on-disk body (this runs before the pages phase, so
+    a page this same sync is about to create has no id yet to anchor with — the
+    first-page fallback covers that case too) with the token-based
+    :mod:`grison.markdown.refscan`, never a regex, for an embed resolving to
+    ``images/<file>`` (book root) or ``../images/<file>`` (one chapter down —
+    REF-007's two accepted spellings). Filename -> the id of the first such page, by
+    path, sorted for determinism; a later page's reference to an already-claimed
+    filename doesn't override the first."""
+    indexed_pages = sorted(
+        (PurePosixPath(p), rec.id)
+        for p, rec in index.records.items()
+        if rec.kind is IndexKind.BS_PAGE and PurePosixPath(p).is_relative_to(book_dir)
+    )
+    out: dict[str, int] = {}
+    for path, page_id in indexed_pages:
+        full = root / path
+        if not full.is_file():
+            continue
+        for ref in scan_refs(full.read_text(encoding="utf-8")):
+            if ref.kind != "embed":
+                continue
+            name = None
+            if ref.path.startswith("images/"):
+                name = ref.path[len("images/") :]
+            elif ref.path.startswith("../images/"):
+                name = ref.path[len("../images/") :]
+            if name is not None and name not in out:
+                out[name] = page_id
+    return out
 
 
 def _report_dirs_for_status(index: Index) -> dict[PurePosixPath, int]:

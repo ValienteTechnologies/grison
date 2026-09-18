@@ -77,7 +77,14 @@ def _remote_body_to_local(body: str, gallery_by_url: dict[str, str], *, in_chapt
 
 def _gallery_by_name_for_book(ctx: BSContext, book_id: int) -> dict[str, str]:
     """filename -> absolute gallery URL, for every gallery image belonging to
-    ``book_id`` (:func:`grison.adapters.bs_images.page_ids_in_book`)."""
+    ``book_id`` (:func:`grison.adapters.bs_images.page_ids_in_book`) — cached on
+    ``ctx.gallery_cache`` for the rest of this sync run. ``fetch_remote``/
+    ``refetch``/``create``/``update`` all resolve a book's gallery through this ONE
+    call site, so a book with several pages pays for the page-list + gallery-list
+    fetch once per run, not once per page pushed."""
+    cached = ctx.gallery_cache.get(book_id)
+    if cached is not None:
+        return cached
     from grison.adapters.bs_images import page_ids_in_book
 
     page_ids = page_ids_in_book(ctx.client, ctx, book_id)
@@ -89,6 +96,7 @@ def _gallery_by_name_for_book(ctx: BSContext, book_id: int) -> dict[str, str]:
         url = row.get("url") or ""
         if name and url:
             out[name] = url
+    ctx.gallery_cache[book_id] = out
     return out
 
 
@@ -189,7 +197,6 @@ class BsPageAdapter:
         rows = ctx.client.fetch_pages()
         books_by_id = ctx.books_by_id
         chapters_by_id = ctx.chapters_by_id
-        gallery_cache: dict[int, dict[str, str]] = {}
         out: dict[int, RemoteRecord] = {}
         for row in rows:
             pid = row["id"]
@@ -206,7 +213,7 @@ class BsPageAdapter:
                 continue
             detail = ctx.client.fetch_page(pid)
             data = _normalize(detail, books_by_id, chapters_by_id)
-            self._localize_gallery_urls(ctx, data, gallery_cache)
+            self._localize_gallery_urls(ctx, data)
             out[pid] = RemoteRecord(id=pid, data=data, witness=witness)
         # Recycle-bin awareness (BRIEF B) is scoped to records grison already knows
         # about — an indexed id whose remote copy is now in the bin gets the SKIP
@@ -234,25 +241,22 @@ class BsPageAdapter:
         except BookStackError:
             return None
         data = _normalize(detail, ctx.books_by_id, ctx.chapters_by_id)
-        self._localize_gallery_urls(ctx, data, {})
+        self._localize_gallery_urls(ctx, data)
         return RemoteRecord(id=id, data=data,
                             witness={"updated_at": detail.get("updated_at"),
                                     "revision_count": detail.get("revision_count")})
 
-    def _localize_gallery_urls(
-        self, ctx: BSContext, data: dict[str, Any], gallery_cache: dict[int, dict[str, str]],
-    ) -> None:
+    def _localize_gallery_urls(self, ctx: BSContext, data: dict[str, Any]) -> None:
         """Mutates ``data["markdown"]`` in place: absolute gallery URL -> the one
         correct local spelling for this page's location (D9/BRIEF task C — see
         module docstring). Cheap no-op when the body has no gallery image line at
-        all (the regex never matches)."""
+        all (the regex never matches). ``_gallery_by_name_for_book`` does its own
+        per-run caching on ``ctx.gallery_cache`` now, so every caller just asks it
+        directly instead of threading a call-local cache dict through."""
         book_id = data.get("book_id")
         if book_id is None or "images/" not in (data.get("markdown") or ""):
             return
-        gallery_by_name = gallery_cache.get(book_id)
-        if gallery_by_name is None:
-            gallery_by_name = _gallery_by_name_for_book(ctx, book_id)
-            gallery_cache[book_id] = gallery_by_name
+        gallery_by_name = _gallery_by_name_for_book(ctx, book_id)
         gallery_by_url = {url: name for name, url in gallery_by_name.items()}
         data["markdown"] = _remote_body_to_local(
             data["markdown"], gallery_by_url, in_chapter=data.get("chapter_id") is not None,
@@ -327,7 +331,7 @@ class BsPageAdapter:
             tags=_tags_to_remote(doc.tags), priority=doc.priority,
         )
         data = _normalize(rec, ctx.books_by_id, ctx.chapters_by_id)
-        self._localize_gallery_urls(ctx, data, {})
+        self._localize_gallery_urls(ctx, data)
         return RemoteRecord(id=rec["id"], data=data,
                             witness={"updated_at": rec.get("updated_at"),
                                     "revision_count": rec.get("revision_count")})
@@ -346,7 +350,7 @@ class BsPageAdapter:
             priority=doc.priority, tags=_tags_to_remote(doc.tags),
         ) or ctx.client.fetch_page(id)
         data = _normalize(rec, ctx.books_by_id, ctx.chapters_by_id)
-        self._localize_gallery_urls(ctx, data, {})
+        self._localize_gallery_urls(ctx, data)
         return RemoteRecord(id=id, data=data,
                             witness={"updated_at": rec.get("updated_at"),
                                     "revision_count": rec.get("revision_count")})

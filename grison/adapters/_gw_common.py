@@ -39,6 +39,12 @@ class GWContext:
 
     client: GhostwriterClient
     report_dirs: dict[PurePosixPath, int] = field(default_factory=dict)
+    #: The org-wide evidence-row cache (:meth:`all_evidence`) — private: every
+    #: reader/writer goes through the methods below so the cache is never read
+    #: half-populated or mutated inconsistently with what the server actually holds.
+    _evidence_cache: list[dict[str, Any]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @classmethod
     def build(cls, client: GhostwriterClient, index: Index) -> GWContext:
@@ -57,6 +63,39 @@ class GWContext:
             if rid is not None:
                 return rid
         return None
+
+    def all_evidence(self) -> list[dict[str, Any]]:
+        """Every evidence row across the whole org — Ghostwriter has no
+        report-scoped evidence query, so :class:`~grison.adapters.gw_evidence.
+        GwEvidenceAdapter` used to pay for this org-wide fetch once per report's
+        ``list_remote`` call AND once per uploaded file's friendly-name de-dup
+        check. Fetched at most once per sync run and cached here; kept accurate
+        through the run by :meth:`evidence_cache_upsert`/:meth:`evidence_cache_remove`,
+        which the adapter calls as it creates/updates/deletes rows, so within-run
+        de-dup still sees names uploaded a moment ago without a second fetch."""
+        if self._evidence_cache is None:
+            self._evidence_cache = list(self.client.fetch_evidence())
+        return self._evidence_cache
+
+    def evidence_cache_upsert(self, row: dict[str, Any]) -> None:
+        """Record a just-created/updated evidence row locally. A no-op before the
+        cache exists (before the first :meth:`all_evidence` call) — the eventual
+        real fetch will already include it, so there is nothing to reconcile."""
+        if self._evidence_cache is None:
+            return
+        for i, existing in enumerate(self._evidence_cache):
+            if existing.get("id") == row.get("id"):
+                self._evidence_cache[i] = row
+                return
+        self._evidence_cache.append(row)
+
+    def evidence_cache_remove(self, evidence_id: int) -> None:
+        """The delete-side counterpart of :meth:`evidence_cache_upsert`."""
+        if self._evidence_cache is None:
+            return
+        self._evidence_cache = [
+            r for r in self._evidence_cache if r.get("id") != evidence_id
+        ]
 
 
 @dataclass

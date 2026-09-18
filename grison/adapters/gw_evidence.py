@@ -31,6 +31,7 @@ from typing import Any
 
 from grison.adapters._gw_common import GWContext
 from grison.engine.model import RemoteRecord
+from grison.errors import GrisonError
 
 
 def _row_to_data(row: dict[str, Any]) -> dict[str, Any]:
@@ -56,7 +57,7 @@ class GwEvidenceAdapter:
     supports_caption: bool = True
 
     def list_remote(self, ctx: GWContext) -> dict[int, RemoteRecord]:
-        rows = ctx.client.fetch_evidence()
+        rows = ctx.all_evidence()
         out: dict[int, RemoteRecord] = {}
         for row in rows:
             if row.get("reportId") != self.report_id:
@@ -79,6 +80,7 @@ class GwEvidenceAdapter:
         )
         row = ctx.client.evidence_by_pk(eid)
         assert row is not None
+        ctx.evidence_cache_upsert(row)
         return RemoteRecord(id=eid, data=_row_to_data(row))
 
     def _dedupe_friendly_name(self, ctx: GWContext, stem: str) -> str:
@@ -86,9 +88,13 @@ class GwEvidenceAdapter:
 
     @staticmethod
     def _dedupe_friendly_name_for(ctx: GWContext, report_id: int, stem: str) -> str:
+        # ctx.all_evidence() fetches org-wide evidence at most once per sync run
+        # (GWContext's own cache) — every upload in this run keeps that cache
+        # updated (see upload()/restore()'s evidence_cache_upsert calls), so this
+        # de-dup check never re-fetches, even across many uploads in one run.
         existing = {
             r.get("friendlyName") or ""
-            for r in ctx.client.fetch_evidence()
+            for r in ctx.all_evidence()
             if r.get("reportId") == report_id
         }
         if stem not in existing:
@@ -105,10 +111,12 @@ class GwEvidenceAdapter:
         ctx.client.update_evidence(id, {"caption": caption, "description": description})
         row = ctx.client.evidence_by_pk(id)
         assert row is not None
+        ctx.evidence_cache_upsert(row)
         return RemoteRecord(id=id, data=_row_to_data(row))
 
     def delete(self, ctx: GWContext, id: int) -> None:
         ctx.client.delete_evidence(id)
+        ctx.evidence_cache_remove(id)
 
     def refetch(self, ctx: GWContext, id: int) -> RemoteRecord | None:
         row = ctx.client.evidence_by_pk(id)
@@ -121,8 +129,17 @@ class GwEvidenceAdapter:
         ``grison.engine.undo.replay``'s adapter map holds one entry per bare kind
         string, so the instance replaying this op may be bound to a different
         report than the one this evidence actually came from (see
-        :func:`grison.engine.filesets._preimage`'s docstring)."""
-        report_id = preimage.get("reportId", self.report_id)
+        :func:`grison.engine.filesets._preimage`'s docstring). A preimage with no
+        ``reportId`` at all can only mean a corrupt or pre-D1 snapshot — grison never
+        guesses a scope by falling back to ``self.report_id``, which would silently
+        restore the row into whichever report this replay's adapter instance happens
+        to be bound to."""
+        report_id = preimage.get("reportId")
+        if report_id is None:
+            raise GrisonError(
+                f"evidence snapshot for {preimage.get('filename', '(unknown file)')!r} has "
+                "no reportId recorded — cannot determine which report to restore it into"
+            )
         body = base64.b64decode(preimage["body_b64"])
         friendly = self._dedupe_friendly_name_for(
             ctx, report_id, PurePosixPath(preimage["filename"]).stem
@@ -135,6 +152,7 @@ class GwEvidenceAdapter:
         )
         row = ctx.client.evidence_by_pk(eid)
         assert row is not None
+        ctx.evidence_cache_upsert(row)
         return RemoteRecord(id=eid, data=_row_to_data(row))
 
     def remote_label(self, data: Any) -> str:

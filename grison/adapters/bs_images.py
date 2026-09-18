@@ -43,6 +43,7 @@ from typing import Any
 
 from grison.adapters._bs_common import BSContext
 from grison.engine.model import RemoteRecord
+from grison.errors import GrisonError
 from grison.remote.bookstack import BookStackClient
 
 
@@ -145,11 +146,16 @@ class BsImagesAdapter:
         restore` — see :func:`grison.engine.filesets._preimage`'s docstring). The
         anchor is cosmetic (module docstring) but must still be a real page id in
         the ORIGINAL book, which ``uploaded_to`` — carried through unchanged in the
-        preimage — already is."""
-        anchor = preimage.get("uploaded_to") or self.anchor_page_id
+        preimage — already is; grison never falls back to ``self.anchor_page_id``
+        (this replaying instance's own book may not even be the right one) — a
+        preimage with no ``uploaded_to`` at all (a corrupt or pre-existing snapshot)
+        is refused outright."""
+        anchor = preimage.get("uploaded_to")
         if anchor is None:
-            raise RuntimeError("no anchor page id recorded in the preimage or the adapter — "
-                               "cannot restore this gallery image")
+            raise GrisonError(
+                f"image snapshot for {preimage.get('filename', '(unknown file)')!r} has no "
+                "uploaded_to page recorded — cannot determine which book to restore it into"
+            )
         body = base64.b64decode(preimage["body_b64"])
         row = ctx.client.upload_gallery_image(
             uploaded_to=anchor, filename=preimage["filename"], content=body,

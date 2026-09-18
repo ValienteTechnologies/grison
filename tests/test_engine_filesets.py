@@ -313,3 +313,112 @@ def test_pull_then_clean_sync_of_a_purely_remote_file_downloads_it_only_once(
     assert [p.outcome for p in result2.plans] == [Outcome.CLEAN]
     assert store.fetch_body_calls == after_pull
     assert index2.get(str(FOLDER / "shot.png")).id == rid
+
+
+# --- pre-write re-fetch guard (ENGINE.md §3) ---------------------------------
+
+
+@dataclass
+class DriftingAdapter(FakeFileSetAdapter):
+    """Wraps :meth:`FakeFileSetAdapter.refetch` to mutate the remote row's caption
+    the FIRST time it's called — simulating a concurrent remote edit discovered
+    exactly where the pre-write re-fetch guard looks for it (``refetch``), never
+    at classification time (which already read the pre-drift row via
+    ``list_remote``). ``refetch`` is the ONE call site the guard uses before any
+    remote-destructive write (reupload/caption-push/delete-remote — see
+    :mod:`grison.engine.filesets`'s own ``_refetch_guard``), so this is enough to
+    prove the guard fires for every one of them without a real server."""
+
+    drift_applied: bool = False
+    drift_caption: str = "changed concurrently"
+
+    def refetch(self, ctx: Any, id: int) -> RemoteRecord | None:
+        if not self.drift_applied:
+            self.drift_applied = True
+            row = self.store.rows.get(id)
+            if row is not None:
+                row["caption"] = self.drift_caption
+        return super().refetch(ctx, id)
+
+
+def test_caption_push_drift_since_classification_is_a_collision_not_an_overwrite(
+    tmp_path: Path,
+) -> None:
+    """The caption-push apply step used to only check ``fresh is None`` — a
+    caption that changed on the server between classification and the write was
+    silently overwritten. Now it goes through the SAME pre-write re-fetch guard
+    the document engine uses (:func:`grison.engine.apply.refetch_guard`)."""
+    store = FakeFileStore()
+    adapter = DriftingAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot)
+    index.save()
+    rid = next(iter(store.rows))
+    assert store.rows[rid]["caption"] == ""
+
+    doc_path = PurePosixPath("findings/reports/r1/f.md")
+    doc_body = "# F\n\n![Login screen](evidence/shot.png)\n"
+    index2, state2, snapshot2 = _env(tmp_path)
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
+                          snapshot=snapshot2, doc_bodies={doc_path: doc_body})
+
+    assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
+    assert store.update_caption_calls == 0  # refused, never overwrote the concurrent edit
+    assert store.rows[rid]["caption"] == "changed concurrently"  # concurrent edit preserved
+
+
+def test_reupload_drift_since_classification_is_a_collision_not_an_overwrite(
+    tmp_path: Path,
+) -> None:
+    """The re-upload apply step (bytes changed under the same name) used to only
+    check ``fresh is None`` before deleting the old row — a concurrent remote
+    edit (or the row vanishing) between classification and the write went
+    undetected. Now it collides instead of uploading/deleting anything."""
+    store = FakeFileStore()
+    adapter = DriftingAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot)
+    index.save()
+    old_id = next(iter(store.rows))
+
+    atomic_write_bytes(tmp_path / FOLDER / "shot.png", b"v2-different-bytes")
+    index2, state2, snapshot2 = _env(tmp_path)
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
+                          snapshot=snapshot2)
+
+    assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
+    assert store.upload_calls == 1  # only the original upload — no reupload happened
+    assert store.delete_calls == 0  # old row never deleted
+    assert old_id in store.rows
+    assert store.rows[old_id]["caption"] == "changed concurrently"  # concurrent edit preserved
+    assert index2.get(str(FOLDER / "shot.png")).id == old_id  # index untouched
+
+
+def test_delete_remote_drift_since_classification_is_a_collision_not_a_delete(
+    tmp_path: Path,
+) -> None:
+    """The delete-remote apply step used to only check ``fresh is None`` — a
+    concurrent remote edit between classification and the write was silently
+    deleted along with everything else. Now it collides instead."""
+    store = FakeFileStore()
+    adapter = DriftingAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot)
+    index.save()
+    rid = next(iter(store.rows))
+
+    (tmp_path / FOLDER / "shot.png").unlink()
+    index2, state2, snapshot2 = _env(tmp_path)
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
+                          snapshot=snapshot2)
+
+    assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
+    assert store.delete_calls == 0
+    assert rid in store.rows
+    assert store.rows[rid]["caption"] == "changed concurrently"  # concurrent edit preserved

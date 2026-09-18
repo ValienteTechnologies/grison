@@ -15,12 +15,15 @@ document. A file-set record's body is arbitrary bytes (an image is not always
 UTF-8-decodable), so this module re-implements the same shape of loop (classify,
 change guard, pre-write re-fetch, undo, bookkeeping) directly against bytes,
 reusing every other primitive verbatim: :func:`grison.engine.classify.classify`,
-:func:`grison.engine.identity.pair`, :class:`grison.engine.state.StateStore`,
-:class:`grison.engine.undo.Snapshot`/:class:`~grison.engine.undo.UndoOp`,
-:class:`grison.index.Index`, and the same :class:`~grison.engine.model.Outcome`/
-:class:`~grison.engine.model.Event`/:class:`~grison.engine.model.KindSummary`
-types — so ``grison status``/``--json`` and ``grison undo`` treat a file set
-exactly like any other engine-managed kind. This is the "seam" ENGINE.md's
+:func:`grison.engine.identity.pair`, :func:`grison.engine.apply.refetch_guard` (the
+pre-write re-fetch guard itself — same drift-is-a-collision semantics, same event
+wording, just handed this module's own bytes-aware refetch/hash functions instead
+of an :class:`~grison.engine.adapter.Adapter`'s), :class:`grison.engine.state.
+StateStore`, :class:`grison.engine.undo.Snapshot`/:class:`~grison.engine.undo.
+UndoOp`, :class:`grison.index.Index`, and the same :class:`~grison.engine.model.
+Outcome`/:class:`~grison.engine.model.Event`/:class:`~grison.engine.model.
+KindSummary` types — so ``grison status``/``--json`` and ``grison undo`` treat a
+file set exactly like any other engine-managed kind. This is the "seam" ENGINE.md's
 package list calls out: "a record type whose body is bytes, not a document".
 
 Two independent rules (D1, restated generically):
@@ -78,6 +81,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
+from grison.engine.apply import refetch_guard
 from grison.engine.classify import classify
 from grison.engine.identity import Missing, Unindexed, pair
 from grison.engine.model import (
@@ -492,6 +496,19 @@ def _pairing_plans(
     return plans, paired_missing, paired_unindexed
 
 
+def _wrap_remote(row: RemoteRecord | None, canon_hash: str | None) -> RemoteRecord | None:
+    """Carry classification's own canonical hash on the ``Plan.remote`` it hands to
+    ``_apply_*`` — ``cached_hash`` is exactly the field
+    :func:`grison.engine.apply.refetch_guard` (via this module's own ``_refetch_guard``
+    below) compares a fresh re-fetch against, the same idiom
+    :func:`grison.engine.apply._remote_hash` uses for a document adapter's
+    skip-detail-fetch placeholder."""
+    if row is None:
+        return None
+    return RemoteRecord(id=row.id, data=row.data, witness=row.witness, cached_hash=canon_hash,
+                        losses=row.losses)
+
+
 def _classify_one(  # noqa: PLR0913
     adapter: FileSetAdapter, ctx: Any, path: PurePosixPath, rid: int, body: bytes,
     remote_rows: dict[int, RemoteRecord], state: StateStore, options: RunOptions,
@@ -540,12 +557,13 @@ def _classify_one(  # noqa: PLR0913
         local_hash=local_canon_hash, remote_hash=remote_canon_hash, base_hash=base_hash,
         force_local=path in options.force_local, force_remote=path in options.force_remote,
     )
+    remote = _wrap_remote(row, remote_canon_hash)
     if outcome is Outcome.PUSH and remote_body_hash is not None and remote_body_hash != local_hash:
         # bytes changed under the same name — never a metadata-only update
         # (D1): re-upload as a new row instead (see _apply_reupload).
-        return Plan(kind=kind, outcome=Outcome.MOVE_EDIT, path=path, id=rid, remote=row,
+        return Plan(kind=kind, outcome=Outcome.MOVE_EDIT, path=path, id=rid, remote=remote,
                    base_hash=base_hash, reason="bytes changed under the same name")
-    return Plan(kind=kind, outcome=outcome, path=path, id=rid, remote=row, base_hash=base_hash)
+    return Plan(kind=kind, outcome=outcome, path=path, id=rid, remote=remote, base_hash=base_hash)
 
 
 def _classify_missing(
@@ -570,7 +588,8 @@ def _classify_missing(
         local_hash=None, remote_hash=remote_hash, base_hash=base_hash,
         force_local=path in options.force_local, force_remote=path in options.force_remote,
     )
-    return Plan(kind=kind, outcome=outcome, path=path, id=rid, remote=row, base_hash=base_hash)
+    return Plan(kind=kind, outcome=outcome, path=path, id=rid,
+               remote=_wrap_remote(row, remote_hash), base_hash=base_hash)
 
 
 def _apply_change_guard(plans: list[Plan], options: RunOptions) -> None:
@@ -594,6 +613,35 @@ def _apply_change_guard(plans: list[Plan], options: RunOptions) -> None:
     if d > _MASS_CHANGE_MIN and d > options.mass_change_ratio * total:
         for p in local_writes:
             p.outcome = Outcome.WITHHELD
+
+
+def _refetch_guard(
+    ctx: Any, adapter: FileSetAdapter, p: Plan, state: StateStore, options: RunOptions,
+) -> tuple[RemoteRecord | None, bool]:
+    """The file-set binding of :func:`grison.engine.apply.refetch_guard` — same
+    pre-write drift check every remote-destructive write (re-upload, caption push,
+    delete-remote) must run immediately before its write, not just the raw
+    ``fresh is None`` check these used to do. Bytes can never silently change
+    under an id (D1: a body change always mints a new id — see
+    ``_apply_reupload``), so the fresh comparison only needs the row's current
+    caption/description; the body-hash half of the canonical digest is the one
+    already cached from classification (:func:`_cached_body_hash`), reused as-is
+    rather than re-downloaded."""
+    if p.id is None:
+        return None, False
+    rid = p.id
+    body_hash = _cached_body_hash(state, adapter.kind, rid) or ""
+    forced = p.path is not None and p.path in options.force_local
+    return refetch_guard(
+        refetch=lambda: adapter.refetch(ctx, rid),
+        expected_hash=p.remote.cached_hash if p.remote is not None else None,
+        canonical_hash=lambda fresh: digest(_canonical(
+            body_hash=body_hash, caption=fresh.data.get("caption", ""),
+            description=fresh.data.get("description", ""),
+            supports_caption=adapter.supports_caption,
+        )),
+        forced=forced,
+    )
 
 
 def _apply_one(  # noqa: PLR0913
@@ -665,7 +713,7 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
         _apply_create(ctx, adapter, p, index, state, snapshot, events, dry, local_files, captions)
         return
     if p.outcome is Outcome.MOVE_EDIT:
-        _apply_reupload(ctx, adapter, p, index, state, snapshot, events, dry, local_files,
+        _apply_reupload(ctx, adapter, p, index, state, snapshot, events, options, local_files,
                         captions)
         return
     if p.outcome is Outcome.PUSH:
@@ -739,7 +787,7 @@ def _preimage(adapter: FileSetAdapter, ctx: Any, row: RemoteRecord) -> dict[str,
 
 def _apply_reupload(  # noqa: PLR0913
     ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], dry: bool, local_files: dict[str, bytes],
+    snapshot: Snapshot, events: list[Event], options: RunOptions, local_files: dict[str, bytes],
     captions: dict[str, ReferenceCaption],
 ) -> None:
     """Bytes changed under the same name (D1): a new remote row, the old one
@@ -747,13 +795,25 @@ def _apply_reupload(  # noqa: PLR0913
     local caption opinion also changed in this same sync, it rides along on the
     re-upload (a fresh row's caption is set once, at create time — see
     ``upload``'s contract — there is no separate metadata PUSH to follow up
-    with, since the plan that would have carried it was replaced by this one)."""
+    with, since the plan that would have carried it was replaced by this one).
+
+    Guarded by the SAME pre-write re-fetch check every remote-destructive write
+    gets (:func:`_refetch_guard`, ENGINE.md §3): a caption/description change (or
+    the row vanishing outright) on the server since classification becomes a
+    COLLISION — nothing uploaded, nothing deleted — instead of silently
+    re-uploading over a change grison never saw."""
     assert p.path is not None and p.id is not None
+    dry = options.dry_run
+    fresh, drifted = _refetch_guard(ctx, adapter, p, state, options)
+    if drifted:
+        p.outcome = Outcome.COLLISION
+        events.append(_event("collision", path=p.path,
+                             detail="changed on the server since classification"))
+        return
     if dry:
         events.append(_event("push", path=p.path, detail="bytes changed — new remote row",
                              dry_run=True))
         return
-    fresh = adapter.refetch(ctx, p.id)
     body = local_files[p.path.name]
     opinion = captions.get(p.path.name)
     if opinion is not None and opinion.has_opinion:
@@ -784,12 +844,23 @@ def _apply_caption_push(  # noqa: PLR0913
     ctx: Any, adapter: FileSetAdapter, p: Plan, state: StateStore, snapshot: Snapshot,
     events: list[Event], options: RunOptions, captions: dict[str, ReferenceCaption],
 ) -> None:
+    """Guarded by the SAME pre-write re-fetch check every remote-destructive write
+    gets (:func:`_refetch_guard`, ENGINE.md §3): a caption/description that changed
+    on the server since classification (or the row being gone outright) is a
+    COLLISION with the same wording the document engine uses, not a
+    push-specific "deleted on the server" message — never a metadata write over a
+    change grison never saw."""
     assert p.id is not None and p.path is not None
     dry = options.dry_run
-    fresh = adapter.refetch(ctx, p.id)
-    if fresh is None:
+    fresh, drifted = _refetch_guard(ctx, adapter, p, state, options)
+    if drifted or fresh is None:
+        # fresh is None only reachable here when force-local overrode drifted for a
+        # row that's now gone entirely (refetch_guard's own "not forced" rule) — a
+        # caption push has no "recreate" fallback the way a reupload/delete-remote
+        # does (there is nothing to attach the caption to), so it collides too.
         p.outcome = Outcome.COLLISION
-        events.append(_event("collision", path=p.path, detail="deleted on the server"))
+        events.append(_event("collision", path=p.path,
+                             detail="changed on the server since classification"))
         return
     if dry:
         events.append(_event("push", path=p.path, detail="caption/description", dry_run=True))
@@ -852,9 +923,18 @@ def _apply_delete_remote(
     ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
     snapshot: Snapshot, events: list[Event], options: RunOptions,
 ) -> None:
+    """Guarded by the SAME pre-write re-fetch check every remote-destructive write
+    gets (:func:`_refetch_guard`, ENGINE.md §3): a row that changed on the server
+    since classification is a COLLISION — nothing deleted — with the same wording
+    the document engine uses, not a raw ``fresh is None`` check."""
     assert p.id is not None
     dry = options.dry_run
-    fresh = adapter.refetch(ctx, p.id)
+    fresh, drifted = _refetch_guard(ctx, adapter, p, state, options)
+    if drifted:
+        p.outcome = Outcome.COLLISION
+        events.append(_event("collision", path=p.path,
+                             detail="changed on the server since classification"))
+        return
     if dry:
         events.append(_event("delete-remote", path=p.path, dry_run=True))
         return
