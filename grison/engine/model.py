@@ -111,6 +111,13 @@ class RemoteRecord:
     unchanged since the last sync — the engine uses it in place of
     ``digest(canonical_remote(data))`` so a provably-clean record costs zero detail
     fetches. ``None`` (the default) means "hash it normally"."""
+    losses: list[str] = field(default_factory=list)
+    """Informational messages an adapter wants surfaced alongside this record (e.g.
+    a converter's ``on_loss`` callback firing while turning remote content into
+    local text — a dropped styling construct, a canonicalized attribute) — opaque
+    text to the engine, never interpreted, only carried from wherever the adapter
+    built this record to :func:`grison.engine.events.emit_losses`, which the apply
+    loop calls at every point it writes an adapter's rendered text to disk."""
 
 
 @dataclass

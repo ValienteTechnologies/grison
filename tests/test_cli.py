@@ -70,11 +70,13 @@ def _set_fake_ghostwriter_creds(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _stub_sync_phases(monkeypatch: pytest.MonkeyPatch, run_sync=None, sync_reports=None) -> None:
     import grison.cli as cli_mod
-    from grison.remote.reports import ReportResult
+    from grison.cli import ReportsPhaseResult
     from grison.remote.sync import SyncResult
 
     monkeypatch.setattr(cli_mod, "run_sync", run_sync or (lambda *a, **k: SyncResult()))
-    monkeypatch.setattr(cli_mod, "sync_reports", sync_reports or (lambda *a, **k: ReportResult()))
+    monkeypatch.setattr(
+        cli_mod, "_run_reports_phase", sync_reports or (lambda *a, **k: ReportsPhaseResult())
+    )
 
 
 def test_help_lists_verbs() -> None:
@@ -144,7 +146,7 @@ def test_sync_exit_code_reflects_result_errors(
     """A batch that finishes with isolated per-record errors must still exit non-zero —
     a green summary line next to a swallowed error would be misleading."""
     import grison.cli as cli_mod
-    from grison.remote.reports import ReportResult
+    from grison.cli import ReportsPhaseResult
     from grison.remote.sync import SyncResult
 
     monkeypatch.chdir(tmp_path)
@@ -158,13 +160,11 @@ def test_sync_exit_code_reflects_result_errors(
     ):
         return SyncResult(errors=["findings/library/bad.md: boom"])
 
-    def fake_sync_reports(
-        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
-    ):
-        return ReportResult()
+    def fake_reports_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        return ReportsPhaseResult()
 
     monkeypatch.setattr(cli_mod, "run_sync", fake_run_sync)
-    monkeypatch.setattr(cli_mod, "sync_reports", fake_sync_reports)
+    monkeypatch.setattr(cli_mod, "_run_reports_phase", fake_reports_phase)
     r = _runner.invoke(app, ["sync"])
     assert r.exit_code == 1
     assert "boom" in r.output
@@ -177,7 +177,7 @@ def test_sync_warnings_alone_do_not_flip_exit_code(
     recomputed cvss score) must print them dimmed but still exit 0 — warnings are
     visibility, not a failure signal."""
     import grison.cli as cli_mod
-    from grison.remote.reports import ReportResult
+    from grison.cli import ReportsPhaseResult
     from grison.remote.sync import SyncResult
 
     monkeypatch.chdir(tmp_path)
@@ -191,13 +191,11 @@ def test_sync_warnings_alone_do_not_flip_exit_code(
     ):
         return SyncResult(warnings=["findings/library/f.md: cvss score 5.0 disagreed..."])
 
-    def fake_sync_reports(
-        root, client, *, dry_run=False, force_local=None, force_remote=None, on_event=None
-    ):
-        return ReportResult()
+    def fake_reports_phase(root, client, *, dry_run=False, force_local=None, force_remote=None):
+        return ReportsPhaseResult()
 
     monkeypatch.setattr(cli_mod, "run_sync", fake_run_sync)
-    monkeypatch.setattr(cli_mod, "sync_reports", fake_sync_reports)
+    monkeypatch.setattr(cli_mod, "_run_reports_phase", fake_reports_phase)
     r = _runner.invoke(app, ["sync"])
     assert r.exit_code == 0
     assert "warning:" in r.output and "cvss score" in r.output

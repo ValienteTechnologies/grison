@@ -209,6 +209,12 @@ REP_BAD_NOTE = _r(
     "an indexed (mirrored) note may only have 'author'/'timestamp' frontmatter; a new, "
     "unindexed note must have no frontmatter fence at all",
 )
+REP_UNKNOWN_NARRATIVE_FIELD = _r(
+    "REP-003", "a narrative/<field>.md file's field is not in this report's "
+    "extraFieldSpec (per .report.yml's recorded narrative_order)",
+    "remove the file, rename it to a real field, or (if the field is genuinely new "
+    "in Ghostwriter) run sync once to let .report.yml pick it up first",
+)
 
 # --- WIKI: wiki page documents ------------------------------------------------------
 

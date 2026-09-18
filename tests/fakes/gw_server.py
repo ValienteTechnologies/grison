@@ -209,6 +209,7 @@ class GWStore:
         self.tagged_items: list[dict] = []  # {content_type_id, object_id, tag: {name}}
         self.users: list[dict] = []
         self.project_notes: list[dict] = []
+        self.extra_field_specs: list[dict] = []
         self.whoami_username = "grison-lab"
         self._next_ids: dict[str, int] = {}
         self.operation_log: list[LoggedOperation] = []
@@ -247,7 +248,8 @@ class GWStore:
             {"id": 40, "appLabel": "reporting", "model": "finding"},
             {"id": 41, "appLabel": "reporting", "model": "reportfindinglink"},
         ]
-        self.users = [{"id": 1, "username": self.whoami_username}]
+        self.users = [{"id": 1, "username": self.whoami_username, "name": ""}]
+        self.seed_report_extra_field_specs()
 
     def seed_finding(self, **fields: Any) -> dict:
         row = {
@@ -343,6 +345,46 @@ class GWStore:
         }
         row.update(fields)
         self.reports.append(row)
+        return row
+
+    _DEFAULT_REPORT_FIELDS = (
+        "about_us", "executive_summary", "attack_chain", "methodology", "disclaimer",
+        "scope_text", "appendix",
+    )
+
+    def seed_report_extra_field_specs(self, fields: tuple[str, ...] | None = None) -> list[dict]:
+        """The Report model's instance-defined rich-text ``extraFieldSpec`` rows —
+        production-shaped by default (the real lab's own 7 fields, in the same
+        order: ``about_us, executive_summary, attack_chain, methodology,
+        disclaimer, scope_text, appendix`` — see ``lab/LAB.md`` and
+        ``lab/seed/seed_gw.py`` in the rework repo). Called once by
+        :meth:`seed_defaults`; a test that needs a different field set calls this
+        again after clearing ``self.extra_field_specs`` first."""
+        rows = [
+            {
+                "id": self._next_id("extraFieldSpec", start=3), "internalName": name,
+                "displayName": name.replace("_", " ").title(), "position": i + 1,
+                "targetModel": "reporting.Report",
+            }
+            for i, name in enumerate(fields or self._DEFAULT_REPORT_FIELDS)
+        ]
+        self.extra_field_specs.extend(rows)
+        return rows
+
+    def seed_project_note(self, *, project_id: int, **fields: Any) -> dict:
+        """A ``projectNote`` row, kept in sync with every seeded report's
+        denormalized ``project.comments`` list (this fake has no live relational
+        join — see the module docstring's note on dict-shaped rows)."""
+        user = fields.pop("user", {"name": "", "username": self.whoami_username})
+        row = {
+            "id": self._next_id("projectNote"), "projectId": project_id,
+            "note": "", "operatorId": 1, "timestamp": date.today().isoformat(), "user": user,
+        }
+        row.update(fields)
+        self.project_notes.append(row)
+        for rec in self.reports:
+            if (rec.get("project") or {}).get("id") == project_id:
+                rec["project"].setdefault("comments", []).append(row)
         return row
 
     def seed_tag(self, table: str, object_id: int, name: str) -> None:
@@ -529,6 +571,14 @@ class FakeGhostwriter:
             )
         if name == "report_by_pk":
             return store._by_id(store.reports, args["id"])
+        if name == "extraFieldSpec":
+            rows = [r for r in store.extra_field_specs if _matches_where(r, args.get("where"))]
+            return _apply_order_limit_offset(
+                rows, order_by=args.get("order_by"), limit=args.get("limit"),
+                offset=args.get("offset"),
+            )
+        if name == "projectNote_by_pk":
+            return store._by_id(store.project_notes, args["id"])
         if name == "findingSeverity":
             return store.finding_severities
         if name == "findingType":
@@ -624,15 +674,31 @@ class FakeGhostwriter:
             return row
         if name == "insert_projectNote_one":
             obj = args["object"]
+            username = next(
+                (u["username"] for u in store.users if u["id"] == obj.get("operatorId")), None
+            )
             row = {
                 "id": store._next_id("projectNote"),
                 "projectId": obj.get("projectId"),
                 "note": obj.get("note"),
                 "operatorId": obj.get("operatorId"),
                 "timestamp": obj.get("timestamp"),
+                "user": {"name": "", "username": username or ""},
             }
             store.project_notes.append(row)
+            for rec in store.reports:
+                if (rec.get("project") or {}).get("id") == row["projectId"]:
+                    rec["project"].setdefault("comments", []).append(row)
             return {"id": row["id"]}
+        if name == "delete_projectNote_by_pk":
+            row = store._by_id(store.project_notes, args["id"])
+            if row is not None:
+                store.project_notes.remove(row)
+                for rec in store.reports:
+                    comments = (rec.get("project") or {}).get("comments")
+                    if comments is not None:
+                        rec["project"]["comments"] = [c for c in comments if c["id"] != row["id"]]
+            return row
         if name == "generateReport":
             report = store._by_id(store.reports, args["id"])
             if report is None:

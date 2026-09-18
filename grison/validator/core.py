@@ -294,11 +294,15 @@ def _validate_report_dir(
         for ref in embeds(text, prefix="evidence"):
             embed_hits.append(_EmbedHit(ref.path, ref.path, ref.caption, rel, ref.line))
 
+    narrative_order = _read_narrative_order(abs_dir / ".report.yml")
     narrative_dir = abs_dir / "narrative"
     if narrative_dir.is_dir():
         for md_path in sorted(narrative_dir.glob("*.md")):
             rel = _rel(root, md_path)
             out.extend(_check_names(PurePosixPath(rel)))
+            if narrative_order is not None and md_path.stem not in narrative_order:
+                out.append(fail(registry.REP_UNKNOWN_NARRATIVE_FIELD, rel,
+                                f"field {md_path.stem!r} is not in {sorted(narrative_order)}"))
             ntext, read_fail = _read_text(root, rel, default_rule=registry.REP_BODY_NOT_CONVERTIBLE)
             if ntext is None:
                 out.extend([read_fail] if read_fail else [])
@@ -360,6 +364,23 @@ def _validate_report_dir(
                 out.append(fail(registry.WS_MIRROR_MALFORMED, rel, e.detail or e.kind))
 
     return out
+
+
+def _read_narrative_order(meta_path: Path) -> set[str] | None:
+    """``.report.yml``'s recorded ``narrative_order`` (REP-003's only offline source
+    of truth for "which fields are real" — the validator never contacts Ghostwriter).
+    ``None`` when there is nothing to compare against yet: no ``.report.yml`` (never
+    synced), a malformed one (``WS-010`` already reports that separately), or one
+    with an empty ``narrative_order`` — matches the "nothing recorded yet" convention
+    ``WS-009``'s digest check uses."""
+    if not meta_path.is_file():
+        return None
+    try:
+        text = meta_path.read_text(encoding="utf-8", errors="replace")
+        doc = mirrors_fmt.parse_report_meta(text, path=meta_path)
+    except FormatError:
+        return None
+    return set(doc.narrative_order) or None
 
 
 def _check_narrative_body(rel: str, text: str, evidence_dir: Path) -> list[Failure]:
@@ -724,6 +745,8 @@ def _expected_kind(rel: PurePosixPath) -> IndexKind | None:
             return IndexKind.GW_EVIDENCE
         if len(parts) == 5 and parts[3] == "notes" and parts[4].endswith(".md"):
             return IndexKind.GW_PROJECT_NOTE
+        if len(parts) == 5 and parts[3] == "narrative" and parts[4].endswith(".md"):
+            return IndexKind.GW_REPORT_SECTION
         return None
     if len(parts) >= 3 and parts[0] == "methodology" and parts[1] == "library":
         if parts[2] == ".shelves":

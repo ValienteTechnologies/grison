@@ -215,10 +215,59 @@ def test_append_only_creates_from_new_local_file() -> None:
                     append_only=True) is Outcome.CREATE
 
 
-def test_append_only_indexed_record_is_always_clean() -> None:
-    """An append-only record is never updated or deleted once created — even if its
-    local content now differs from the remote's (an edit an append-only adapter never
-    offers a push path for)."""
+def test_append_only_indexed_record_stays_clean_when_unchanged() -> None:
+    assert classify(indexed=True, local_present=True, remote_present=True,
+                    local_hash=H1, remote_hash=H1, base_hash=H1,
+                    append_only=True) is Outcome.CLEAN
+
+
+def test_append_only_indexed_record_pulls_a_remote_edit() -> None:
+    """An already-indexed append-only record classifies exactly like a read-only
+    one — ENGINE.md: "Read-only record types... only ever take PULL / PULL_NEW /
+    DELETE_LOCAL"; a remote edit to an existing mirrored note DOES pull, it is only
+    ever PUSHed/DELETE_REMOTEd that append-only forbids."""
+    assert classify(indexed=True, local_present=True, remote_present=True,
+                    local_hash=BASE, remote_hash=H2, base_hash=BASE,
+                    append_only=True) is Outcome.PULL
+
+
+def test_append_only_indexed_record_still_deletes_local() -> None:
+    assert classify(indexed=True, local_present=True, remote_present=False,
+                    local_hash=BASE, remote_hash=None, base_hash=BASE,
+                    append_only=True) is Outcome.DELETE_LOCAL
+
+
+def test_append_only_indexed_record_still_repairs() -> None:
+    assert classify(indexed=True, local_present=True, remote_present=True,
+                    local_hash=H1, remote_hash=H1, base_hash=BASE,
+                    append_only=True) is Outcome.REPAIR
+
+
+def test_append_only_indexed_record_still_forgets() -> None:
+    assert classify(indexed=True, local_present=False, remote_present=False,
+                    local_hash=None, remote_hash=None, base_hash=BASE,
+                    append_only=True) is Outcome.FORGET
+
+
+def test_append_only_never_pushes_a_local_edit() -> None:
+    """A local edit to an already-indexed append-only record (mirrored note) is
+    never a PUSH — it clamps to INVALID (the same defense-in-depth read-only
+    relies on; the real enforcement is upstream, in the validator)."""
+    assert classify(indexed=True, local_present=True, remote_present=True,
+                    local_hash=H1, remote_hash=BASE, base_hash=BASE,
+                    append_only=True) is Outcome.INVALID
+
+
+def test_append_only_never_deletes_remote() -> None:
+    """A local file deleted, remote unmodified since the last sync, would
+    otherwise be DELETE_REMOTE for a read-write kind — append-only clamps this to
+    INVALID instead (it never deletes the remote record)."""
+    assert classify(indexed=True, local_present=False, remote_present=True,
+                    local_hash=None, remote_hash=BASE, base_hash=BASE,
+                    append_only=True) is Outcome.INVALID
+
+
+def test_append_only_collision_clamps_to_invalid() -> None:
     assert classify(indexed=True, local_present=True, remote_present=True,
                     local_hash=H1, remote_hash=H2, base_hash=BASE,
-                    append_only=True) is Outcome.CLEAN
+                    append_only=True) is Outcome.INVALID

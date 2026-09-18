@@ -14,3 +14,5 @@ status:
 dates:
   creation: '2026-08-01T00:00:00Z'
   last_update: '2026-08-10T00:00:00Z'
+narrative_order:
+  - executive_summary

@@ -36,8 +36,11 @@ def test_status_before_any_sync(run_grison):
     result = run_grison("status")
 
     assert result.exit_code == 0
-    assert "findings: 0 library file(s), 0 report dir(s) — not yet engine-managed" \
-        in result.output
+    # tests changed on purpose (reports task C): findings/reports moved onto the
+    # sync engine — `grison status` now gives it a real per-record breakdown (like
+    # methodology), so the "not yet engine-managed" line is library-only.
+    assert "findings: 0 library file(s) — not yet engine-managed" in result.output
+    assert "reports: clean" in result.output
     assert "methodology: clean" in result.output
     assert "last findings sync: never" in result.output
     assert "last report sync: never" in result.output
@@ -194,7 +197,13 @@ def test_status_json_stable_shape(run_grison, bs_server):
     result = run_grison("status", "--json")
     payload = json.loads(result.output)
 
-    assert payload["findings"] == {"managed": False, "library_files": 0, "report_dirs": 0}
+    # tests changed on purpose (reports task C): reports is now its own engine-managed
+    # area with the same shape as methodology's, no longer folded into "findings".
+    assert payload["findings"] == {"managed": False, "library_files": 0}
+    assert payload["reports"]["managed"] is True
+    assert payload["reports"]["counts"] == {
+        "clean": 0, "edited": 0, "new": 0, "deleted": 0, "moved": 0, "invalid": 0, "unknown": 0,
+    }
     assert payload["methodology"]["managed"] is True
     assert payload["methodology"]["counts"] == {
         "clean": 1, "edited": 0, "new": 0, "deleted": 0, "moved": 0, "invalid": 0, "unknown": 0,

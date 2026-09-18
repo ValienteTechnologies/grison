@@ -1,11 +1,11 @@
 """Format v2 report-narrative section documents: ``findings/reports/<dir>/narrative/<field>.md``.
 
-No frontmatter — the field key is the filename stem (``report.extraFields`` is an
-instance-defined jsonb map; each key becomes one file). The body is markdown in the
-Ghostwriter vocabulary plus headings (``md_to_html(..., headings=True)`` — see
-:mod:`grison.remote.repmap`'s narrative converter mode); whether it actually converts
-is a :mod:`grison.validator` concern (needs the real converter + a report-scoped
-``RefResolver``), not this module's.
+No frontmatter — the field key is the filename stem, taken from the report's
+``extraFieldSpec`` rows (one file per instance-defined rich-text field on the Report
+model — see :mod:`grison.adapters.gw_report`). The body is markdown in the
+Ghostwriter vocabulary plus headings (``md_to_html(..., headings=True)``); whether it
+actually converts is a :mod:`grison.validator` concern (needs the real converter + a
+report-scoped ``RefResolver``), not this module's.
 """
 
 from __future__ import annotations
