@@ -47,3 +47,23 @@ def test_rep002_unindexed_note_has_frontmatter(tmp_path: Path) -> None:
     p = root / _NEW_NOTE
     p.write_text("---\nauthor: Someone\n---\n\n" + p.read_text(encoding="utf-8"))
     assert "REP-002" in rule_ids(validate_workspace(root))
+
+
+@pytest.mark.rule("REP-003")
+def test_rep003_unknown_narrative_field(tmp_path: Path) -> None:
+    root = copy_fixture(tmp_path)
+    # 14-acme-corp's .report.yml records narrative_order: [executive_summary] —
+    # a field not in that list is REP-003, offline, with no Ghostwriter contact.
+    unknown = root / "findings/reports/14-acme-corp/narrative/not_a_real_field.md"
+    unknown.write_text("Some narrative text.\n")
+    assert "REP-003" in rule_ids(validate_workspace(root))
+
+
+@pytest.mark.rule_ok("REP-003")
+def test_rep003_ok_when_no_report_yml_recorded_yet(tmp_path: Path) -> None:
+    """No .report.yml (or one with an empty narrative_order) means nothing recorded
+    to compare against yet — REP-003 never fires, same convention as WS-009's digest
+    check for a mirror that has never been generated."""
+    root = copy_fixture(tmp_path)
+    (root / "findings/reports/globex/.report.yml").unlink()
+    assert "REP-003" not in rule_ids(validate_workspace(root))

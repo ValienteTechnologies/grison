@@ -47,9 +47,16 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from graphql import GraphQLSchema, build_client_schema, execute_sync, parse, validate
+from graphql import (
+    GraphQLSchema,
+    IntrospectionQuery,
+    build_client_schema,
+    execute_sync,
+    parse,
+    validate,
+)
 
 import grison.remote.ghostwriter as gw_module
 from grison.errors import GrisonError
@@ -157,7 +164,7 @@ def check_ghostwriter_compatibility(client: GhostwriterClient, root: Path) -> No
 
 def _validate_every_operation(client: GhostwriterClient) -> None:
     raw = client.introspect_schema()
-    schema = build_client_schema(raw)
+    schema = build_client_schema(cast(IntrospectionQuery, raw))
     operations = _module_level_operations()
     for name, source in sorted(operations.items()):
         errors = validate(schema, parse(source))

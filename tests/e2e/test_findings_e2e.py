@@ -8,18 +8,14 @@ is fixed by the report-scoped evidence queries — see
 ``tests/test_gw_schema_conformance.py`` for the permanent schema-level check and
 ``lab/LAB.md`` (rework repo) for the confirmed live server error this documents.
 
-Report directories are seeded directly into ``.grison/index.json``
-(:func:`_seed_report_dir`) rather than through a real report-creation sync: the
-report/narrative/notes phase (what actually creates a ``gw.report`` index entry)
-is a DIFFERENT engine step's own responsibility, being built in a different
-worktree at the same time this one was — these tests exercise the findings
-phase's OWN adapters against a report directory that already exists and is
-already indexed, exactly the shape the findings phase always finds it in
-downstream of that other phase. (The old v1 ``grison.remote.reports`` module
-still runs in this worktree too, since it isn't this task's to touch, but it
-knows nothing about ``gw.report`` index entries — its own output would trip
-IDX-003 if these tests didn't scope validation and event assertions to
-``findings/reports/<seeded-name>/`` only.)
+Report directories come from a real ``run_grison("sync")`` now — the reports
+adapter (:mod:`grison.adapters.gw_report`) is merged in, and ``grison.cli``'s
+``sync`` command runs the report phase BEFORE the findings phase (a brand-new
+report only becomes an indexed ``gw.report`` directory during the report phase;
+see ``grison/cli.py``'s ``sync``), so a report seeded on the fake with no
+``extraFieldSpec`` rows (the default — nothing pulls for it) is enough: one sync
+creates the ``findings/reports/<slug>/`` directory + index entry AND, in the
+same run, pulls whatever findings/evidence were also seeded into it.
 """
 
 from __future__ import annotations
@@ -28,20 +24,21 @@ from pathlib import Path
 
 from grison.index import Index, IndexKind
 
-REPORT_SCOPES = [{"name": "Internal range", "scope": "10.0.0.0/24", "description": "",
-                   "disallowed": False, "requiresCaution": False}]
+REPORT_SCOPES = [
+    {
+        "name": "Internal range",
+        "scope": "10.0.0.0/24",
+        "description": "",
+        "disallowed": False,
+        "requiresCaution": False,
+    }
+]
 
 
-def _seed_report_dir(workspace: Path, report_id: int, name: str = "report-a") -> Path:
-    """Index ``findings/reports/<name>`` as ``gw.report`` (D3: identity lives in
-    the index, never parsed from a directory name) and create the directory."""
-    rel = f"findings/reports/{name}"
-    report_dir = workspace / rel
-    report_dir.mkdir(parents=True, exist_ok=True)
-    index = Index.load(workspace)
-    index.set(rel, IndexKind.GW_REPORT, report_id)
-    index.save()
-    return report_dir
+def _rdir(workspace: Path, name: str = "report-a") -> Path:
+    """Where the report phase creates a report directory for a slugged title
+    (D3/D4: ``slug(title)``, no numeric id prefix) — computed, not seeded."""
+    return workspace / "findings" / "reports" / name
 
 
 def test_pulled_library_finding_has_no_id_block(run_grison, gw_server):
@@ -65,7 +62,10 @@ def test_library_finding_push_updates_ghostwriter(run_grison, gw_server, workspa
     """A local edit to a pulled library finding pushes back through
     ``update_finding_by_pk`` — no id ever re-enters the document."""
     gw_server.store.seed_finding(
-        id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4,
+        id=1,
+        title="Weak TLS Ciphers",
+        severityId=3,
+        findingTypeId=4,
         description="<p>old text</p>",
     )
     first = run_grison("sync")
@@ -90,13 +90,19 @@ def test_report_finding_evidence_pulls_as_image_line(run_grison, gw_server, work
     a native ``richtext-evidence`` div references, never a per-finding link (which
     does not exist in the real >= 7.2 schema)."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
-    _seed_report_dir(workspace, report["id"], "report-a")
     gw_server.store.seed_evidence(
-        id=90, reportId=report["id"], friendlyName="login_screenshot",
-        document=f"evidence/{report['id']}/login_screenshot.png", caption="Login screen",
+        id=90,
+        reportId=report["id"],
+        friendlyName="login_screenshot",
+        document=f"evidence/{report['id']}/login_screenshot.png",
+        caption="Login screen",
     )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="SQL Injection", severityId=5, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="SQL Injection",
+        severityId=5,
+        findingTypeId=4,
         description='<div class="richtext-evidence" data-evidence-id="90"></div>',
     )
 
@@ -105,10 +111,11 @@ def test_report_finding_evidence_pulls_as_image_line(run_grison, gw_server, work
     assert "findings (gw.reportedFinding): pull_new 1" in result.output, result.output
     finding_path = Path.cwd() / "findings" / "reports" / "report-a" / "sql-injection.md"
     body = finding_path.read_text(encoding="utf-8")
-    assert '![Login screen](evidence/login_screenshot.png' in body
+    assert "![Login screen](evidence/login_screenshot.png" in body
     assert "grison:" not in body and "id:" not in body
-    evidence_file = Path.cwd() / "findings" / "reports" / "report-a" / "evidence" \
-        / "login_screenshot.png"
+    evidence_file = (
+        Path.cwd() / "findings" / "reports" / "report-a" / "evidence" / "login_screenshot.png"
+    )
     assert evidence_file.is_file()
     index = Index.load(Path.cwd())
     rec = index.get("findings/reports/report-a/evidence/login_screenshot.png")
@@ -121,9 +128,13 @@ def test_new_local_evidence_file_uploads_report_scoped(run_grison, gw_server, wo
     ``finding:`` — with ``friendlyName`` set to the file's stem, and the
     referencing finding is re-pushed carrying the new evidence id."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
-    report_dir = _seed_report_dir(workspace, report["id"], "report-a")
+    report_dir = _rdir(workspace)
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
     )
     first = run_grison("sync")
     assert "findings (gw.reportedFinding): pull_new 1" in first.output, first.output
@@ -131,7 +142,9 @@ def test_new_local_evidence_file_uploads_report_scoped(run_grison, gw_server, wo
     finding_path = report_dir / "finding-one.md"
     text = finding_path.read_text(encoding="utf-8")
     text = text.replace(
-        "## Description\n\n", "## Description\n\n![A screenshot](evidence/shot.png)\n\n", 1,
+        "## Description\n\n",
+        "## Description\n\n![A screenshot](evidence/shot.png)\n\n",
+        1,
     )
     finding_path.write_text(text, encoding="utf-8")
     (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
@@ -153,9 +166,13 @@ def test_affected_entities_is_always_p_wrapped_on_push(run_grison, gw_server, wo
     """BRIEF D: affected_entities is ALWAYS pushed ``<p>``-wrapped — the lab proved
     plain text breaks Ghostwriter's docx export."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
-    report_dir = _seed_report_dir(workspace, report["id"], "report-a")
+    report_dir = _rdir(workspace)
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
     )
     first = run_grison("sync")
     assert "findings (gw.reportedFinding): pull_new 1" in first.output, first.output
@@ -180,13 +197,18 @@ def test_mass_evidence_delete_is_guarded_and_announced(run_grison, gw_server, wo
     what it withheld — deleting every locally-mirrored evidence file at once must
     not silently wipe out a report's evidence rows."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
-    _seed_report_dir(workspace, report["id"], "report-a")
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
     )
     for i in range(8):
         gw_server.store.seed_evidence(
-            reportId=report["id"], friendlyName=f"shot-{i}", document=f"evidence/shot-{i}.png",
+            reportId=report["id"],
+            friendlyName=f"shot-{i}",
+            document=f"evidence/shot-{i}.png",
         )
     first = run_grison("sync")  # establishes the local evidence/ mirror
     assert "gw.evidence[findings/reports/report-a]): pull_new 8" in first.output, first.output
@@ -207,13 +229,20 @@ def test_undo_reverses_a_library_push_and_an_evidence_upload(run_grison, gw_serv
     ``uploadEvidence``) are replayed in reverse through the Ghostwriter adapters:
     the finding's pre-image is restored and the uploaded evidence row deleted."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
-    report_dir = _seed_report_dir(workspace, report["id"], "report-a")
+    report_dir = _rdir(workspace)
     gw_server.store.seed_finding(
-        id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4,
+        id=1,
+        title="Weak TLS Ciphers",
+        severityId=3,
+        findingTypeId=4,
         description="<p>old text</p>",
     )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
     )
     first = run_grison("sync")
     assert first.exit_code == 0, first.output

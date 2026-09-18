@@ -15,7 +15,7 @@ populated by today's sync — a later step fills them from BookStack); the schem
 them now so the engine step doesn't also need to touch the format layer.
 
 ``project.md`` carries free-form regenerated prose (scope, objectives, targets, white
-cards — see :mod:`grison.remote.repmap`'s ``project_context_to_md``), not simple
+cards — see :mod:`grison.adapters.gw_report`'s ``project_context_to_md``), not simple
 key/value structure, so its model is an opaque body wrapper: there is nothing here
 to validate beyond "did it parse as text at all", which is always true.
 """
@@ -59,13 +59,19 @@ class DatesMeta(_Base):
 
 
 class ReportMetaDoc(_Base):
-    """``.report.yml`` — plain YAML, no frontmatter fence (see :mod:`grison.remote.repmap`'s
-    ``meta_to_yaml``, which dumps it via ``fm.dump_yaml``, not ``fm.dump``)."""
+    """``.report.yml`` — plain YAML, no frontmatter fence.
+
+    ``narrative_order`` is the report's ``extraFieldSpec`` field names (D+ENGINE.md:
+    "section order from position is recorded where it matters"), in ``position``
+    order — a reader's only way to know the intended narrative order, and the
+    validator's only (offline) way to tell a real, spec-defined section apart from
+    an unknown one (``REP-003``) without contacting Ghostwriter."""
 
     title: str = ""
     project: ProjectMeta = ProjectMeta()
     status: StatusMeta = StatusMeta()
     dates: DatesMeta = DatesMeta()
+    narrative_order: list[str] = []
 
 
 class BookMirrorDoc(_Base):

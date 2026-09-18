@@ -15,8 +15,10 @@ Three properties, per the brief:
       (``test_html_to_md_of_md_to_html_reaches_fixpoint`` — r1 is already
       ``html_to_md`` output, and r2 must equal it exactly) and starting from
       generated HTML directly (``test_html_to_md_output_is_an_immediate_
-      fixpoint`` — this is what actually caught real ``migrate_body_v1`` bugs
-      the markdown-first generator never reached; see test_migrate_bodies.py).
+      fixpoint`` — this is what actually caught real bugs in the old v1→v2 body
+      migration the markdown-first generator never reached; that migration was
+      later dropped entirely — D13 now just refuses an old-format workspace — but
+      the property itself stayed the tighter, HTML-first regression check).
   (c) canonical HTML is stable: ``md_to_html(html_to_md(h)) == h`` for every ``h``
       produced by ``md_to_html`` in this run.
 
@@ -172,9 +174,7 @@ def list_block(draw: st.DrawFn) -> str:
             # (no blank line before it, the shape here) if it starts at 1.
             nested_num = 1
             for _ in range(draw(st.integers(min_value=1, max_value=2))):
-                nested_marker = (
-                    f"{nested_num}{nested_delim} " if nested_ol else f"{nested_bullet} "
-                )
+                nested_marker = f"{nested_num}{nested_delim} " if nested_ol else f"{nested_bullet} "
                 lines.append(indent + nested_marker + draw(paragraph_text()))
                 if nested_ol:
                     nested_num += 1
@@ -203,9 +203,7 @@ def document(draw: st.DrawFn) -> str:
     return "\n\n".join(blocks)
 
 
-_SETTINGS = settings(
-    max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
+_SETTINGS = settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 
 @_SETTINGS
@@ -427,9 +425,7 @@ def gw_inline_html(
     # combination that's actually safe and unambiguous, verified separately. Each
     # side excludes its OWN tag (a becomes <strong>'s content, b becomes <em>'s)
     # for the same same-tag-nesting reason as the "strong"/"em" cases above.
-    a = draw(
-        gw_inline_html(depth + 1, exclude=frozenset({"code", "strong"}), safe_leaf=True)
-    )
+    a = draw(gw_inline_html(depth + 1, exclude=frozenset({"code", "strong"}), safe_leaf=True))
     b = draw(gw_inline_html(depth + 1, exclude=frozenset({"code", "em"}), safe_leaf=True))
     return f"<strong>{a}</strong><em>{b}</em>"
 
@@ -497,9 +493,9 @@ def test_html_to_md_output_is_an_immediate_fixpoint(html: str) -> None:
     fixpoint the FIRST time — not "after at most one extra round" — checked as
     EXACT markdown equality, not just visible text. ``test_html_to_md_of_md_to_
     html_reaches_fixpoint`` below tests the same thing starting from AUTHOR
-    markdown; this one starts from HTML directly, which is what caught real
-    migrate_body_v1 bugs (see test_migrate_bodies.py) the markdown-first
-    generator didn't reach."""
+    markdown; this one starts from HTML directly, which is what caught real bugs
+    in the old (now-dropped) v1→v2 body migration the markdown-first generator
+    didn't reach."""
     try:
         m = html_to_md(html)
     except ConverterError:

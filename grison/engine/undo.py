@@ -47,6 +47,13 @@ class UndoOp:
     id: int | None = None
     move_from: str | None = None  # old path, for move_edit
     remote_preimage: Any = None  # adapter's raw record shape before this op's write, or None
+    local_preimage: str | None = None
+    """For a ``create`` op only: the author's own exact local bytes BEFORE the
+    create's post-write mirror rewrite (``LocalDoc.raw_text`` at the moment
+    ``adapter.create`` was called). Undoing a create restores these bytes at the
+    same path (rather than deleting the file, which would lose the author's
+    original words, or leaving it in its post-create rendered form, which was
+    never what the author wrote) — see ``_replay_one``'s "create" branch."""
 
 
 @dataclass
@@ -109,6 +116,16 @@ class SnapshotSummary:
     def render(self) -> str:
         counts = ", ".join(f"{verb} {n}" for verb, n in sorted(self.counts.items()))
         return f"{self.at:%Y-%m-%d %H:%M}  {counts}"
+
+
+def snapshot_kinds(root: Path, name: str) -> set[str]:
+    """Every distinct ``kind`` recorded in snapshot ``name`` — a phase's own
+    ``Snapshot`` only ever collects its own kinds (each phase persists its own
+    snapshot directory), so this tells a caller with more than one remote domain
+    (e.g. the CLI's ``grison undo``, which drives BookStack and Ghostwriter through
+    different context objects) which domain's adapters/context a given snapshot
+    needs, without guessing from the snapshot's timestamp or name."""
+    return {op.kind for op in _load(root, name)}
 
 
 def describe_snapshot(root: Path, name: str) -> SnapshotSummary:
@@ -190,6 +207,16 @@ def _replay_one(  # noqa: PLR0912
         if op.path is not None:
             index.remove(op.path)
             state.forget(op.kind, op.id)
+            # Restore the author's own pre-create bytes rather than deleting the
+            # file (which would lose their original words) or leaving it in its
+            # post-create mirrored form (which was never what they wrote) — an
+            # older snapshot recorded before this field existed has no preimage to
+            # restore, so it falls back to the previous behaviour (delete the file).
+            target = root / op.path
+            if op.local_preimage is not None:
+                atomic_write_text(target, op.local_preimage)
+            else:
+                target.unlink(missing_ok=True)
         _emit(on_event, f"delete-remote {op.path or op.id} — undoing create")
         return
 

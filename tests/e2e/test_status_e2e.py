@@ -42,6 +42,7 @@ def test_status_before_any_sync(run_grison):
     assert result.exit_code == 0
     assert "findings (library): clean" in result.output
     assert "findings (reports): clean" in result.output
+    assert "report: clean" in result.output
     assert "methodology: clean" in result.output
     assert "last findings sync: never" in result.output
     assert "last report sync: never" in result.output
@@ -137,8 +138,7 @@ def test_status_reports_invalid_with_rule_ids(run_grison, bs_server):
 
     assert result.exit_code == 1  # invalid IS a problem
     assert "methodology: invalid 1" in result.output
-    assert "  invalid  methodology/library/playbook/getting-started.md (WIKI-002)" \
-        in result.output
+    assert "  invalid  methodology/library/playbook/getting-started.md (WIKI-002)" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +161,9 @@ def test_status_reports_a_live_collision_sidecar(run_grison, bs_server):
     assert "1 collision-sidecar(s) pending" in result.output
     # named by the ORIGINAL record's path (what the user recognizes), not the
     # sidecar file's own name — the message spells out that it's a collision
-    assert "! methodology/library/playbook/getting-started.md: unresolved collision" \
-        in result.output
+    assert (
+        "! methodology/library/playbook/getting-started.md: unresolved collision" in result.output
+    )
     # the record underneath is unresolved-edited, not itself invalid/unknown
     assert "methodology: edited 1" in result.output
 
@@ -197,20 +198,36 @@ def test_status_json_stable_shape(run_grison, bs_server):
     result = run_grison("status", "--json")
     payload = json.loads(result.output)
 
-    # tests changed on purpose (task step 3): findings are engine-managed now,
-    # with the same per-kind counts/non_clean shape methodology already had
-    # (one bucket for library findings, one for reported findings, the latter
-    # also carrying an `evidence_files` breakdown — D1's file-set mirror).
+    # tests changed on purpose (task step 3 + reports task C): findings AND report
+    # (narrative sections/notes) are both engine-managed now, each with the same
+    # per-kind counts/non_clean shape methodology already had (findings splits into
+    # a library bucket and a reports bucket — the latter also carrying an
+    # `evidence_files` breakdown, D1's file-set mirror — while report/narrative
+    # sections+notes get their own top-level area, same shape as methodology's).
     assert payload["findings"]["managed"] is True
     zero_counts = {
-        "clean": 0, "edited": 0, "new": 0, "deleted": 0, "moved": 0, "invalid": 0, "unknown": 0,
+        "clean": 0,
+        "edited": 0,
+        "new": 0,
+        "deleted": 0,
+        "moved": 0,
+        "invalid": 0,
+        "unknown": 0,
     }
     assert payload["findings"]["library"] == {"counts": zero_counts, "non_clean": []}
     assert payload["findings"]["reports"]["counts"] == zero_counts
     assert payload["findings"]["reports"]["non_clean"] == []
+    assert payload["report"]["managed"] is True
+    assert payload["report"]["counts"] == zero_counts
     assert payload["methodology"]["managed"] is True
     assert payload["methodology"]["counts"] == {
-        "clean": 1, "edited": 0, "new": 0, "deleted": 0, "moved": 0, "invalid": 0, "unknown": 0,
+        "clean": 1,
+        "edited": 0,
+        "new": 0,
+        "deleted": 0,
+        "moved": 0,
+        "invalid": 0,
+        "unknown": 0,
     }
     assert payload["methodology"]["non_clean"] == []
     assert payload["methodology"]["collision_sidecars"] == []

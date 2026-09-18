@@ -274,6 +274,54 @@ query {
 }
 """
 
+_REPORT_BY_PK_QUERY = """
+query($id: bigint!) {
+  report_by_pk(id: $id) {
+    id
+    extraFields
+    last_update
+  }
+}
+"""
+
+_EXTRA_FIELD_SPEC_QUERY = """
+query($target_model: String!) {
+  extraFieldSpec(
+    where: {targetModel: {_eq: $target_model}}
+    order_by: {position: asc}
+  ) {
+    id
+    internalName
+    displayName
+    position
+  }
+}
+"""
+
+_PROJECT_NOTE_BY_PK_QUERY = """
+query($id: bigint!) {
+  projectNote_by_pk(id: $id) {
+    id
+    projectId
+    note
+    operatorId
+    timestamp
+    user {
+      name
+      username
+    }
+  }
+}
+"""
+
+_DELETE_PROJECT_NOTE_MUTATION = """
+mutation($id: bigint!) {
+  delete_projectNote_by_pk(id: $id) {
+    id
+  }
+}
+"""
+
 _WHOAMI_QUERY = """
 query {
   whoami {
@@ -606,6 +654,42 @@ class GhostwriterClient(BaseHttpClient):
     def update_report(self, report_id: int, fields: dict) -> None:
         """Patch a report's ``_set`` columns (grison only ever sends ``extraFields``)."""
         self._post(_UPDATE_REPORT_MUTATION, {"id": report_id, "set": fields})
+
+    def fetch_report_by_pk(self, report_id: int) -> dict | None:
+        """A single report's ``id``/``extraFields``/``last_update`` only — the TIGHT
+        pre-write re-fetch query (unlike :meth:`fetch_reports`' heavy nested query,
+        which the old reports phase re-ran in full before every narrative push; that
+        was the one real inefficiency the rework's brief called out). ``None`` if the
+        report no longer exists."""
+        return self._post(_REPORT_BY_PK_QUERY, {"id": report_id}, idempotent=True)["report_by_pk"]
+
+    _REPORT_EXTRA_FIELD_TARGET_MODEL = "reporting.Report"
+
+    def fetch_report_extra_field_specs(self) -> list[dict]:
+        """``{id, internalName, displayName, position}`` rows for the Report model's
+        instance-defined rich-text extra fields, in ``position`` order — the live
+        source of truth for what narrative sections a report has (grison never
+        guesses field names from the data, per the rework's brief)."""
+        return self._post(
+            _EXTRA_FIELD_SPEC_QUERY,
+            {"target_model": self._REPORT_EXTRA_FIELD_TARGET_MODEL},
+            idempotent=True,
+        )["extraFieldSpec"]
+
+    def fetch_project_note_by_pk(self, note_id: int) -> dict | None:
+        """One ``projectNote`` row (with its author's ``user{name,username}``), or
+        ``None`` if it no longer exists — used right after
+        :meth:`insert_project_note` to build the local mirror, and by undo's
+        create-refetch check."""
+        return self._post(
+            _PROJECT_NOTE_BY_PK_QUERY, {"id": note_id}, idempotent=True
+        )["projectNote_by_pk"]
+
+    def delete_project_note(self, note_id: int) -> None:
+        """Delete a project note — used ONLY to undo a note create grison itself just
+        pushed (grison never deletes an existing, previously-synced note; project
+        notes are append-only, per the rework's brief)."""
+        self._post(_DELETE_PROJECT_NOTE_MUTATION, {"id": note_id})
 
     def whoami(self) -> dict:
         """``{username, role, expires}`` for the token's own session — no ``id`` field

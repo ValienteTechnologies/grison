@@ -25,8 +25,7 @@ directory an author creates may be named anything matching
 `[a-z0-9][a-z0-9._-]*` (lowercase, must start with a letter or digit; files also need
 the correct extension for their location). Once grison creates a file or directory on
 pull, it never renames it again — not when the remote title changes, not after a
-create gets its id. A pre-existing v1 name (with its old `<id>-` numeric prefix) is
-still a valid name under this rule and is left alone by the migration.
+create gets its id.
 
 ---
 
@@ -135,13 +134,14 @@ to them in full. Agents write here just as much as anywhere else in the workspac
 
 ### 1.5 Format version (`WS-005`, `WS-006`)
 
-`.grison/manifest.yml` records `format: 2`. If it's older, `grison validate` fails with
-`WS-005` and says to run the one-time migration; grison never tries to interpret an
-older-format workspace directly. If it's newer than this grison understands, `WS-006`
-says to upgrade grison. A workspace with no `manifest.yml` but with a real
-`.grison/env` reads as format 1 (pre-dates the manifest file) and gets `WS-005`; one
-with neither reads as a fresh, unbootstrapped directory (not validated as a workspace
-at all — that's what `grison sync`'s bootstrap step is for).
+`.grison/manifest.yml` records `format: 2`. A workspace whose format differs from the
+one this grison supports is refused outright, with a plain message — nothing converts
+it, and grison never tries to interpret a workspace at another format directly. If
+it's older, `grison validate` fails with `WS-005`; if it's newer than this grison
+understands, `WS-006` says to upgrade grison. A workspace with no `manifest.yml` but
+with a real `.grison/env` reads as format 1 (pre-dates the manifest file) and gets
+`WS-005`; one with neither reads as a fresh, unbootstrapped directory (not validated
+as a workspace at all — that's what `grison sync`'s bootstrap step is for).
 
 ### 1.6 `.grison/manifest.yml` schema (`WS-007`)
 
@@ -177,11 +177,15 @@ directory except the files that must be tracked — so a stray edit to the top-l
 
 Keys sorted, one record per line (git-merge-friendly), written atomically. Kinds:
 `gw.finding`, `gw.reportedFinding`, `gw.report` (the report directory itself),
-`gw.evidence`, `gw.projectNote`, `bs.shelf`, `bs.book` (the book directory itself),
-`bs.chapter` (the chapter directory itself), `bs.page`, `bs.image`. A structurally
-malformed `index.json` (not the shape above, an unknown kind, a non-integer id, the
-same identity indexed under two paths) is `IDX-001` — see §7. This file is
-grison-owned and tracked; never hand-edit it.
+`gw.reportSection` (one `narrative/<field>.md` — a section has no id of its own in
+Ghostwriter, since `report.extraFields` is a single jsonb map, not a table; its
+`.grison/index.json` id is `report_id * 100000 + extraFieldSpec.id`, decodable and
+unique per report+field — see `grison.adapters.gw_report.section_id`), `gw.evidence`,
+`gw.projectNote`, `bs.shelf`, `bs.book` (the book directory itself), `bs.chapter`
+(the chapter directory itself), `bs.page`, `bs.image`. A structurally malformed
+`index.json` (not the shape above, an unknown kind, a non-integer id, the same
+identity indexed under two paths) is `IDX-001` — see §7. This file is grison-owned
+and tracked; never hand-edit it.
 
 ### 1.9 Read-only mirrors (`WS-009`, `WS-010`)
 
@@ -342,11 +346,14 @@ validated by §5.
 
 ### 3.1 Narrative sections
 
-`findings/reports/<dir>/narrative/<field>.md` — one file per
-`report.extraFields` key. No frontmatter at all; the filename stem is the field key.
+`findings/reports/<dir>/narrative/<field>.md` — one file per instance-defined
+`extraFieldSpec` row on the Report model (Ghostwriter's `internalName` column is the
+field key; `position` is the intended reading order, recorded in `.report.yml`'s
+`narrative_order` — §3.4). No frontmatter at all; the filename stem is the field key.
 The body is markdown in the same vocabulary as a finding section, **plus ATX
 headings** (`md_to_html(..., headings=True)` — ATX headings `#`-`######` are allowed
-here, unlike in a finding section). A body that doesn't convert is `REP-001`.
+here, unlike in a finding section), and may embed report evidence the same way a
+finding section does (§5.1). A body that doesn't convert is `REP-001`.
 
 ```markdown
 The engagement ran from 2026-08-01 to 2026-08-14 against the scoped web application.
@@ -355,6 +362,14 @@ The engagement ran from 2026-08-01 to 2026-08-14 against the scoped web applicat
 
 Three critical, two high findings were identified.
 ```
+
+A `narrative/<field>.md` whose stem is not one of `.report.yml`'s recorded
+`narrative_order` entries is `REP-003` — the validator's only (offline, no
+Ghostwriter contact) way to tell a real section from a leftover/typo'd one. When
+`.report.yml` has never been written yet (no sync has run for this report), or its
+`narrative_order` is empty, there is nothing recorded to compare against and
+`REP-003` never fires for that report — the same "nothing to compare against yet"
+convention `WS-009` uses for a mirror digest.
 
 ### 3.2 Project notes
 
@@ -408,19 +423,28 @@ status:
 dates:
   creation: '2026-08-01T00:00:00Z'
   last_update: '2026-08-10T00:00:00Z'
+narrative_order:
+  - about_us
+  - executive_summary
+  - attack_chain
+  - methodology
+  - disclaimer
+  - scope_text
+  - appendix
 ```
 
-`project.md` is opaque regenerated prose (scope, objectives, targets, white cards —
-see `grison.remote.repmap.project_context_to_md`); there is no schema beyond "it's
-text" — its integrity is entirely the `WS-009` digest check (§1.9). Neither file is
-ever hand-authored.
+`project.md` is opaque regenerated prose (scope, objectives, targets, white cards);
+there is no schema beyond "it's text" — its integrity is entirely the `WS-009` digest
+check (§1.9). Neither file is ever hand-authored.
 
 ### 3.4 `.report.yml` schema (`WS-010`)
 
 Top-level keys: `title` (string), `project` (`id`, `client.id`/`client.name`/
 `client.short_name`, `start_date`, `end_date`), `status` (`complete`, `archived`,
-`delivered` — booleans), `dates` (`creation`, `last_update`). No other top-level or
-nested key. A `.report.yml` that doesn't match this shape is `WS-010`.
+`delivered` — booleans), `dates` (`creation`, `last_update`), `narrative_order` (list
+of strings — the report's `extraFieldSpec` field names in `position` order, §3.1). No
+other top-level or nested key. A `.report.yml` that doesn't match this shape is
+`WS-010`.
 
 ---
 

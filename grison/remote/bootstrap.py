@@ -81,17 +81,18 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
     # A brand-new workspace (never had v1 content) starts at the CURRENT format —
     # manifest.read() would otherwise read it as v1 the moment .grison/env exists
     # (v1 predates manifest.yml entirely; see manifest.py's own docstring), sending
-    # a workspace that never had any v1 data through the "needs migration" path on
-    # its very first sync. This isn't only the freshly-generated-env case: a
+    # a workspace that never had any v1 data through the "refused, wrong format"
+    # path on its very first sync. This isn't only the freshly-generated-env case: a
     # workspace whose .grison/env was created by hand or copied in (a scripted
     # deployment, a credential rotation, this very repo's own lab proof) never sets
     # env_created either, so the real signal is "is there any actual v1 CONTENT
     # anywhere" (findings/ or methodology/ has at least one real file already) —
-    # only THAT means a real pre-v2 workspace whose format the later migration step
-    # must convert, not this bootstrap. Format v2's own .gitignore rule (D13/
-    # "Workspace format v2"): .grison/.gitignore is the private-file allow-list; the
-    # workspace root's OWN .gitignore must NOT blanket-ignore .grison/ (that was the
-    # v1 scaffold's shape) since manifest.yml/index.json must stay tracked.
+    # only THAT means a real pre-v2 workspace, which D13 refuses outright (no
+    # migration converts it) rather than this bootstrap writing a v2 manifest over
+    # it. Format v2's own .gitignore rule (D13/"Workspace format v2"):
+    # .grison/.gitignore is the private-file allow-list; the workspace root's OWN
+    # .gitignore must NOT blanket-ignore .grison/ (that was the v1 scaffold's
+    # shape) since manifest.yml/index.json must stay tracked.
     manifest_path = root / ".grison" / "manifest.yml"
     has_v1_content = any(
         d.is_dir() and any(p.is_file() for p in d.rglob("*"))
@@ -106,10 +107,10 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
             Index(root=root).save()
 
     settings = load_settings(root)
-    # A real, not-yet-migrated v1 workspace (has_v1_content, no manifest.yml written
-    # above) must not get v2-shaped scaffolding yet — CLAUDE.md's frontmatter rules,
-    # .grison/SPEC.md, and the rest all describe format v2, which doesn't apply until
-    # the one-time migration converts this workspace. `manifest_path` now exists
+    # A real v1 workspace (has_v1_content, no manifest.yml written above) must not
+    # get v2-shaped scaffolding — CLAUDE.md's frontmatter rules, .grison/SPEC.md,
+    # and the rest all describe format v2, which this workspace is permanently
+    # refused for (D13: no migration converts it). `manifest_path` now exists
     # exactly when this IS (or just became, in the block above) a v2 workspace.
     if manifest_path.exists():
         scaffold = scaffold_workspace(root, settings=settings)

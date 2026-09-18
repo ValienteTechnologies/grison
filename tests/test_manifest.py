@@ -108,7 +108,11 @@ def test_check_too_old_raises_distinct_error_type_with_exact_message(tmp_path: P
     m.write(tmp_path, m.Manifest(format=1))
     with pytest.raises(m.WorkspaceNeedsMigration) as ei:
         m.check(tmp_path)
-    assert str(ei.value) == "workspace format 1 needs the one-time migration"
+    assert str(ei.value) == (
+        f"this workspace uses format 1; this grison supports only format "
+        f"{m.CURRENT_FORMAT} — no migration converts it, sync with the grison version "
+        f"that wrote it"
+    )
 
 
 def test_too_new_and_too_old_are_distinct_exception_types(tmp_path: Path) -> None:
@@ -149,8 +153,9 @@ def test_check_git_hygiene_outside_a_repo_is_a_noop(tmp_path: Path) -> None:
 def test_check_git_hygiene_clean_workspace_has_no_problems(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     _init_repo(root)
-    (root / ".gitignore").write_text(".grison/*\n!.grison/.gitignore\n!.grison/manifest.yml\n"
-                                      "!.grison/index.json\n")
+    (root / ".gitignore").write_text(
+        ".grison/*\n!.grison/.gitignore\n!.grison/manifest.yml\n!.grison/index.json\n"
+    )
     (root / ".grison").mkdir()
     (root / ".grison" / "env").write_text("secret")
     (root / ".grison" / "manifest.yml").write_text("format: 2\n")
