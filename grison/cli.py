@@ -39,7 +39,7 @@ from grison.engine.apply import run as engine_run
 from grison.engine.filesets import RunOptions as FilesetRunOptions
 from grison.engine.filesets import rewrite_captions
 from grison.engine.filesets import sync_fileset as engine_sync_fileset
-from grison.engine.model import Event, KindSummary, Plan, RemoteRecord
+from grison.engine.model import Event, KindSummary, Outcome, Plan, RemoteRecord
 from grison.engine.offline_status import OfflineStatus, StatusEntry, compute_offline_status
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
@@ -865,17 +865,34 @@ def _run_findings_phase(
         report_id = ctx.report_dirs[report_dir]
         evidence_adapter = GwEvidenceAdapter(report_id=report_id)
         doc_bodies = _report_finding_bodies(root, report_dir)
-        result = engine_sync_fileset(
-            root,
-            ctx,
-            evidence_adapter,
-            report_dir / "evidence",
-            index=index,
-            state=state,
-            snapshot=snapshot,
-            doc_bodies=doc_bodies,
-            options=fs_options,
-        )
+        evidence_dir = report_dir / "evidence"
+        try:
+            result = engine_sync_fileset(
+                root,
+                ctx,
+                evidence_adapter,
+                evidence_dir,
+                index=index,
+                state=state,
+                snapshot=snapshot,
+                doc_bodies=doc_bodies,
+                options=fs_options,
+            )
+        except Exception as e:  # noqa: BLE001 — per-record isolation (ENGINE.md §5):
+            # one report's evidence file set blowing up must not abort every other
+            # report/finding in this phase, any more than one record's own apply
+            # step does inside grison.engine.filesets/apply themselves.
+            reason = f"{type(e).__name__}: {e}"
+            events.append(Event(verb="failed", path=str(evidence_dir), detail=reason))
+            evidence_plans.append(
+                Plan(kind=evidence_adapter.kind, outcome=Outcome.FAILED, path=evidence_dir,
+                    reason=reason)
+            )
+            summaries[f"gw.evidence[{report_dir}]"] = KindSummary(
+                kind=evidence_adapter.kind, counts={"failed": 1},
+                problem_paths=[str(evidence_dir)],
+            )
+            continue
         # a fileset's own problems (collision/failed/withheld evidence) must count
         # toward this phase's exit code exactly like a finding's would — folded
         # into the SAME plans list FindingsPhaseResult.exit_code reads, not just

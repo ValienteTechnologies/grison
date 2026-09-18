@@ -46,7 +46,13 @@ Two files sharing a stem (REF-003) and two non-empty captions disagreeing
 (REF-004) are hard validator failures BEFORE sync ever runs (`grison.validator`) —
 this module's own :func:`collect_captions` re-derives the same agreement rule
 defensively (never silently guesses when it sees a conflict the validator
-should have already caught), but is not the primary enforcement.
+should have already caught), but is not the primary enforcement. A conflict that
+slips past that gate never aborts the sync: :func:`sync_fileset` degrades just
+that one file to "no local caption opinion" (the same branch a file with no
+non-empty alt anywhere already takes — see below) and reports it as a `failed`
+event naming REF-004 and the disagreeing documents (ENGINE.md §5 per-record
+isolation — one bad file's caption conflict must never take down every other
+file, or the findings/wiki that reference them, in the same sync).
 
 Caption/description sync — the exact rule an adapter that sets
 ``supports_caption=True`` (only :mod:`grison.adapters.gw_evidence`; BookStack's
@@ -81,7 +87,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
-from grison.engine.apply import refetch_guard
+from grison.engine.apply import refetch_guard, sidecar_path
 from grison.engine.classify import classify
 from grison.engine.identity import Missing, Unindexed, pair
 from grison.engine.model import (
@@ -94,7 +100,6 @@ from grison.engine.model import (
 )
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
-from grison.errors import GrisonError
 from grison.fsio import atomic_write_bytes
 from grison.hashing import digest
 from grison.index import Index, IndexKind
@@ -112,11 +117,6 @@ _REMOTE_WRITE_OUTCOMES = frozenset(
     {Outcome.PUSH, Outcome.CREATE, Outcome.DELETE_REMOTE, Outcome.MOVE_EDIT}
 )
 _LOCAL_WRITE_OUTCOMES = frozenset({Outcome.PULL, Outcome.DELETE_LOCAL})
-
-
-class FileSetError(GrisonError, ValueError):
-    """Raised for a file-set precondition this module refuses to guess past —
-    today: a caption conflict slipping past the validator (defense in depth)."""
 
 
 @dataclass(frozen=True)
@@ -140,41 +140,72 @@ class ReferenceCaption:
     has_opinion: bool
 
 
+@dataclass(frozen=True)
+class CaptionConflict:
+    """One file whose referencing documents disagree on its caption (REF-004)
+    slipping past the validator — :func:`collect_captions` reports it here
+    instead of raising (module docstring): the file gets no entry in
+    :func:`collect_captions`' other return value, which :func:`sync_fileset`'s
+    callers already treat as "no local caption opinion" (mirrors the remote,
+    never pushed), and :func:`sync_fileset` turns each conflict into its own
+    ``failed`` event/:class:`~grison.engine.model.Plan` — one broken file, not
+    the whole sync."""
+
+    name: str
+    captions: tuple[str, ...]
+    docs: tuple[str, ...]  # one representative referencing document per caption
+
+    @property
+    def detail(self) -> str:
+        return (
+            f"conflicting captions {list(self.captions)!r} across "
+            f"{', '.join(self.docs)} (REF-004)"
+        )
+
+
 def collect_captions(
     doc_bodies: dict[PurePosixPath, str], *, folder: PurePosixPath
-) -> dict[str, ReferenceCaption]:
+) -> tuple[dict[str, ReferenceCaption], list[CaptionConflict]]:
     """Scan every document in ``doc_bodies`` for embeds whose path resolves inside
     ``folder`` (``<folder-name>/name`` or, one level down, ``../<folder-name>/name``
     — callers pass whichever spellings their own REF rule accepts), keyed by
-    filename. Raises :class:`FileSetError` on a caption disagreement the
-    validator should already have rejected (defense in depth, not primary
-    enforcement — see module docstring)."""
-    by_name: dict[str, list[tuple[str, str]]] = {}
+    filename. Returns ``(captions, conflicts)``: a name whose referencing documents
+    disagree on a non-empty caption is left OUT of ``captions`` and reported in
+    ``conflicts`` instead — a disagreement the validator should already have
+    rejected (defense in depth, not primary enforcement — see module docstring),
+    never guessed at and never raised past the one file it concerns."""
+    by_name: dict[str, list[tuple[PurePosixPath, str, str]]] = {}
     prefix = f"{folder.name}/"
-    for body in doc_bodies.values():
+    for doc_path, body in doc_bodies.items():
         for ref in scan_refs(body):
             if ref.kind != "embed":
                 continue
             name = _match_folder(ref.path, folder_name=folder.name, prefix=prefix)
             if name is None:
                 continue
-            by_name.setdefault(name, []).append((ref.caption, ref.title))
+            by_name.setdefault(name, []).append((doc_path, ref.caption, ref.title))
 
     out: dict[str, ReferenceCaption] = {}
+    conflicts: list[CaptionConflict] = []
     for name, entries in by_name.items():
-        captions = {c for c, _t in entries if c}
-        descriptions = {t for _c, t in entries if t}
+        captions = {c for _d, c, _t in entries if c}
+        descriptions = {t for _d, _c, t in entries if t}
         if len(captions) > 1:
-            raise FileSetError(
-                f"{folder}/{name}: conflicting captions {sorted(captions)!r} across "
-                "referencing documents (REF-004 should have caught this before sync)"
-            )
+            doc_by_caption: dict[str, PurePosixPath] = {}
+            for doc_path, c, _t in entries:
+                if c and c not in doc_by_caption:
+                    doc_by_caption[c] = doc_path
+            conflicts.append(CaptionConflict(
+                name=name, captions=tuple(sorted(captions)),
+                docs=tuple(str(doc_by_caption[c]) for c in sorted(captions)),
+            ))
+            continue
         caption = next(iter(captions), "")
         description = next(iter(descriptions), "") if len(descriptions) <= 1 else ""
         out[name] = ReferenceCaption(
             caption=caption, description=description, has_opinion=bool(captions)
         )
-    return out
+    return out, conflicts
 
 
 def _match_folder(ref_path: str, *, folder_name: str, prefix: str) -> str | None:
@@ -317,6 +348,25 @@ def _cached_body_hash(state: StateStore, kind: str, id: int) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _is_sidecar_name(name: str) -> bool:
+    """True for a name :func:`grison.engine.apply.sidecar_path` would produce from
+    some OTHER name in this same folder (``shot.png`` -> ``shot.remote.png``, an
+    extension-less ``README`` -> ``README.remote``). The old check here
+    (``name.endswith(".remote")``) only ever matched the extension-less case — a
+    real ``<name>.remote.<ext>`` collision sidecar (the only kind an evidence/image
+    folder ever actually has, since every file in one has an extension) always ends
+    in the ORIGINAL extension, never in ``.remote`` itself, so it silently passed
+    straight through as an ordinary local file (ENGINE.md §8: sidecars are never
+    documents/files the engine scans — ``grison.engine.apply``'s own document-side
+    scanners get this right for free because a document sidecar is always literally
+    ``.remote.md``, a single fixed extension; a file-set sidecar's extension varies
+    with the file it shadows, so this module needs the general shape check)."""
+    p = PurePosixPath(name)
+    if p.suffix == ".remote":
+        return True
+    return PurePosixPath(p.stem).suffix == ".remote"
+
+
 def _local_files(root: Path, folder: PurePosixPath) -> dict[str, bytes]:
     d = root / folder
     if not d.is_dir():
@@ -324,7 +374,7 @@ def _local_files(root: Path, folder: PurePosixPath) -> dict[str, bytes]:
     return {
         p.name: p.read_bytes()
         for p in sorted(d.iterdir())
-        if p.is_file() and not p.name.startswith(".") and not p.name.endswith(".remote")
+        if p.is_file() and not p.name.startswith(".") and not _is_sidecar_name(p.name)
     }
 
 
@@ -370,8 +420,9 @@ def sync_fileset(  # noqa: PLR0913
 
     local_files = _local_files(root, folder)
     remote_rows = adapter.list_remote(ctx)
-    captions = (
-        collect_captions(doc_bodies or {}, folder=folder) if adapter.supports_caption else {}
+    captions, caption_conflicts = (
+        collect_captions(doc_bodies or {}, folder=folder)
+        if adapter.supports_caption else ({}, [])
     )
 
     indexed = {
@@ -390,6 +441,14 @@ def sync_fileset(  # noqa: PLR0913
     plans, paired_missing_names, paired_unindexed_names = _pairing_plans(
         kind, folder, missing_names, unindexed_names, indexed, state, local_files,
     )
+    # a caption conflict (REF-004) that slipped past the validator degrades just
+    # this one file to "no local caption opinion" (it has no entry in `captions`
+    # above) and becomes its own FAILED record here — never an exception that
+    # would abort every other file/finding in this sync (module docstring,
+    # ENGINE.md §5 per-record isolation).
+    for conflict in caption_conflicts:
+        plans.append(Plan(kind=kind, outcome=Outcome.FAILED, path=folder / conflict.name,
+                          reason=conflict.detail))
 
     for name in sorted(present_names - paired_missing_names):
         path = folder / name
@@ -403,9 +462,19 @@ def sync_fileset(  # noqa: PLR0913
         plans.append(_classify_missing(adapter, ctx, path, rid, remote_rows, state, options))
     for name in sorted(unindexed_names - paired_unindexed_names):
         plans.append(Plan(kind=kind, outcome=Outcome.CREATE, path=folder / name))
+    # A running "already spoken for" set, not just the pre-sync disk/index snapshot
+    # (`local_files`/`indexed`): two remote rows named identically in the SAME sync
+    # (e.g. two Ghostwriter evidence uploads both called "shot.png") would otherwise
+    # both call `_dedupe_path` against the same unchanged pre-sync state and both
+    # land on "shot.png", the second silently clobbering the first on disk and in
+    # the index with no event at all. Seeded from local_files/indexed exactly like
+    # before, then extended after every dedupe so each subsequent PULL_NEW in this
+    # same loop sees the names already claimed by its predecessors.
+    claimed_names = set(local_files) | {p.name for p in indexed}
     for rid in sorted(remote_unindexed):
         row = remote_rows[rid]
-        path = _dedupe_path(folder / row.data["filename"], local_files, indexed)
+        path = _dedupe_path(folder / row.data["filename"], claimed_names)
+        claimed_names.add(path.name)
         plans.append(Plan(kind=kind, outcome=Outcome.PULL_NEW, id=rid, remote=row, path=path))
 
     _apply_change_guard(plans, options)
@@ -420,6 +489,8 @@ def sync_fileset(  # noqa: PLR0913
             )
             summary.problem_paths.append(label)
 
+    _clear_stale_sidecars(root, plans)
+
     resolved: dict[str, tuple[str, str]] = {}
     if adapter.supports_caption:
         rows_after = _rows_after(remote_rows, plans)
@@ -433,16 +504,19 @@ def sync_fileset(  # noqa: PLR0913
     return FileSetResult(plans=plans, events=events, summary=summary, resolved_captions=resolved)
 
 
-def _dedupe_path(
-    path: PurePosixPath, local_files: dict[str, bytes], indexed: dict[PurePosixPath, int],
-) -> PurePosixPath:
-    if path.name not in local_files and path not in indexed:
+def _dedupe_path(path: PurePosixPath, claimed_names: set[str]) -> PurePosixPath:
+    """``claimed_names`` is every filename already spoken for IN THIS FOLDER — disk,
+    index, or a sibling PULL_NEW plan already assigned earlier in the same loop (see
+    the running ``claimed_names`` set built in :func:`sync_fileset`, which is what
+    makes two same-named remote rows in one sync dedupe against EACH OTHER, not just
+    against pre-sync state)."""
+    if path.name not in claimed_names:
         return path
     stem, suffix = PurePosixPath(path.name).stem, PurePosixPath(path.name).suffix
     n = 2
     while True:
         candidate = path.with_name(f"{stem}-{n}{suffix}")
-        if candidate.name not in local_files and candidate not in indexed:
+        if candidate.name not in claimed_names:
             return candidate
         n += 1
 
@@ -670,6 +744,12 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
 
     if p.outcome is Outcome.CLEAN:
         return
+    if p.outcome is Outcome.FAILED:
+        # a pre-built failure (today: a caption conflict `collect_captions`
+        # degraded rather than raised — see `sync_fileset`) that never went
+        # through classification/apply at all; just surface it.
+        events.append(_event("failed", path=p.path, detail=p.reason))
+        return
     if p.outcome is Outcome.REPAIR:
         # L == R already (that's what REPAIR means) — restamp base to the
         # CANONICAL hash both sides already agree on (body+caption+description,
@@ -713,21 +793,58 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
         _apply_create(ctx, adapter, p, index, state, snapshot, events, dry, local_files, captions)
         return
     if p.outcome is Outcome.MOVE_EDIT:
-        _apply_reupload(ctx, adapter, p, index, state, snapshot, events, options, local_files,
-                        captions)
+        _apply_reupload(root, ctx, adapter, p, index, state, snapshot, events, options,
+                        local_files, captions)
         return
     if p.outcome is Outcome.PUSH:
-        _apply_caption_push(ctx, adapter, p, state, snapshot, events, options, captions)
+        _apply_caption_push(root, ctx, adapter, p, state, snapshot, events, options, captions)
         return
     if p.outcome in (Outcome.PULL, Outcome.PULL_NEW):
         _apply_pull(root, ctx, adapter, p, index, state, events, dry)
         return
     if p.outcome is Outcome.DELETE_REMOTE:
-        _apply_delete_remote(ctx, adapter, p, index, state, snapshot, events, options)
+        _apply_delete_remote(root, ctx, adapter, p, index, state, snapshot, events, options)
         return
     if p.outcome is Outcome.COLLISION:
+        # ENGINE.md §8: a COLLISION writes the remote version next to the file —
+        # gated on `dry` (mirrors `grison.engine.apply._apply_collision`, the
+        # equivalent classify-time-collision branch for documents): dry run
+        # reports the same event but performs no write of any kind (ENGINE.md §9).
+        if not dry:
+            _write_collision_sidecar(root, ctx, adapter, p.path, p.remote)
         events.append(_event("collision", path=p.path, dry_run=dry))
         return
+
+
+def _write_collision_sidecar(
+    root: Path, ctx: Any, adapter: FileSetAdapter, path: PurePosixPath | None,
+    remote: RemoteRecord | None,
+) -> None:
+    """Mirrors :func:`grison.engine.apply._write_collision_sidecar` for a file
+    set's bytes (ENGINE.md §8): the remote version, fetched via
+    :meth:`FileSetAdapter.fetch_body` and written atomically next to the file at
+    :func:`~grison.engine.apply.sidecar_path` (``shot.png`` ->
+    ``shot.remote.png``) — never a document: the scaffolded ``.gitignore``'s
+    ``*.remote.*`` entry already covers it (unlike the document engine, a
+    file-set sidecar's extension is whatever the shadowed file's is, not a fixed
+    ``.md``, so a literal ``.remote.md`` pattern would have missed it — see
+    :func:`_is_sidecar_name`). A no-op when there's no local path to sidecar next
+    to, or no remote record to read bytes from (e.g. "edited locally, deleted
+    remotely" — there is nothing on the server left to show)."""
+    if path is None or remote is None:
+        return
+    body = adapter.fetch_body(ctx, remote.id)
+    atomic_write_bytes(root / sidecar_path(path), body)
+
+
+def _clear_stale_sidecars(root: Path, plans: list[Plan]) -> None:
+    """Mirrors :func:`grison.engine.apply._clear_stale_sidecars` (ENGINE.md §8): a
+    sidecar is cleared as soon as its record is no longer in collision (resolved
+    by a force flag, or the two sides converged)."""
+    for p in plans:
+        if p.path is None or p.outcome is Outcome.COLLISION:
+            continue
+        (root / sidecar_path(p.path)).unlink(missing_ok=True)
 
 
 def _apply_delete_local(
@@ -786,7 +903,7 @@ def _preimage(adapter: FileSetAdapter, ctx: Any, row: RemoteRecord) -> dict[str,
 
 
 def _apply_reupload(  # noqa: PLR0913
-    ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
+    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
     snapshot: Snapshot, events: list[Event], options: RunOptions, local_files: dict[str, bytes],
     captions: dict[str, ReferenceCaption],
 ) -> None:
@@ -807,6 +924,8 @@ def _apply_reupload(  # noqa: PLR0913
     fresh, drifted = _refetch_guard(ctx, adapter, p, state, options)
     if drifted:
         p.outcome = Outcome.COLLISION
+        if not dry:
+            _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
         events.append(_event("collision", path=p.path,
                              detail="changed on the server since classification"))
         return
@@ -841,8 +960,9 @@ def _apply_reupload(  # noqa: PLR0913
 
 
 def _apply_caption_push(  # noqa: PLR0913
-    ctx: Any, adapter: FileSetAdapter, p: Plan, state: StateStore, snapshot: Snapshot,
-    events: list[Event], options: RunOptions, captions: dict[str, ReferenceCaption],
+    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, state: StateStore,
+    snapshot: Snapshot, events: list[Event], options: RunOptions,
+    captions: dict[str, ReferenceCaption],
 ) -> None:
     """Guarded by the SAME pre-write re-fetch check every remote-destructive write
     gets (:func:`_refetch_guard`, ENGINE.md §3): a caption/description that changed
@@ -859,6 +979,8 @@ def _apply_caption_push(  # noqa: PLR0913
         # caption push has no "recreate" fallback the way a reupload/delete-remote
         # does (there is nothing to attach the caption to), so it collides too.
         p.outcome = Outcome.COLLISION
+        if not dry:
+            _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
         events.append(_event("collision", path=p.path,
                              detail="changed on the server since classification"))
         return
@@ -920,7 +1042,7 @@ def _apply_pull(
 
 
 def _apply_delete_remote(
-    ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
+    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
     snapshot: Snapshot, events: list[Event], options: RunOptions,
 ) -> None:
     """Guarded by the SAME pre-write re-fetch check every remote-destructive write
@@ -932,6 +1054,8 @@ def _apply_delete_remote(
     fresh, drifted = _refetch_guard(ctx, adapter, p, state, options)
     if drifted:
         p.outcome = Outcome.COLLISION
+        if not dry:
+            _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
         events.append(_event("collision", path=p.path,
                              detail="changed on the server since classification"))
         return
