@@ -20,18 +20,30 @@ from grison.fsio import atomic_write_text
 CURRENT_FORMAT = 2
 MANIFEST_RELATIVE_PATH = ".grison/manifest.yml"
 
-# .gitignore allow-list for .grison/ (brief's "Workspace format v2" layout table):
-# ignore everything in the directory except these tracked files.
-_GITIGNORE_TEXT = """\
-# grison-managed — ignore everything in this directory except the files below.
-*
-!.gitignore
-!manifest.yml
-!index.json
-!SPEC.md
-!templates/
-!templates/**
-"""
+# Every ``.grison/`` entry that is explicitly TRACKED (brief's "Workspace format v2"
+# layout table) — the ONE source both the ``.gitignore`` allow-list below and
+# :mod:`grison.scaffold.settings_json`'s ``Read`` deny rules are derived from, so
+# "what's safe to read" and "what's tracked" can never drift apart: an entry not in
+# this tuple is private by construction (git-ignored, and denied to an agent's Read
+# tool) until someone deliberately adds it here.
+TRACKED_ENTRIES: tuple[str, ...] = (".gitignore", "manifest.yml", "index.json", "SPEC.md",
+                                    "templates/")
+
+# Every KNOWN private ``.grison/`` entry — must stay git-ignored (see
+# :func:`check_git_hygiene`) and is what :mod:`grison.scaffold.settings_json` denies
+# an agent's Read tool for. Not derived from TRACKED_ENTRIES (there's no way to
+# enumerate "everything else" as a static list) — this is the other, explicit half of
+# the same allow-list design ``.grison/.gitignore``'s own ``*`` catch-all encodes.
+PRIVATE_ENTRIES: tuple[str, ...] = ("env", "state/", "snapshots/", "lock", "terms.txt")
+
+# .gitignore allow-list for .grison/: ignore everything in the directory except the
+# tracked files above.
+_GITIGNORE_TEXT = (
+    "# grison-managed — ignore everything in this directory except the files below.\n"
+    "*\n"
+    + "".join(f"!{entry}\n" for entry in TRACKED_ENTRIES)
+    + "!templates/**\n"
+)
 
 
 class ManifestError(GrisonError, ValueError):
@@ -146,8 +158,10 @@ def check_git_hygiene(root: Path) -> list[str]:
         return result.returncode == 0
 
     problems: list[str] = []
-    must_be_ignored = [".grison/env", ".grison/state", ".grison/snapshots", ".grison/terms.txt"]
-    must_be_tracked = [".grison/manifest.yml", ".grison/index.json"]
+    must_be_ignored = [f".grison/{entry.rstrip('/')}" for entry in PRIVATE_ENTRIES]
+    must_be_tracked = [
+        f".grison/{entry.rstrip('/')}" for entry in TRACKED_ENTRIES if entry != ".gitignore"
+    ]
     for rel in must_be_ignored:
         if (root / rel).exists() and not _ignored(rel):
             problems.append(f"{rel} must be git-ignored but is not (private data would leak)")
