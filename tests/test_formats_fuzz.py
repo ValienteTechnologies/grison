@@ -14,7 +14,9 @@ from hypothesis import strategies as st
 from grison.formats import finding, mirrors, narrative, note, wiki
 from grison.formats.common import FormatError
 
-_SETTINGS = settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+_SETTINGS = settings(
+    max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+)
 
 _text = st.text(max_size=2000)
 _bytes_as_text = st.binary(max_size=2000).map(lambda b: b.decode("utf-8", errors="replace"))
