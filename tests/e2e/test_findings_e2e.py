@@ -333,3 +333,57 @@ def test_undo_refuses_to_guess_the_report_for_an_evidence_restore_with_no_report
     assert result.exit_code == 1, result.output
     assert "shot.png" in result.output
     assert gw_server.store.evidence == []  # never silently restored into a guessed scope
+
+
+def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
+    run_grison, gw_server, workspace, monkeypatch,
+):
+    """BRIEF task 2 (ENGINE.md §5 per-record isolation): before this fix, an
+    unexpected exception out of one report's ``engine_sync_fileset`` call
+    propagated straight out of ``_run_findings_phase`` — caught only at the
+    WHOLE-PHASE level by ``grison.cli._run_phase`` ("findings sync failed: ..."),
+    discarding the entire findings phase's result: library findings, and every
+    OTHER report's findings, along with it. The fix wraps each report's evidence
+    file-set sync in its own try/except, so one report's failure becomes that
+    report's own `failed` record and every other report/finding still syncs."""
+    import grison.cli as cli_mod
+
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_report(id=8, title="Report B", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_finding(
+        id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4,
+        description="<p>old text</p>",
+    )
+    first = run_grison("sync")  # creates both report directories + pulls the library finding
+    assert first.exit_code == 0, first.output
+
+    lib_path = workspace / "findings" / "library" / "weak-tls-ciphers.md"
+    lib_path.write_text(
+        lib_path.read_text(encoding="utf-8").replace("old text", "brand new text"),
+        encoding="utf-8",
+    )
+
+    real_sync_fileset = cli_mod.engine_sync_fileset
+
+    def _fake_sync_fileset(root, ctx, adapter, folder, **kwargs):
+        if str(folder) == "findings/reports/report-b/evidence":
+            raise RuntimeError("boom")
+        return real_sync_fileset(root, ctx, adapter, folder, **kwargs)
+
+    monkeypatch.setattr(cli_mod, "engine_sync_fileset", _fake_sync_fileset)
+
+    result = run_grison("sync")
+
+    # the phase-level "findings sync failed" message (grison.cli._run_phase) must
+    # NEVER fire for this — the failure is report-b's evidence set's alone.
+    assert "findings sync failed" not in result.output, result.output
+    assert "gw.evidence[findings/reports/report-b]): failed 1" in result.output, result.output
+    assert "boom" in result.output
+    # everything that did NOT touch report-b's evidence still went through in the
+    # SAME sync: the library finding push actually reached the fake server...
+    assert "findings (gw.finding): push 1" in result.output, result.output
+    row = gw_server.store._by_id(gw_server.store.findings, 1)
+    assert row is not None and "brand new text" in row["description"]
+    # ...and report-a's own (clean) evidence set was not skipped either.
+    assert "gw.evidence[findings/reports/report-a])" in result.output, result.output
+    assert result.exit_code == 1, result.output  # still a problem — just correctly attributed

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from grison.engine.apply import sidecar_path
 from grison.engine.filesets import RunOptions, sync_fileset
 from grison.engine.model import Outcome, RemoteRecord
 from grison.engine.state import StateStore
@@ -422,3 +423,171 @@ def test_delete_remote_drift_since_classification_is_a_collision_not_a_delete(
     assert store.delete_calls == 0
     assert rid in store.rows
     assert store.rows[rid]["caption"] == "changed concurrently"  # concurrent edit preserved
+
+
+# --- duplicate remote filenames in one sync (BRIEF fix-b task 1) ------------
+
+
+def test_two_remote_rows_with_the_same_filename_dedupe_against_each_other(tmp_path: Path) -> None:
+    """Before the fix, ``_dedupe_path`` only checked pre-sync disk/index state, not
+    sibling PULL_NEW plans built earlier in the SAME loop: two remote rows named
+    identically both computed the SAME dedupe target, and ``_apply_pull`` for the
+    second one silently clobbered the first — on disk AND in the index — with no
+    event and exit 0. Now a running ``claimed_names`` set is extended after every
+    dedupe, so the second row lands at ``shot-2.png`` in the same run."""
+    store = FakeFileStore()
+    store.upload("shot.png", b"first", "", "")
+    store.upload("shot.png", b"second", "", "")
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
+                          snapshot=snapshot)
+
+    assert [p.outcome for p in result.plans] == [Outcome.PULL_NEW, Outcome.PULL_NEW]
+    on_disk = sorted(p.name for p in (tmp_path / FOLDER).iterdir())
+    assert on_disk == ["shot-2.png", "shot.png"]
+    bytes_by_name = {p.name: p.read_bytes() for p in (tmp_path / FOLDER).iterdir()}
+    assert {bytes_by_name["shot.png"], bytes_by_name["shot-2.png"]} == {b"first", b"second"}
+    index.save()
+    shot = index.get(str(FOLDER / "shot.png"))
+    shot2 = index.get(str(FOLDER / "shot-2.png"))
+    assert shot is not None and shot2 is not None
+    assert shot.id != shot2.id  # two distinct records, not one clobbering the other
+
+    # both files are now correctly tracked — a follow-up sync is clean, not a
+    # repeat "new remote row" for whichever one used to get silently overwritten.
+    index2, state2, snapshot2 = _env(tmp_path)
+    result2 = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
+                           snapshot=snapshot2)
+    assert [p.outcome for p in result2.plans] == [Outcome.CLEAN, Outcome.CLEAN]
+
+
+# --- caption conflict never aborts the sync (BRIEF fix-b task 2) ------------
+
+
+def test_caption_conflict_degrades_only_that_file_and_does_not_abort_the_sync(
+    tmp_path: Path,
+) -> None:
+    """Before the fix, a caption disagreement between two referencing documents
+    raised ``FileSetError`` straight out of ``collect_captions`` — called before
+    any per-record plan exists, outside ``_apply_one``'s per-record isolation, so
+    the exception propagated out of ``sync_fileset`` entirely. Now the conflicting
+    file degrades to "no local caption opinion" (module docstring) and gets its
+    own FAILED record/`failed` event naming REF-004; every other file in the same
+    folder still syncs normally."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    (tmp_path / FOLDER / "other.png").write_bytes(b"v2")
+
+    doc_a = PurePosixPath("findings/reports/r1/a.md")
+    doc_b = PurePosixPath("findings/reports/r1/b.md")
+    doc_bodies = {
+        doc_a: "# A\n\n![Login screen](evidence/shot.png)\n",
+        doc_b: "# B\n\n![Different caption](evidence/shot.png)\n",
+    }
+
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
+                          snapshot=snapshot, doc_bodies=doc_bodies)
+
+    plans_by_path = [(p.path, p.outcome) for p in result.plans]
+    assert (FOLDER / "shot.png", Outcome.FAILED) in plans_by_path  # the conflict, isolated...
+    assert (FOLDER / "shot.png", Outcome.CREATE) in plans_by_path  # ...never blocks its own sync
+    assert (FOLDER / "other.png", Outcome.CREATE) in plans_by_path  # ...or any other file's
+    assert store.upload_calls == 2  # both files still uploaded — the sync was never aborted
+    assert result.summary.counts.get("failed") == 1  # affects the exit code like any failed record
+
+    failed_events = [e for e in result.events if e.verb == "failed"]
+    assert len(failed_events) == 1
+    assert "REF-004" in failed_events[0].detail
+    assert str(doc_a) in failed_events[0].detail
+    assert str(doc_b) in failed_events[0].detail
+
+    # the disputed caption itself was never pushed — degrades to "no opinion"
+    shot_row = next(r for r in store.rows.values() if r["filename"] == "shot.png")
+    assert shot_row["caption"] == ""
+    other_row = next(r for r in store.rows.values() if r["filename"] == "other.png")
+    assert other_row["filename"] == "other.png"
+
+
+# --- collision sidecars for file-set bytes (BRIEF fix-b task 3) -------------
+
+
+def test_collision_sidecar_file_is_never_treated_as_an_ordinary_local_file(
+    tmp_path: Path,
+) -> None:
+    """The old sidecar filter (``name.endswith(".remote")``) only ever matched an
+    extension-less sidecar — a REAL ``<name>.remote.<ext>`` sidecar (the only kind
+    an evidence/image folder ever actually has, since every file in one has an
+    extension) always ends in the ORIGINAL extension, not literally ``.remote``,
+    so it silently passed straight through ``_local_files`` as an ordinary new
+    local file and would have been uploaded as bogus new evidence."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    (tmp_path / FOLDER / "shot.remote.png").write_bytes(b"stale-sidecar-bytes")
+
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
+                          snapshot=snapshot)
+
+    assert [p.outcome for p in result.plans] == [Outcome.CREATE]  # shot.png only
+    assert store.upload_calls == 1
+    assert next(iter(store.rows.values()))["filename"] == "shot.png"
+
+
+def test_collision_writes_a_remote_bytes_sidecar_cleared_once_resolved(tmp_path: Path) -> None:
+    """ENGINE.md §8: a file-set COLLISION must write ``<name>.remote.<ext>`` next
+    to the file with the REMOTE version's bytes — before this fix, the classify-
+    time COLLISION branch in ``_dispatch`` only appended an event, leaving
+    nothing on disk. The sidecar is cleared as soon as the record is no longer in
+    collision (here: the two sides converge)."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    doc_path = PurePosixPath("findings/reports/r1/f.md")
+
+    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot,
+                doc_bodies={doc_path: "# F\n\n![Local caption](evidence/shot.png)\n"})
+    index.save()
+    rid = next(iter(store.rows))
+    assert store.rows[rid]["caption"] == "Local caption"
+
+    # someone edits the caption directly on the server (no grison involved) —
+    # discovered at the very next sync's bulk list, no pre-write re-fetch needed:
+    # a genuine CLASSIFY-TIME collision (ENGINE.md's table), not the pre-write
+    # re-fetch guard's drift case the other tests above already cover.
+    store.rows[rid]["caption"] = "Remote caption"
+    index2, state2, snapshot2 = _env(tmp_path)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2,
+        doc_bodies={doc_path: "# F\n\n![A different local caption](evidence/shot.png)\n"},
+    )
+
+    assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
+    sidecar = tmp_path / FOLDER / sidecar_path(PurePosixPath("shot.png")).name
+    assert sidecar.name == "shot.remote.png"
+    assert sidecar.exists()
+    assert sidecar.read_bytes() == store.bodies[rid]  # the REMOTE version's bytes
+    assert (tmp_path / FOLDER / "shot.png").read_bytes() == b"v1"  # local untouched
+    assert store.rows[rid]["caption"] == "Remote caption"  # never silently overwritten
+
+    # the user resolves it: the local caption opinion is brought in line with the
+    # remote's current value.
+    index3, state3, snapshot3 = _env(tmp_path)
+    result2 = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index3, state=state3, snapshot=snapshot3,
+        doc_bodies={doc_path: "# F\n\n![Remote caption](evidence/shot.png)\n"},
+    )
+
+    assert all(p.outcome is not Outcome.COLLISION for p in result2.plans)
+    assert not sidecar.exists()  # cleared once no longer in collision
+    # and the now-cleared sidecar was never itself mistaken for a new local file
+    assert not any(p.path is not None and p.path.name == "shot.remote.png"
+                   for p in result2.plans)
