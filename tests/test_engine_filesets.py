@@ -19,13 +19,19 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 from grison.engine.apply import sidecar_path
-from grison.engine.filesets import RunOptions, sync_fileset
+from grison.engine.filesets import RunOptions, canonical_prose, canonical_remote_prose, sync_fileset
 from grison.engine.model import Outcome, RemoteRecord
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
 from grison.fsio import atomic_write_bytes
 from grison.index import Index
+from grison.markdown.converter import ConverterError
+from grison.markdown.refscan import scan_refs
 from grison.validator.registry import Failure
 
 FOLDER = PurePosixPath("findings/reports/r1/evidence")
@@ -765,3 +771,146 @@ def test_invalid_fileset_create_is_withheld_others_proceed(tmp_path: Path) -> No
 
     assert store.upload_calls == 1  # only the good file — the bad one never uploaded
     assert next(iter(store.rows.values()))["filename"] == "good-name.png"
+
+
+# --- _substitute_ref_identity/canonical_prose: fold by POSITION from the one
+# real parse, and ONLY a reference _is_grison_reference recognises (fix-f
+# item 1 + the coordinator's external-link addendum) ---------------------------
+
+
+@dataclass
+class _FakeIdResolver:
+    id_by_path: dict[str, int]
+
+    def to_remote_id(self, path: str) -> int | None:
+        return self.id_by_path.get(path)
+
+
+def test_canonical_prose_folds_a_real_reference_not_a_fenced_lookalike() -> None:
+    """Verified failure (a): a real reference's exact text ALSO appearing
+    inside a code fence elsewhere in the document used to leave BOTH
+    occurrences unfolded — the old exclusion checked whether the MATCHED TEXT
+    was contained in a code span's own text, not whether THIS occurrence's
+    POSITION was inside one, so a same-text fenced copy poisoned the real
+    occurrence too."""
+    resolver = _FakeIdResolver({"evidence/shot.png": 7})
+    md = (
+        "see ![shot](evidence/shot.png) above\n\n"
+        "```\n"
+        "![shot](evidence/shot.png)\n"
+        "```\n"
+    )
+    result = canonical_prose(md, resolver)["text"]
+    assert "![](7)" in result  # the real one, outside the fence, IS folded
+    assert "![shot](evidence/shot.png)" in result  # the fenced copy is untouched
+
+
+def test_canonical_prose_folds_reference_with_escaped_bracket_in_caption() -> None:
+    """Verified failure (c): a caption containing an escaped ``\\]`` never
+    matched the old flat ``[^\\]]*`` regex at all, so the reference was never
+    folded (the authored path stayed forever, never converging with the
+    remote's resolved-id form)."""
+    resolver = _FakeIdResolver({"evidence/x.png": 3})
+    md = "see [foo \\] bar](evidence/x.png) here"
+    result = canonical_prose(md, resolver)["text"]
+    assert "[3](3)" in result
+    assert "foo" not in result
+
+
+def test_canonical_prose_rejects_image_nested_inside_a_link() -> None:
+    """Verified failure (b): ``[![alt](inner)](outer)`` misparsed under the old
+    regex (caption group has no concept of bracket depth, so it closed at the
+    INNER ``]``, leaving a dangling ``](outer)`` and folding the wrong
+    destination). Rejected consistently with the converter's own "image not
+    alone in its paragraph" push-side rule instead of guessing which link
+    "wins" — see ``_substitute_ref_identity``'s docstring for why."""
+    resolver = _FakeIdResolver({"evidence/inner.png": 1, "evidence/outer.png": 2})
+    md = "[![alt](evidence/inner.png)](evidence/outer.png)"
+    with pytest.raises(ConverterError):
+        canonical_prose(md, resolver)
+
+
+def test_canonical_prose_leaves_an_external_link_byte_identical() -> None:
+    """The coordinator's addendum: a plain external link next to a real
+    evidence reference must be left completely untouched — only the evidence
+    reference folds. Before the fix, ANY ``[text](dest)`` folded
+    unconditionally, turning the external link into
+    ``[unresolved](unresolved)`` on this (local) side forever, while the
+    remote side never touches an ordinary ``<a>`` at all — see
+    ``test_canonical_remote_prose_leaves_an_ordinary_link_untouched`` below and
+    ``tests/e2e/test_findings_e2e.py::
+    test_library_finding_with_external_link_stays_clean_across_syncs``."""
+    resolver = _FakeIdResolver({"evidence/shot.png": 9})
+    md = (
+        "See [OWASP: SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection) "
+        "and the screenshot ![shot](evidence/shot.png) above."
+    )
+    result = canonical_prose(md, resolver)["text"]
+    assert (
+        "[OWASP: SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection)"
+        in result
+    )
+    assert "![](9)" in result
+
+
+def test_canonical_remote_prose_leaves_an_ordinary_link_untouched() -> None:
+    """The remote side must apply the exact same classification: an ordinary
+    ``<a>`` (never grison's native evidence div/cross-reference span) goes
+    through ``html_to_md``'s plain link rendering unchanged, while a real
+    evidence embed still folds to its literal id."""
+    html = (
+        '<p>See <a href="https://owasp.org/x" target="_blank" rel="noopener">OWASP</a></p>'
+        '<div class="richtext-evidence" data-evidence-id="9"></div>'
+    )
+    result = canonical_remote_prose(html)["text"]
+    assert "[OWASP](https://owasp.org/x)" in result
+    assert "![](9)" in result
+
+
+@given(
+    prose=st.lists(
+        st.sampled_from(
+            [
+                "plain",
+                "prose",
+                "words",
+                "here",
+                "[external](https://example.com/x)",
+                "![shot](evidence/a.png)",
+                "[ref](evidence/a.png)",
+                "![shot](evidence/b.png \"cap\")",
+                "`![shot](evidence/a.png)`",
+                "```\n![shot](evidence/a.png)\n```",
+            ]
+        ),
+        min_size=1,
+        max_size=6,
+    )
+)
+@settings(max_examples=100, deadline=None)
+def test_canonical_prose_touches_exactly_the_grison_references_scan_refs_reports(
+    prose: list[str],
+) -> None:
+    """Property: folding touches exactly the references ``scan_refs`` reports
+    AND ``_is_grison_reference`` recognises (an ``evidence/``-prefixed
+    embed/cross-reference) — nothing else, whether that "something else" is
+    plain prose, an external link, or a fenced/inline-code lookalike."""
+    md = "\n\n".join(prose)
+    resolver = _FakeIdResolver({"evidence/a.png": 1, "evidence/b.png": 2})
+    try:
+        result = canonical_prose(md, resolver)["text"]
+    except ConverterError:
+        return  # a nested-image-in-link shape this draw can't produce anyway
+    refs = scan_refs(md)
+    for ref in refs:
+        if ref.kind == "embed" or ref.path.startswith("evidence/"):
+            token = str(resolver.id_by_path.get(ref.path, "unresolved"))
+            expected = f"![]({token})" if ref.kind == "embed" else f"[{token}]({token})"
+            assert expected in result
+    # every fenced/inline-code lookalike copy survives byte-identical
+    if "```\n![shot](evidence/a.png)\n```" in md:
+        assert "![shot](evidence/a.png)" in result
+    if "`![shot](evidence/a.png)`" in md:
+        assert "`![shot](evidence/a.png)`" in result
+    if "[external](https://example.com/x)" in md:
+        assert "[external](https://example.com/x)" in result

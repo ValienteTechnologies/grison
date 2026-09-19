@@ -648,7 +648,8 @@ def test_md_to_html_never_invents_or_multiplies_invisible_characters(doc: str) -
 # This section adds the one shape those can't reach: a REAL, unescaped Jinja
 # ``{% raw %}...{% endraw %}`` region actually present in HTML — never emitted by
 # grison's own push any more, but real/legacy stored data can still carry one (see
-# ``grison.markdown.converter``'s ``_RAW_BLOCK_RE``) — mixed with plain text and
+# ``grison.markdown.converter``'s ``_RawScanState``/``_split_raw_regions``) — mixed
+# with plain text and
 # genuinely active ``{{ }}`` expressions sitting OUTSIDE it in the same field.
 
 _RAW_INNER_SNIPPETS = [
@@ -711,3 +712,48 @@ def test_raw_block_repush_never_nests_escaping(html: str) -> None:
     html2 = md_to_html(md)
     assert "{% raw %}" not in html2
     assert "{% endraw %}" not in html2
+
+
+# --- item 2 (fix-f): a raw region split across an inline tag, or across two
+# top-level blocks, must be recognized as ONE region (see converter.py's
+# _RawScanState/_split_raw_regions and the module docstring) — never two
+# dangling `gw:` active markers, one per half.
+
+_INLINE_TAGS_FOR_RAW_SPLIT = ["strong", "em", "code", "a", None]
+
+
+@st.composite
+def html_with_raw_region_split(draw: st.DrawFn) -> str:
+    """One ``{% raw %}...{% endraw %}`` region whose opener and closer are
+    separated either by a random inline tag wrapping the region's own content
+    (inside one ``<p>``), or by a top-level block boundary (the opener's ``<p>``
+    ends, the closer starts the next ``<p>``) — the two shapes the old
+    per-text-run scan could never see across."""
+    inner = draw(st.sampled_from(_RAW_INNER_SNIPPETS))
+    lead = _esc_html_text(draw(st.sampled_from(WORDS)))
+    trail = _esc_html_text(draw(st.sampled_from(WORDS)))
+    tag = draw(st.sampled_from(_INLINE_TAGS_FOR_RAW_SPLIT))
+    across_block = draw(st.booleans())
+    wrapped_inner = inner if tag is None else (
+        f'<a href="http://example.com/x">{inner}</a>' if tag == "a" else f"<{tag}>{inner}</{tag}>"
+    )
+    if across_block:
+        return f"<p>{lead} {{% raw %}}{wrapped_inner}</p><p>{{% endraw %}} {trail}</p>"
+    return f"<p>{lead} {{% raw %}}{wrapped_inner}{{% endraw %}} {trail}</p>"
+
+
+@_SETTINGS
+@given(html_with_raw_region_split())
+def test_raw_region_split_across_tag_or_block_never_leaves_a_gw_marker(html: str) -> None:
+    md = html_to_md(html)
+    assert "{% raw %}" not in md
+    assert "{% endraw %}" not in md
+    assert "gw:" not in md, f"content inside the raw region became an active marker: {md!r}"
+
+
+@_SETTINGS
+@given(html_with_raw_region_split())
+def test_raw_region_split_across_tag_or_block_reaches_immediate_fixpoint(html: str) -> None:
+    md = html_to_md(html)
+    md2 = html_to_md(md_to_html(md))
+    assert md2 == md, f"non-fixpoint: html={html!r} md={md!r} md2={md2!r}"

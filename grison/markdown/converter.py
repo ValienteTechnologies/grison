@@ -165,13 +165,13 @@ of them raises ``ConverterError`` naming what to do instead (pass ``refs=``):
   active.
 
   A real, unescaped Jinja ``{% raw %}...{% endraw %}`` region found in pulled
-  HTML (``_RAW_BLOCK_RE``) is a THIRD case, distinct from both of the above:
-  never emitted by grison's own push any more (the per-token mechanism above
-  replaced the old design that used it — see the proof reference below), but
-  real/legacy stored data can still carry one, and Jinja's own semantics say
-  everything between the tags is unconditionally literal. ``html_to_md``
-  resolves the whole region straight to its plain literal text — never to a
-  ``gw:`` active-expression marker, and never leaving the ``{% raw %}``/
+  HTML is a THIRD case, distinct from both of the above: never emitted by
+  grison's own push any more (the per-token mechanism above replaced the old
+  design that used it — see the proof reference below), but real/legacy stored
+  data can still carry one, and Jinja's own semantics say everything between
+  the tags is unconditionally literal. ``html_to_md`` resolves the whole
+  region straight to its plain literal text — never to a ``gw:``
+  active-expression marker, and never leaving the ``{% raw %}``/
   ``{% endraw %}`` markers themselves in the markdown, so the very next push
   re-escapes it (if needed) through the ONE per-token mechanism rather than
   reproducing the (now-legacy) raw-wrap shape. This is what keeps the escaping
@@ -181,6 +181,25 @@ of them raises ``ConverterError`` naming what to do instead (pass ``refs=``):
   expression itself renders literally, unevaluated, instead of resolving to the
   token it names) — grison's push never produces this shape because it never
   emits ``{% raw %}`` in the first place.
+
+  The rule: an opener and its closer are recognized WHEREVER they fall,
+  never only within one HTML text node. ``{% raw %}`` and ``{% endraw %}`` are
+  each their own token (never one paired regex), scanned across every leaf of
+  text in the WHOLE field, in document order, against one shared, mutable
+  "are we inside a raw region right now" flag (``_RawScanState`` /
+  ``_split_raw_regions``) — so a region is recognized (a) across an inline tag
+  inside one block, e.g. ``<p>a {% raw %}<strong>{{ x }}</strong>{% endraw %}
+  b</p>``: the ``<strong>`` stays real bold formatting in the markdown, but its
+  content renders literally (never a ``gw:`` marker), same as the plain text on
+  either side; and (b) across two separate top-level block elements, e.g. one
+  ``<p>`` ending mid-region and the next ``<p>`` carrying the closer: BOTH
+  halves render literally (never active), and the still-open region is
+  reported via ``on_loss`` once, at the boundary where it's still open,
+  distinct from the ordinary "resolved to literal text" message fired once the
+  closer is actually found. An opener with no closer anywhere in the rest of
+  the field leaves everything after it literal for good — Jinja's own raw
+  block, once opened, never re-enables evaluation on its own, and a field
+  shaped that way is already un-exportable regardless of what grison renders.
 
   The legacy evidence forms (``{{.name}}``, ``{{.ref name}}``) are handled above,
   not by the active/literal distinction. Any OTHER dot-form (``{{.caption}}``,
@@ -324,21 +343,21 @@ _INLINE_SPECIAL_RE = re.compile(
     r"|\{#(?P<active_comment>.*?)#\}",
     re.DOTALL,
 )
-# A literal Jinja ``{% raw %}...{% endraw %}`` block found in STORED html — never
-# emitted by grison's own push any more (see ``_jinja_escape_html``'s per-token
-# design), but real data can still carry one (an older grison push, or a human
-# typing raw-block syntax directly in Ghostwriter's editor): Jinja's own semantics
-# say everything between the tags is literal, unconditionally, so ``html_to_md``
-# must resolve it to plain literal text — never to ``gw:`` active-expression code
-# spans, and never leaving the ``{% raw %}``/``{% endraw %}`` markers themselves in
-# the markdown (see module docstring, "Active template expressions"). Matched
-# non-greedily (DOTALL) so the FIRST ``{% endraw %}`` closes it, exactly like a real
-# Jinja lexer never nests raw blocks; an unmatched opener with no closer anywhere in
-# the field falls through to the ordinary active-statement handling below (unusual,
-# but such a field is already un-exportable either way, raw-wrapped or not).
-_RAW_BLOCK_RE = re.compile(
-    r"\{%-?\s*raw\s*-?%\}(?P<raw_content>.*?)\{%-?\s*endraw\s*-?%\}", re.DOTALL
-)
+# A literal Jinja ``{% raw %}``/``{% endraw %}`` DELIMITER TOKEN found in STORED
+# html — never emitted by grison's own push any more (see ``_jinja_escape_html``'s
+# per-token design), but real data can still carry one (an older grison push, or a
+# human typing raw-block syntax directly in Ghostwriter's editor): Jinja's own
+# semantics say everything between the two is literal, unconditionally. Matched as
+# two SEPARATE tokens, never a single paired regex: pairing them requires seeing
+# both in the same scan, and the two can legitimately sit in different HTML text
+# nodes (an inline tag — ``<strong>``, ``<em>``, ``<a>``, ``<code>`` — between them)
+# or in different top-level blocks entirely (module docstring, "Active template
+# expressions") — see ``_RawScanState``/``_split_raw_regions`` below, the ONE place
+# that pairs them, by scanning every leaf of a document in order against one
+# shared, mutable flag rather than re-deriving pairing per leaf.
+_RAW_OPEN_RE = r"\{%-?\s*raw\s*-?%\}"
+_RAW_CLOSE_RE = r"\{%-?\s*endraw\s*-?%\}"
+_RAW_TOKEN_RE = re.compile(rf"(?P<raw_open>{_RAW_OPEN_RE})|(?P<raw_close>{_RAW_CLOSE_RE})")
 _UNRESOLVED_RE = re.compile(r"^gw:evidence-ref:(?:id=(?P<id>\d+)|name=(?P<name>.*))$", re.DOTALL)
 _GW_REF_ENCODED_ATTR = "data-gw-ref-encoded"
 _EVIDENCE_DIV_CLASS = "richtext-evidence"
@@ -650,11 +669,15 @@ def html_to_md(
     if len(builder.stack) != 1:
         raise ConverterError(f"unclosed HTML tag: <{builder.stack[-1].tag}>")
     blocks = _merge_adjacent_top_level_lists(_group_top_level(builder.root.children), on_loss)
-    return "\n\n".join(_render_top_level_blocks(blocks, refs, on_loss))
+    raw_state = _RawScanState()
+    return "\n\n".join(_render_top_level_blocks(blocks, refs, on_loss, raw_state))
 
 
 def _render_top_level_blocks(
-    blocks: list[_Node], refs: RefResolver | None, on_loss: Callable[[str], None] | None
+    blocks: list[_Node],
+    refs: RefResolver | None,
+    on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
 ) -> list[str]:
     """Render each top-level block, DROPPING a ``<p>``/heading that renders to
     nothing (an empty ``<p></p>``, or one whose only content is CommonMark-
@@ -672,7 +695,8 @@ def _render_top_level_blocks(
     CommonMark behavior to match."""
     rendered: list[str] = []
     for block in blocks:
-        text = _render_block(block, refs, on_loss)
+        text = _render_block(block, refs, on_loss, raw_state)
+        _note_block_boundary(raw_state, on_loss)
         if text == "" and block.tag != "ul" and block.tag != "ol":
             _report_loss(
                 on_loss,
@@ -799,7 +823,10 @@ def _render_evidence_div(
 
 
 def _render_block(
-    node: _Node, refs: RefResolver | None = None, on_loss: Callable[[str], None] | None = None
+    node: _Node,
+    refs: RefResolver | None,
+    on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
 ) -> str:
     if node.tag == "p":
         text = _is_bare_text(node.children)
@@ -808,12 +835,16 @@ def _render_block(
             if embed is not None:
                 return embed
         _report_dropped_attrs(node, on_loss)
-        return _finalize_line(_render_inline(node.children, refs, on_loss), on_loss)
+        return _finalize_line(_render_inline(node.children, refs, on_loss, raw_state), on_loss)
     if node.tag in _HEADING_TAGS:
         _report_dropped_attrs(node, on_loss)
-        return "#" * int(node.tag[1]) + " " + _render_inline(node.children, refs, on_loss)
+        return (
+            "#" * int(node.tag[1])
+            + " "
+            + _render_inline(node.children, refs, on_loss, raw_state)
+        )
     if node.tag in ("ul", "ol"):
-        return _render_list_node(node, refs, on_loss)
+        return _render_list_node(node, refs, on_loss, raw_state)
     if node.tag == "div":
         return _render_evidence_div(node, refs, on_loss)
     raise ConverterError(f"unsupported block-level tag: <{node.tag}>")
@@ -838,7 +869,10 @@ def _ol_start(node: _Node, on_loss: Callable[[str], None] | None) -> int:
 
 
 def _render_list_node(
-    node: _Node, refs: RefResolver | None = None, on_loss: Callable[[str], None] | None = None
+    node: _Node,
+    refs: RefResolver | None,
+    on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
 ) -> str:
     is_ol = node.tag == "ol"
     n = _ol_start(node, on_loss) if is_ol else 1
@@ -852,7 +886,7 @@ def _render_list_node(
         if li.tag != "li":
             raise ConverterError(f"unsupported <{node.tag}> child: <{li.tag}>")
         _report_dropped_attrs(li, on_loss)
-        item_lines = _render_li(li, refs, on_loss)
+        item_lines = _render_li(li, refs, on_loss, raw_state)
         marker = f"{n}. " if is_ol else "- "
         lines.append(marker + item_lines[0])
         # CommonMark requires a nested block to be indented to (at least) this
@@ -873,8 +907,9 @@ _LI_BLOCK_TAGS = ("p", "div")
 
 def _render_li(
     li: _Node,
-    refs: RefResolver | None = None,
-    on_loss: Callable[[str], None] | None = None,
+    refs: RefResolver | None,
+    on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
     depth: int = 0,
 ) -> list[str]:
     """Render one ``<li>``'s content, unwrapping the ``<p>`` GW wraps item content
@@ -897,17 +932,17 @@ def _render_li(
     nested: list[str] = []
     for lst in lists:
         _report_dropped_attrs(lst, on_loss)
-        nested.extend(_flatten_nested_list(lst, refs, on_loss, depth + 1))
+        nested.extend(_flatten_nested_list(lst, refs, on_loss, raw_state, depth + 1))
 
     if not blocks:
         inline_children = [
             c for c in li.children if not (isinstance(c, _Node) and c.tag in _LIST_TAGS)
         ]
-        head = _finalize_line(_render_inline(inline_children, refs, on_loss), on_loss)
+        head = _finalize_line(_render_inline(inline_children, refs, on_loss, raw_state), on_loss)
         return [head, *nested]
     if len(blocks) == 1 and blocks[0].tag == "p":
         _report_dropped_attrs(blocks[0], on_loss)
-        head = _finalize_line(_render_inline(blocks[0].children, refs, on_loss), on_loss)
+        head = _finalize_line(_render_inline(blocks[0].children, refs, on_loss, raw_state), on_loss)
         return [head, *nested]
 
     lines: list[str] = []
@@ -925,7 +960,9 @@ def _render_li(
             if embed is not None:
                 text = embed
             else:
-                text = _finalize_line(_render_inline(b.children, refs, on_loss), on_loss)
+                text = _finalize_line(
+                    _render_inline(b.children, refs, on_loss, raw_state), on_loss
+                )
         if lines:
             lines.append("")
         lines.append(text)
@@ -937,6 +974,7 @@ def _flatten_nested_list(
     lst: _Node,
     refs: RefResolver | None,
     on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
     depth: int = 1,
 ) -> list[str]:
     """Flatten a ``<ul>``/``<ol>`` nested inside an ``<li>`` — and anything nested
@@ -965,7 +1003,7 @@ def _flatten_nested_list(
         if li.tag != "li":
             raise ConverterError(f"unsupported <{lst.tag}> child: <{li.tag}>")
         _report_dropped_attrs(li, on_loss)
-        item_lines = _render_li(li, refs, on_loss, depth)
+        item_lines = _render_li(li, refs, on_loss, raw_state, depth)
         if item_lines and item_lines[0]:
             marker = f"{n}. " if is_ol else "- "
             lines.append(marker + item_lines[0])
@@ -983,26 +1021,27 @@ def _flatten_nested_list(
 
 def _render_inline(
     nodes: list[_Node | str],
-    refs: RefResolver | None = None,
-    on_loss: Callable[[str], None] | None = None,
+    refs: RefResolver | None,
+    on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
 ) -> str:
     parts = []
     for n in _merge_adjacent_inline(nodes, on_loss):
         if isinstance(n, str):
-            parts.append(_render_text_run(n, refs, on_loss))
+            parts.append(_render_text_run(n, refs, on_loss, raw_state))
         elif n.tag == "br":
             parts.append("\n")
         elif n.tag == "strong":
             _report_dropped_attrs(n, on_loss)
-            inner = _render_inline(n.children, refs, on_loss)
+            inner = _render_inline(n.children, refs, on_loss, raw_state)
             parts.append(_wrap_delim("**", inner, "strong", on_loss))
         elif n.tag == "em":
             _report_dropped_attrs(n, on_loss)
-            inner = _render_inline(n.children, refs, on_loss)
+            inner = _render_inline(n.children, refs, on_loss, raw_state)
             parts.append(_wrap_delim("*", inner, "em", on_loss))
         elif n.tag == "code":
             _report_dropped_attrs(n, on_loss)
-            parts.append(_fence_code(_render_code_text(n.children)))
+            parts.append(_fence_code(_render_code_text(n.children, raw_state)))
         elif n.tag == "a":
             href = n.attrs.get("href", "")
             rel = n.attrs.get("rel")
@@ -1016,7 +1055,8 @@ def _render_inline(
             _report_dropped_attrs(n, on_loss)
             title = n.attrs.get("title")
             title_part = f' "{_md_escape_quotes(title)}"' if title else ""
-            parts.append(f"[{_render_inline(n.children, refs, on_loss)}]({href}{title_part})")
+            inner_a = _render_inline(n.children, refs, on_loss, raw_state)
+            parts.append(f"[{inner_a}]({href}{title_part})")
         elif n.tag == "span":
             # A plain (non cross-reference) <span> is always spliced away by
             # _flatten_transparent_spans() inside _merge_adjacent_inline()
@@ -1270,32 +1310,102 @@ def _render_cross_ref_span(
     return f"[{_md_escape_run(_ref_display_text(local))}]({local.path})"
 
 
+@dataclass
+class _RawScanState:
+    """Shared, mutable "are we currently inside a real, unescaped Jinja
+    ``{% raw %}...{% endraw %}`` region" flag, threaded through one whole
+    :func:`html_to_md` call — the ONE rule that replaces the old per-text-run
+    ``_RAW_BLOCK_RE`` pair match (which only ever saw one HTML text node at a
+    time, so an opener and its closer split across an inline tag, e.g.
+    ``{% raw %}<strong>{{ x }}</strong>{% endraw %}``, or across two separate
+    top-level blocks, e.g. one ``<p>`` ending mid-region and the next ``<p>``
+    carrying the closer, were each invisible to it — see module docstring). Every
+    leaf of text in the document, in document order, is scanned against this one
+    flag (:func:`_split_raw_regions`), so a region is recognised wherever its two
+    tokens actually fall, never re-derived per leaf. ``_open_reported`` tracks
+    whether the region open right now already fired its "still open at a block
+    boundary" ``on_loss`` message once (:func:`_note_block_boundary`), so a region
+    spanning three or more blocks is reported once, not once per boundary."""
+
+    in_raw: bool = False
+    _open_reported: bool = False
+
+
+def _split_raw_regions(
+    text: str, state: _RawScanState, on_loss: Callable[[str], None] | None
+) -> list[tuple[bool, str]]:
+    """Split one leaf of text into ``(is_literal, piece)`` runs against
+    ``state``'s shared flag, dropping every ``{% raw %}``/``{% endraw %}`` marker
+    token itself — never left in the output (module docstring). A closer flips
+    the flag back off and fires the "resolved to literal text" ``on_loss``
+    message exactly once per region, regardless of how many leaves/tags/blocks it
+    actually spanned. An opener with no closer anywhere in the rest of the
+    document leaves every later piece — in this leaf and every leaf after it,
+    across every remaining tag and block — literal for good (Jinja's own raw
+    block, once opened, disables evaluation unconditionally until its closer;
+    with none, the whole field is already un-exportable regardless of what
+    grison renders here)."""
+    out: list[tuple[bool, str]] = []
+    pos = 0
+    for m in _RAW_TOKEN_RE.finditer(text):
+        if m.start() > pos:
+            out.append((state.in_raw, text[pos : m.start()]))
+        if m.group("raw_open") and not state.in_raw:
+            state.in_raw = True
+            state._open_reported = False
+        elif m.group("raw_close") and state.in_raw:
+            state.in_raw = False
+            state._open_reported = False
+            _report_loss(
+                on_loss,
+                "{% raw %}...{% endraw %} block resolved to its literal text (normalization)",
+            )
+        pos = m.end()
+    if pos < len(text):
+        out.append((state.in_raw, text[pos:]))
+    return out
+
+
+def _note_block_boundary(state: _RawScanState, on_loss: Callable[[str], None] | None) -> None:
+    """Called between top-level blocks (:func:`_render_top_level_blocks`): a
+    region still open at a block boundary is a raw region spanning two block
+    elements — reported once via ``on_loss`` (the flag itself already makes both
+    halves render literally; this call only adds visibility), never re-reported
+    for the same still-open region at the next boundary."""
+    if state.in_raw and not state._open_reported:
+        state._open_reported = True
+        _report_loss(
+            on_loss,
+            "{% raw %} block still open at the end of a block, continuing into the next "
+            "block element (normalization: rendered literally in both halves, never as "
+            "an active expression)",
+        )
+
+
 def _render_text_run(
-    text: str, refs: RefResolver | None, on_loss: Callable[[str], None] | None
+    text: str,
+    refs: RefResolver | None,
+    on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
 ) -> str:
-    """Render one literal HTML text node as markdown: a ``{% raw %}...{% endraw %}``
-    region (see ``_RAW_BLOCK_RE``) resolves to its own plain literal text FIRST and
+    """Render one literal HTML text node as markdown: every piece of ``text``
+    that :func:`_split_raw_regions` marks as inside a ``{% raw %}...{% endraw %}``
+    region (see ``raw_state``) resolves to its own plain literal text FIRST and
     unconditionally — Jinja's raw block already means "never evaluate this", so
     nothing inside one is ever treated as an active expression or re-escaped as a
     ``gw:`` marker, matching D10's contract that the escaping mechanism is never
-    nested; everything OUTSIDE a raw region then goes through the ordinary special-
-    form scan: a D10 escape token (see ``_jinja_escape_html``) unwraps to the
-    literal delimiter text it stands for first, then legacy ``.ref`` cross-refs,
-    then active (un-escaped) Jinja delimiters (see module docstring); anything else
-    is escaped literal text."""
+    nested; every piece outside a raw region then goes through the ordinary
+    special-form scan: a D10 escape token (see ``_jinja_escape_html``) unwraps to
+    the literal delimiter text it stands for first, then legacy ``.ref``
+    cross-refs, then active (un-escaped) Jinja delimiters (see module docstring);
+    anything else is escaped literal text."""
     out: list[str] = []
-    pos = 0
-    for rm in _RAW_BLOCK_RE.finditer(text):
-        if rm.start() > pos:
-            out.append(_render_text_run_specials(text[pos : rm.start()], refs, on_loss))
-        literal = _JINJA_STRLIT_RE.sub(lambda m: m.group(1), rm.group("raw_content"))
-        out.append(_md_escape_run(literal))
-        _report_loss(
-            on_loss,
-            "{% raw %}...{% endraw %} block resolved to its literal text (normalization)",
-        )
-        pos = rm.end()
-    out.append(_render_text_run_specials(text[pos:], refs, on_loss))
+    for is_literal, piece in _split_raw_regions(text, raw_state, on_loss):
+        if is_literal:
+            literal = _JINJA_STRLIT_RE.sub(lambda m: m.group(1), piece)
+            out.append(_md_escape_run(literal))
+        else:
+            out.append(_render_text_run_specials(piece, refs, on_loss))
     return "".join(out)
 
 
@@ -1352,26 +1462,25 @@ def _render_dot_form_inline(
     )
 
 
-def _unwrap_jinja_escapes(text: str) -> str:
+def _unwrap_jinja_escapes(text: str, raw_state: _RawScanState) -> str:
     """Resolve every D10 escape token (``_jinja_escape_html``'s per-token form) AND
     every ``{% raw %}...{% endraw %}`` region back to plain literal text — used for
     ``<code>`` content, which (per module docstring) is always literal regardless of
     shape, so a raw-wrap found there is exactly as redundant as it is in plain text
-    and resolves the same way (see ``_render_text_run``); any D10 strlit token found
-    INSIDE a raw region (only possible in already-malformed legacy data, since
-    grison's own push never nests them) is unwrapped too, defensively."""
+    and resolves the same way (see ``_render_text_run``, same ``raw_state`` shared
+    across the whole document so a region's opener/closer pairing is unaffected by
+    whether either half happens to sit inside a ``<code>`` element); any D10 strlit
+    token found INSIDE a raw region (only possible in already-malformed legacy
+    data, since grison's own push never nests them) is unwrapped too, defensively.
+    Never reports via ``on_loss`` — code content never has, and gains no new
+    reporting here (:func:`_render_code_text` has no ``on_loss`` of its own)."""
     out: list[str] = []
-    pos = 0
-    for rm in _RAW_BLOCK_RE.finditer(text):
-        if rm.start() > pos:
-            out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), text[pos : rm.start()]))
-        out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), rm.group("raw_content")))
-        pos = rm.end()
-    out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), text[pos:]))
+    for _is_literal, piece in _split_raw_regions(text, raw_state, None):
+        out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), piece))
     return "".join(out)
 
 
-def _render_code_text(nodes: list[_Node | str]) -> str:
+def _render_code_text(nodes: list[_Node | str], raw_state: _RawScanState) -> str:
     """<code> content is never inline-parsed, so just flatten its text (unwrapping
     any cosmetic <span>, and unwrapping each D10 escape token — see
     ``_jinja_escape_html`` — back to the literal delimiter text it stands for —
@@ -1381,9 +1490,9 @@ def _render_code_text(nodes: list[_Node | str]) -> str:
     parts = []
     for n in nodes:
         if isinstance(n, str):
-            parts.append(_unwrap_jinja_escapes(n))
+            parts.append(_unwrap_jinja_escapes(n, raw_state))
         elif n.tag == "span":
-            parts.append(_render_code_text(n.children))
+            parts.append(_render_code_text(n.children, raw_state))
         else:
             raise ConverterError(f"unsupported nested tag inside <code>: <{n.tag}>")
     return "".join(parts)

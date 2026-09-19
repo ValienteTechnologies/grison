@@ -93,10 +93,16 @@ link text is synthesised deterministically on the remote side, never preserved �
 see :mod:`grison.markdown.converter`'s module docstring). :func:`_substitute_ref_
 identity` folds BOTH an embed's and a cross-reference's destination into the same
 identity token :func:`canonical_prose`/:func:`canonical_remote_prose` agree on —
-one shape-matching pattern for both forms (they differ only in the leading
-``!``), guarded against a code-span/fence lookalike by
-:mod:`grison.markdown.refscan`'s real tokenizer (:func:`~grison.markdown.
-refscan.code_spans`) rather than a second hand-rolled matching regex.
+one substitution for both forms (they differ only in the leading ``!``), by
+POSITION from the one real parse (:mod:`grison.markdown.refscan`'s
+:func:`~grison.markdown.refscan.scan_refs`/:func:`~grison.markdown.refscan.
+ref_spans`, matched by ordinal index), never a second hand-rolled matching
+regex — and ONLY for a reference :func:`_is_grison_reference` recognises: an
+embed always; a cross-reference only when its destination starts with
+``evidence/``, exactly mirroring the converter's own push-side rule, so an
+ordinary external link is never touched on the local side either (the remote
+side already never touches one, by construction — see
+:func:`canonical_remote_prose`).
 """
 
 from __future__ import annotations
@@ -128,7 +134,7 @@ from grison.hashing import digest
 from grison.index import Index, IndexKind
 from grison.markdown.converter import ConverterError, html_to_md
 from grison.markdown.refs import LocalRef, RemoteRef
-from grison.markdown.refscan import code_spans, decode_ref_path, scan_refs
+from grison.markdown.refscan import FoundRef, ref_spans, scan_refs
 from grison.validator.registry import Failure
 
 #: Same values as grison.engine.apply's — one change-guard rule for every record
@@ -268,19 +274,38 @@ class ResolvesEmbeds(Protocol):
     def to_remote_id(self, path: str) -> int | None: ...
 
 
-# Generalised from `_EMBED_LINE_RE` (both forms — the two differ only in the
-# leading `!` — never a second, independent pattern per form) and, unlike that
-# one, NOT anchored to a whole standalone line: a cross-reference is inline by
-# nature (D1: `[text](evidence/file.png)`, no `!`, mid-sentence), so folding its
-# identity needs to find it wherever it sits, not just alone on its own line.
-# Matching by shape alone can mistake code-span/fence TEXT that merely looks
-# like a link for a real one (a plain regex has no concept of "inside a code
-# span"); `_substitute_ref_identity` below guards against exactly that with
-# :func:`~grison.markdown.refscan.code_spans`'s real, tokenizer-grounded
-# answer, never a second hand-rolled matching regex.
-_REF_RE = re.compile(
-    r'(?P<bang>!?)\[(?P<caption>[^\]]*)\]\((?P<dest>[^)\s]+)(?:\s+"(?P<title>[^"]*)")?\)'
-)
+# Folding was ONCE done with a hand-rolled regex over the whole text, matching
+# by SHAPE alone and excluding a match by checking whether its own matched TEXT
+# was contained in one of `~grison.markdown.refscan.code_spans`' results — text
+# containment, not position: a real reference whose exact text ALSO happened to
+# appear inside a code fence elsewhere in the document excluded BOTH occurrences
+# (the regex has no notion of "this specific occurrence, at this position");
+# nested `![alt](inner)](outer)` misparsed (the caption group has no concept of
+# bracket depth, so it closed at the INNER `]`, leaving a dangling `](outer)`);
+# and an escaped `\]` in a caption never matched at all (same reason). All three
+# are the SAME root cause — re-deriving "what a reference looks like" with a
+# second parser instead of asking the real one — so this now folds by POSITION
+# from the one real parse: :func:`~grison.markdown.refscan.ref_spans` gives the
+# exact character span of every reference :func:`~grison.markdown.refscan.
+# scan_refs` reports, in the same order (see that module for how — a
+# bracket-depth/escape-aware scan restricted to real paragraph/heading blocks,
+# so a fenced copy is structurally invisible and an inline code-span lookalike
+# is excluded by real position, not text).
+def _is_grison_reference(ref: FoundRef) -> bool:
+    """The SAME rule :mod:`grison.markdown.converter`'s PUSH side uses (its
+    ``_render_md_link``): an embed is always a reference (this vocabulary has
+    no concept of a non-evidence image); a plain link is a cross-reference
+    ONLY when its destination literally starts with ``evidence/`` — an
+    ordinary external link, a ``mailto:``, an anchor, or any other destination
+    is never a grison reference and must be left byte-identical on both the
+    local and remote canonical payload (the bug this classification fixes: a
+    library finding's external link, e.g. an OWASP citation, used to be folded
+    into ``[unresolved](unresolved)`` on the LOCAL side only — the remote side
+    never touches an ordinary ``<a>`` at all, see ``canonical_remote_prose`` —
+    so the record pushed forever)."""
+    if ref.kind == "embed":
+        return True
+    return ref.path.startswith("evidence/")
 
 
 def _substitute_ref_identity(md: str, token_for: Callable[[str], str]) -> str:
@@ -302,26 +327,42 @@ def _substitute_ref_identity(md: str, token_for: Callable[[str], str]) -> str:
         author's own caption/path, which would leave LOCAL's payload
         permanently disagreeing with REMOTE's (the bug this function fixes).
 
-    A ``_REF_RE`` match is folded UNLESS its own matched text is contained in
-    one of :func:`~grison.markdown.refscan.code_spans`' results — the real
-    parser's own account of what's actually inside a code span/fence, where a
-    lookalike (e.g. a narrative documenting the syntax itself,
-    `` `![x](evidence/y.png)` ``) never becomes a real reference at all.
-    Kind/destination are read straight off the match (a leading ``!`` is
-    unambiguous — the only thing the tokenizer adds here beyond shape is
-    exactly that "is this inside code" exclusion)."""
-    excluded = code_spans(md)
+    ONLY a reference :func:`_is_grison_reference` recognises is folded; every
+    other markdown link/image (an external URL, a mailto:, an anchor, a plain
+    internal doc link) is left byte-identical, on both sides, unconditionally —
+    see :func:`_is_grison_reference`'s own docstring.
 
-    def _sub(m: re.Match[str]) -> str:
-        matched = m.group(0)
-        if any(matched in region for region in excluded):
-            return matched
-        token = token_for(decode_ref_path(m.group("dest")))
-        if m.group("bang"):
-            return f"![]({token})"
-        return f"[{token}]({token})"
-
-    return _REF_RE.sub(_sub, md)
+    :func:`~grison.markdown.refscan.scan_refs` and :func:`~grison.markdown.
+    refscan.ref_spans` must report the SAME COUNT for ``md`` (they're the same
+    parse, matched by ordinal index — see that module) — a mismatch means a
+    construct this module's simpler span-scanner and the real parser disagree
+    about, which today is exactly one shape: an image nested inside a link's
+    text (``[![alt](inner)](outer)``). Rejected outright (never folded as
+    "only the outer link", never guessed at) — the converter's own "image not
+    alone in its paragraph" rule already refuses this shape at push, so
+    canonicalizing it silently would only ever describe a record that can
+    never actually be pushed as written."""
+    refs = scan_refs(md)
+    spans = ref_spans(md)
+    if len(refs) != len(spans):
+        raise ConverterError(
+            "unsupported markdown: a reference-shaped construct could not be resolved "
+            "unambiguously (e.g. an image nested inside a link's text — an embed must "
+            "be its own block, never nested inside a link's caption)"
+        )
+    out: list[str] = []
+    pos = 0
+    normalized = md.replace("\r\n", "\n")
+    for ref, (start, end) in zip(refs, spans, strict=True):
+        if not _is_grison_reference(ref):
+            continue
+        if start > pos:
+            out.append(normalized[pos:start])
+        token = token_for(ref.path)
+        out.append(f"![]({token})" if ref.kind == "embed" else f"[{token}]({token})")
+        pos = end
+    out.append(normalized[pos:])
+    return "".join(out)
 
 
 def canonical_prose(md: str, resolver: ResolvesEmbeds) -> dict[str, Any]:
