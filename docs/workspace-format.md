@@ -147,9 +147,21 @@ one this grison supports is refused outright, with a plain message — nothing c
 it, and grison never tries to interpret a workspace at another format directly. If
 it's older, `grison validate` fails with `WS-005`; if it's newer than this grison
 understands, `WS-006` says to upgrade grison. A workspace with no `manifest.yml` but
-with a real `.grison/env` reads as format 1 (pre-dates the manifest file) and gets
-`WS-005`; one with neither reads as a fresh, unbootstrapped directory (not validated
-as a workspace at all — that's what `grison sync`'s bootstrap step is for).
+with real pre-v2 content under `findings/`/`methodology/` reads as format 1
+(pre-dates the manifest file) and gets `WS-005`; a directory whose `.grison/env`
+merely exists (by hand, copied in, or freshly template-written) with no real content
+yet reads as a fresh, unbootstrapped directory instead — not v1, so a first `grison
+sync`/`grison parse` there still bootstraps it at the CURRENT format rather than
+refusing it.
+
+Every command that reads an EXISTING workspace — `sync`, `status`, `undo`, and
+`parse` writing into one (i.e. without an explicit `-o`/`--out`) — checks this
+BEFORE doing any other work (no bootstrap self-heal, no remote call, no validator
+run): a format mismatch exits `2` with the same plain message, never just a `WS-005`/
+`WS-006` finding among everything else `grison validate` would otherwise report
+(exit `1`). This is the harder "could not run safely at all" gate; `grison
+validate`'s own `WS-005`/`WS-006` failure is the softer, alongside-everything-else
+report of the identical check.
 
 ### 1.6 `.grison/manifest.yml` schema (`WS-007`)
 
@@ -235,7 +247,20 @@ yet" rule as §1.9). Once a digest IS recorded:
   - `.claude/settings.json`: only grison's own canonical deny rules and post-edit
     hook entry are compared (whether each is present) — a user's own additional
     deny/allow rules or other top-level keys never affect this and are never
-    flagged. Removing one of grison's own guardrail entries IS flagged.
+    flagged. Removing one of grison's own guardrail entries IS flagged. The
+    canonical set includes an `Edit`/`Write` deny for `.claude/settings.json`
+    itself and for `CLAUDE.md` (neither is agent-writable, same as everything
+    under `.grison/`).
+
+`WS-011`/`WS-012` are WORKSPACE-level rules, not scoped to `findings/` or
+`methodology/` — `grison sync` and `grison undo` both refuse the WHOLE run outright
+(exit `2`, "could not run safely", before any remote write or replay) if either
+fires anywhere, the same "could not run safely at all" class as a format mismatch
+(§1.5) or missing credentials. `grison scaffold --force` (or `--force` on the
+idempotent parts it names) is the fix; a plain `grison scaffold`/the next `grison
+sync`'s own self-heal pass only ever ADDS what's missing, which the refusal
+above deliberately runs BEFORE — a hand-edit is caught, not silently healed away
+first.
 
 ---
 
@@ -945,6 +970,71 @@ apart from "validate itself is broken":
 Exit `2` is deliberately distinct from `1`: a caller must never mistake "grison could
 not evaluate your documents" for "your documents are fine," and must never mistake it
 for "your documents are broken" either — it means neither answer is known.
+
+### 9.6 `sync --json` and `status --json`
+
+**`grison sync --json`** emits exactly ONE JSON document for the whole run — never
+JSON Lines, never one document per phase:
+
+```
+{"report": <phase|null>, "findings": <phase|null>, "wiki": <phase|null>,
+ "snapshot": "<path>"|null, "exit_code": 0|1}
+```
+
+- `snapshot` and `exit_code` are the run's own values, given once — every phase in
+  one `grison sync` run shares the SAME undo snapshot (or none, if nothing was
+  written) and the SAME overall exit-code decision, so repeating either per phase
+  would be redundant, not independent information.
+- Each of `report`/`findings`/`wiki` is one of:
+  - `null` — this phase never ran at all (today, only `wiki` can be: no BookStack
+    credentials configured).
+  - `{"error": "<message>"}` — the phase raised before producing a result
+    (per-record isolation still applies inside a phase that DID run; this is for a
+    failure before it could run at all, e.g. a transport error).
+  - `<phase>` — the phase ran: `{"events": [<event>, ...], "summary": {...}}`.
+    `events` is EVERY event the phase emitted, in application order, including
+    INFO-severity ones (`--json` is for machine consumers that can filter for
+    themselves) — one object per event: `{"verb", "path", "label", "detail",
+    "dry_run", "severity"}` (the same shape `grison.engine.events.event_dict`
+    defines, so the wording can never drift between phases). `summary` carries
+    that phase's own per-kind counts (`"kinds": {"<kind>": {"counts": {...},
+    "problem_paths": [...]}, ...}`) plus phase-specific extras (`report`: `dirs`;
+    `wiki`: `structure`) and that phase's own `exit_code` (never authoritative on
+    its own — the top-level `exit_code` is the one a script should branch on).
+
+**`grison status --json`** (offline by default; `--remote` adds a dry-run classify
+of every phase, writing nothing):
+
+```
+{"findings": {...}, "report": {...}, "methodology": {...},
+ "remote": <remote|null>, "last_sync": {"findings": <entry|null>,
+ "report": <entry|null>, "wiki": <entry|null>}}
+```
+
+- `findings`: `{"managed": true, "collision_sidecars": ["<path>", ...],
+  "library": {"counts": {...}, "non_clean": [<status-entry>, ...]}, "reports":
+  {"counts": {...}, "non_clean": [...]}}` — `collision_sidecars` merges BOTH
+  engine-managed findings kinds (library and reported) into one list, the same
+  way `report` and `methodology` already report theirs.
+- `report`: `{"managed": true, "counts": {...}, "non_clean": [...],
+  "collision_sidecars": [...], "evidence": {"<report-dir>": {"files": n,
+  "collisions": n}, ...}}`.
+- `methodology`: same shape as `report`, with `images` instead of `evidence`.
+- A `counts` object always has all seven buckets (`clean`, `edited`, `new`,
+  `deleted`, `moved`, `invalid`, `unknown`), zero-filled. A `<status-entry>` is
+  `{"path", "bucket", "reasons": [...], "moved_from": null|"<path>"}`.
+- `remote` is `null` when `--remote` was not given; otherwise
+  `{"report": <remote-phase>, "findings": <remote-phase>, "wiki": <remote-phase>}`,
+  each a plain string (that leg's credentials aren't configured, or its own
+  error) or `{"kinds": {"<kind>": {"counts": {...}, "problem_paths": [...]}, ...}}`.
+- `last_sync`'s each entry is `null` (that phase has never run) or
+  `{"at": "<iso8601>", "ok": true|false, "error": "<message>"?, "summary": {...}?}`
+  — `.grison/state/last-sync.json`, read back verbatim per phase.
+
+Exit code for both: `0` clean/nothing needs attention, `1` something does (an
+invalid record, a collision, a withheld mass-change, a failed phase), `2` could not
+run at all (no workspace, bad/missing credentials, an incompatible server, the
+workspace lock held, or a format mismatch — §1.5).
 
 ---
 

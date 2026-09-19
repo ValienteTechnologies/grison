@@ -542,7 +542,7 @@ class GhostwriterClient(BaseHttpClient):
             base_url=creds.gw_url,
             url_setting_name="GRISON_GW_URL",
             headers={
-                "Authorization": f"Bearer {creds.gw_token}",
+                "Authorization": f"Bearer {creds.gw_token.get_secret_value()}",
                 "Content-Type": "application/json",
             },
             timeout=timeout,

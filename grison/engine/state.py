@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from grison.fsio import atomic_write_text, ensure_private_dir
+from grison.fsio import atomic_write_text
 
 STATE_DIR = ".grison/state"
 MIRRORS_RELATIVE_PATH = f"{STATE_DIR}/mirrors.json"
@@ -116,6 +116,3 @@ class StateStore:
         except (OSError, ValueError):
             return None
         return data if isinstance(data, dict) else None
-
-    def ensure_dirs(self) -> None:
-        ensure_private_dir(self._dir)

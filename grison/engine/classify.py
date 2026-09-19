@@ -43,14 +43,24 @@ def classify(  # noqa: PLR0911, PLR0913
     ``force_local``/``force_remote`` resolve a COLLISION (including its DELETE_LOCAL/
     DELETE_REMOTE flavors) the way ``--force-local PATH``/``--force-remote PATH``
     do (ENGINE.md): local wins -> push/re-create/delete-remote; remote wins ->
-    pull/restore-locally/delete-local. They have no effect outside a collision —
-    in particular, a PULL_NEW slot (remote-only, never indexed: there is nothing
-    local to prefer and nothing to overwrite) ignores both flags by construction.
-    This is a known, accepted limitation (coordinator feedback item 8c): naming a
-    not-yet-pulled remote path on ``--force-local``/``--force-remote`` is simply a
-    no-op for that path, not an error — it is indistinguishable from any other path
-    that isn't currently a collision, and every other non-collision outcome (CLEAN,
-    PUSH, PULL, CREATE, MOVE, …) is silently un-forceable the same way.
+    pull/restore-locally/delete-local. They ALSO resolve an ordinary (non-
+    colliding) DELETE_REMOTE/DELETE_LOCAL the same way — "whose side wins for
+    this path" (item 11, fix-fin1): ``--force-remote PATH`` on a plain,
+    locally-deleted DELETE_REMOTE restores the file (PULL) instead of letting the
+    deletion through; ``--force-local PATH`` on a plain, remote-deleted
+    DELETE_LOCAL (read-write record types only — read-only/append-only can never
+    push/create an already-indexed record) recreates it remotely (CREATE)
+    instead of deleting it locally. This is what makes naming such a path exempt
+    it from the mass-change guard's WITHHELD conversion *correctly*, not just
+    exempt it while leaving the wrong side's deletion to go through anyway.
+
+    Every OTHER outcome (CLEAN, PUSH, PULL, CREATE, MOVE, …) is still unaffected
+    by either flag outside a collision — in particular, a PULL_NEW slot (remote-
+    only, never indexed: there is nothing local to prefer and nothing to
+    overwrite) ignores both flags by construction, a known, accepted limitation
+    (coordinator feedback item 8c): naming a not-yet-pulled remote path on
+    ``--force-local``/``--force-remote`` is simply a no-op for that path, not an
+    error.
     """
     if append_only:
         outcome = _classify_append_only(
@@ -101,6 +111,30 @@ def classify(  # noqa: PLR0911, PLR0913
             if local_present and not remote_present:
                 return Outcome.DELETE_LOCAL
             return Outcome.PULL
+
+    # Force-flag semantics on a WITHHELD (or simply operator-named) deletion —
+    # never a genuine COLLISION, just an ordinary, unambiguous DELETE_REMOTE/
+    # DELETE_LOCAL the mass-change guard might otherwise refuse to apply in bulk
+    # (item 11, fix-fin1). "--force-remote PATH always means the remote wins for
+    # this path": a locally-deleted record about to be deleted remotely is
+    # instead RESTORED locally (PULL) — the deletion never happens, the record
+    # survives exactly as the remote has it. "--force-local PATH always means the
+    # local side wins": a remote-deleted record about to be deleted locally is
+    # instead RECREATED remotely (CREATE) — never actually deleted locally.
+    # Before this fix, naming either flag on such a path only exempted it from
+    # the guard's WITHHELD conversion while leaving the deletion itself
+    # unchanged, so `--force-remote` on a locally-deleted path silently let the
+    # remote record be deleted too — exactly backwards from what the flag name
+    # promises.
+    if outcome is Outcome.DELETE_REMOTE and force_remote:
+        return Outcome.PULL
+    if outcome is Outcome.DELETE_LOCAL and force_local and not read_only and not append_only:
+        # Read-only/append-only record types can never push/create an already-
+        # indexed record (ENGINE.md) — recreating one remotely would violate the
+        # same contract _clamp_read_only defends elsewhere, so the flag simply
+        # has no effect for those; the deletion proceeds exactly as it would
+        # without it.
+        return Outcome.CREATE
     return outcome
 
 

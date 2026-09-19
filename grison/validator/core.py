@@ -1108,14 +1108,25 @@ def _expected_kind(rel: PurePosixPath) -> IndexKind | None:
 
 def _check_manifest_and_hygiene(root: Path) -> list[Failure]:
     out: list[Failure] = []
-    try:
-        manifest_mod.check(root)
-    except manifest_mod.WorkspaceNeedsMigration as e:
-        out.append(fail(registry.WS_NEEDS_MIGRATION, ".grison/manifest.yml", str(e)))
-    except manifest_mod.WorkspaceTooNew as e:
-        out.append(fail(registry.WS_TOO_NEW, ".grison/manifest.yml", str(e)))
-    except manifest_mod.ManifestError as e:
-        out.append(fail(registry.WS_BAD_MANIFEST, ".grison/manifest.yml", str(e)))
+    # Only check the format when there is an actual format to check (item 10,
+    # fix-fin1): a real manifest.yml on record, or real pre-v2 content
+    # (grison.manifest.has_v1_content — the SAME precise signal
+    # bootstrap_workspace itself uses). Without this, manifest.read()'s own
+    # cruder fallback heuristic ("no manifest.yml, but .grison/env exists ->
+    # format 1") would misreport a directory whose .grison/env merely exists
+    # with no real content yet as "needs migration", contradicting
+    # bootstrap_workspace's own documented decision to start such a directory
+    # fresh at CURRENT_FORMAT.
+    manifest_path = root / manifest_mod.MANIFEST_RELATIVE_PATH
+    if manifest_path.is_file() or manifest_mod.has_v1_content(root):
+        try:
+            manifest_mod.check(root)
+        except manifest_mod.WorkspaceNeedsMigration as e:
+            out.append(fail(registry.WS_NEEDS_MIGRATION, ".grison/manifest.yml", str(e)))
+        except manifest_mod.WorkspaceTooNew as e:
+            out.append(fail(registry.WS_TOO_NEW, ".grison/manifest.yml", str(e)))
+        except manifest_mod.ManifestError as e:
+            out.append(fail(registry.WS_BAD_MANIFEST, ".grison/manifest.yml", str(e)))
 
     for problem in manifest_mod.check_git_hygiene(root):
         out.append(fail(registry.WS_GIT_HYGIENE, ".grison", problem))

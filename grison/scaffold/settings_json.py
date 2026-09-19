@@ -85,6 +85,21 @@ DENY_MIRRORS: tuple[str, ...] = (
     "Edit(/**/.chapter.yml)",
     "Edit(/**/.shelves/**)",
 )
+# Neither of these two lives under .grison/ (the blanket deny above doesn't reach
+# them), and neither is agent-writable either (item 1, fix-fin1: an agent must not
+# be able to quietly disable its own guardrails by rewriting the deny list, or make
+# CLAUDE.md say something grison never generated) — Write is included alongside
+# Edit even though the docs say only Edit/Read rules are actually consulted (see the
+# module docstring's point 1): a harmless no-op today, forward-compatible if that
+# ever changes, and it costs nothing to state the intent explicitly.
+DENY_SETTINGS_JSON_WRITE: tuple[str, ...] = (
+    "Edit(/.claude/settings.json)",
+    "Write(/.claude/settings.json)",
+)
+DENY_CLAUDE_MD_WRITE: tuple[str, ...] = (
+    "Edit(/CLAUDE.md)",
+    "Write(/CLAUDE.md)",
+)
 DENY_SYNC = "Bash(*grison sync*)"
 DENY_UNDO = "Bash(*grison undo*)"
 
@@ -92,6 +107,8 @@ CANONICAL_DENY: tuple[str, ...] = (
     *DENY_GRISON_PRIVATE_READ,
     DENY_GRISON_WRITE_ALL,
     *DENY_MIRRORS,
+    *DENY_SETTINGS_JSON_WRITE,
+    *DENY_CLAUDE_MD_WRITE,
     DENY_SYNC,
     DENY_UNDO,
 )

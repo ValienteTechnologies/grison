@@ -16,6 +16,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from grison.errors import GrisonError
@@ -51,19 +52,27 @@ class Creds(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GRISON_", extra="ignore", frozen=True)
 
     gw_url: str = ""
-    gw_token: str = ""
+    # The four secret fields (item 7, fix-fin1): SecretStr so `repr(creds)`/
+    # `str(creds)` (a stray debug log, an uncaught-exception traceback frame, a
+    # pytest assertion failure printing the whole object) show ``**********``
+    # instead of the real bearer token/API secret. `gw_url`/`bs_url`/
+    # `cf_client_id` stay plain ``str`` — a URL is never secret, and a Cloudflare
+    # Access service token's CLIENT ID is a public-ish identifier (paired with,
+    # but not itself, the secret half of that credential), same distinction as
+    # BookStack's own token id vs. token secret below.
+    gw_token: SecretStr = SecretStr("")
     bs_url: str = ""
-    bs_token_id: str = ""
-    bs_token_secret: str = ""
+    bs_token_id: SecretStr = SecretStr("")
+    bs_token_secret: SecretStr = SecretStr("")
     cf_client_id: str = ""
-    cf_client_secret: str = ""
+    cf_client_secret: SecretStr = SecretStr("")
 
     def cf_headers(self) -> dict[str, str]:
         if not (self.cf_client_id and self.cf_client_secret):
             return {}
         return {
             "CF-Access-Client-Id": self.cf_client_id,
-            "CF-Access-Client-Secret": self.cf_client_secret,
+            "CF-Access-Client-Secret": self.cf_client_secret.get_secret_value(),
         }
 
     def require_ghostwriter(self) -> None:

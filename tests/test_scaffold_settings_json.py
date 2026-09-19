@@ -90,7 +90,7 @@ def test_write_and_reload_round_trips(tmp_path: Path) -> None:
 # of grison's own code, so it proves the RULE TEXT itself has the intended scope
 # rather than just re-asserting whatever grison.manifest.PRIVATE_ENTRIES says.
 
-_RULE_RE = re.compile(r"^(Read|Edit)\((.*)\)$")
+_RULE_RE = re.compile(r"^(Read|Edit|Write)\((.*)\)$")
 
 
 def _matches(rule: str, rel_path: str) -> bool:
@@ -138,3 +138,14 @@ def test_private_grison_entries_are_read_denied(rel: str) -> None:
 )
 def test_everything_under_grison_is_edit_denied(rel: str) -> None:
     assert any(_matches(r, rel) for r in _deny_patterns("Edit")), rel
+
+
+@pytest.mark.parametrize("rel", [".claude/settings.json", "CLAUDE.md"])
+def test_settings_json_and_claude_md_are_edit_and_write_denied(rel: str) -> None:
+    """Item 1 (CRITICAL, fix-fin1): neither file lives under ``.grison/`` (the
+    blanket ``Edit(/.grison/**)`` deny doesn't reach them), and neither is
+    agent-writable either — an agent must not be able to quietly disable its own
+    guardrails by rewriting the deny list, or make ``CLAUDE.md`` say something
+    grison never generated."""
+    assert any(_matches(r, rel) for r in _deny_patterns("Edit")), rel
+    assert any(_matches(r, rel) for r in _deny_patterns("Write")), rel

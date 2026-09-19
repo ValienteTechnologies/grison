@@ -94,11 +94,7 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
     # .gitignore must NOT blanket-ignore .grison/ (that was the v1 scaffold's
     # shape) since manifest.yml/index.json must stay tracked.
     manifest_path = root / ".grison" / "manifest.yml"
-    has_v1_content = any(
-        d.is_dir() and any(p.is_file() for p in d.rglob("*"))
-        for d in (root / "findings", root / "methodology")
-        if d.is_dir()
-    )
+    has_v1_content = manifest_mod.has_v1_content(root)
     if not manifest_path.exists() and not has_v1_content:
         manifest_mod.write(root)
         manifest_mod.write_gitignore(root)

@@ -176,6 +176,20 @@ def test_parse_dry_run_writes_nothing(tmp_path: Path, monkeypatch: pytest.Monkey
     assert list((tmp_path / "findings" / "inbox").glob("*.md")) == []
 
 
+def test_parse_summary_uses_words_not_an_arrow_glyph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Item 9 (LOW, fix-fin1): ``_print_parse_summary`` used to print a literal
+    ``→`` glyph ("Wrote N → <dir>") — every other printer in grison spells things
+    out in words (ENGINE.md 'Events': "No arrow glyphs"). ``parse``'s own summary
+    line is not an engine event, but the same house style applies."""
+    monkeypatch.chdir(tmp_path)
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml")])
+    assert r.exit_code == 0
+    assert "→" not in r.output
+    assert "to " in r.output
+
+
 def test_sync_exit_code_reflects_result_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -219,6 +233,7 @@ def test_sync_exit_code_reflects_result_errors(
         force_local=None,
         force_remote=None,
         snapshot=None,
+        quiet=False,
     ):
         return ReportsPhaseResult(), {}
 
@@ -285,6 +300,7 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
         force_local=None,
         force_remote=None,
         snapshot=None,
+        quiet=False,
     ):
         return ReportsPhaseResult(), {}
 
@@ -465,16 +481,46 @@ def test_sync_git_driving_disabled_makes_no_git_calls(
 
 
 def test_sync_dry_run_never_commits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # item 2, fix-fin1: `--dry-run` on a never-bootstrapped directory now refuses
+    # outright (exit 2, "would create" report — see test_sync_dry_run_on_a_fresh_
+    # directory_refuses_and_writes_nothing below) rather than bootstrapping it for
+    # real; this test is about the git-commit behavior specifically, so it
+    # bootstraps first (bypassing the CLI, like the real first sync would) and
+    # only then exercises the dry-run.
+    from grison.remote.bootstrap import bootstrap_workspace
+
     monkeypatch.chdir(tmp_path)
     _set_fake_ghostwriter_creds(monkeypatch)
     monkeypatch.setenv("GRISON_GIT", "commit")
     _init_repo(tmp_path)
+    bootstrap_workspace(tmp_path)
     (tmp_path / "dirty.txt").write_text("uncommitted before the dry-run\n")
     _stub_sync_phases(monkeypatch)
 
     r = _runner.invoke(app, ["sync", "--dry-run"])
     assert r.exit_code == 0, r.output
     assert _rev_count(tmp_path) == "1"  # only the seed commit
+
+
+def test_sync_dry_run_on_a_fresh_directory_refuses_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Item 2 (CRITICAL, fix-fin1): before this fix, ``sync --dry-run`` in a never-
+    bootstrapped directory still called ``bootstrap_workspace`` for real (~11
+    files written) before ever consulting ``dry_run`` — a "preview" that wrote a
+    complete workspace to disk. Now it reports what a real run would create and
+    stops, exit 2, writing nothing at all."""
+    monkeypatch.chdir(tmp_path)
+    _set_fake_ghostwriter_creds(monkeypatch)
+
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    r = _runner.invoke(app, ["sync", "--dry-run"])
+    after = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+
+    assert r.exit_code == 2, r.output
+    assert "not a grison workspace yet" in r.output
+    assert "would create" in r.output
+    assert before == after == []  # byte-identical: nothing at all was written
 
 
 def test_sync_git_failure_warns_not_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -533,7 +579,8 @@ def test_sync_prints_claude_md_scaffold_message(
     monkeypatch.delenv("GRISON_CLAUDE_MD", raising=False)
 
     r = _runner.invoke(app, ["sync"])
-    assert r.exit_code == 1  # still fails on missing creds
+    # item 6, fix-fin1: missing creds is "could not run" — exit 2, not 1.
+    assert r.exit_code == 2  # still fails on missing creds
     assert "Scaffolded workspace + wrote CLAUDE.md" in r.output
     assert (tmp_path / "CLAUDE.md").exists()
 
@@ -547,7 +594,7 @@ def test_sync_claude_md_off_suppresses_scaffold_and_message(
     monkeypatch.setenv("GRISON_CLAUDE_MD", "off")
 
     r = _runner.invoke(app, ["sync"])
-    assert r.exit_code == 1
+    assert r.exit_code == 2  # item 6, fix-fin1: missing creds — exit 2, not 1.
     assert "CLAUDE.md" not in r.output
     assert not (tmp_path / "CLAUDE.md").exists()
 

@@ -41,7 +41,12 @@ class BookStackClient(BaseHttpClient):
             creds,
             base_url=creds.bs_url,
             url_setting_name="GRISON_BS_URL",
-            headers={"Authorization": f"Token {creds.bs_token_id}:{creds.bs_token_secret}"},
+            headers={
+                "Authorization": (
+                    f"Token {creds.bs_token_id.get_secret_value()}:"
+                    f"{creds.bs_token_secret.get_secret_value()}"
+                )
+            },
             timeout=timeout,
             transport=transport,
             max_attempts=max_attempts,
