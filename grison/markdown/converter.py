@@ -450,6 +450,7 @@ def _wrap_delim(
         _report_loss(on_loss, f"{kind} <{tag}> dropped (no markdown representation)")
         return content
     m = _LEAD_TRAIL_WS_RE.match(content)
+    assert m is not None, "content.strip() != '' guarantees the whitespace-run regex matches"
     lead, core, trail = m.group(1), m.group(2), m.group(3)
     return f"{lead}{marker}{core}{marker}{trail}"
 
@@ -1635,7 +1636,7 @@ def _render_paragraph_node(
     if len(inline_children) == 1:
         only = inline_children[0]
         if only.type == "image":
-            return _push_embed_ref(only.attrs.get("src", "") or "", refs)
+            return _push_embed_ref(str(only.attrs.get("src", "") or ""), refs)
         if only.type == "code_inline":
             m = _UNRESOLVED_RE.match(only.content)
             if m:
@@ -1857,11 +1858,11 @@ def _render_inline_nodes(
 def _render_md_link(
     node: SyntaxTreeNode, refs: RefResolver | None, jinja_escape: bool, *, line: int = 0
 ) -> str:
-    href = node.attrs.get("href", "") or ""
-    if isinstance(href, str) and href.startswith("evidence/"):
+    href = str(node.attrs.get("href", "") or "")
+    if href.startswith("evidence/"):
         return _push_cross_ref(href, refs)
     title = node.attrs.get("title")
-    title_attr = f' title="{_esc(title)}"' if title else ""
+    title_attr = f' title="{_esc(str(title))}"' if title else ""
     text = _render_inline_nodes(node.children, refs, jinja_escape, line=line)
     return f'<a href="{_esc(href)}"{title_attr} target="_blank" rel="noopener">{text}</a>'
 

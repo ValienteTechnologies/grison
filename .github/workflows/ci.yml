@@ -27,4 +27,6 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy grison
       - run: uv run pytest -q --cov=grison --cov-report=term-missing:skip-covered

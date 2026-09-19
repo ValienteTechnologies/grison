@@ -59,10 +59,11 @@ class BookStackClient(BaseHttpClient):
         files: dict | None = None,
         data: dict | None = None,
         idempotent: bool | None = None,
-    ) -> dict | None:
-        """GET/PUT/POST/DELETE all funnel through here. ``idempotent`` defaults to
-        "GET only" (see :mod:`grison.remote.http`) — a PUT/POST/DELETE call site
-        that's provably safe to retry (none are, today) would pass it explicitly."""
+    ) -> dict:
+        """GET/PUT/POST all funnel through here (DELETE has no body — see
+        ``_delete``). ``idempotent`` defaults to "GET only" (see
+        :mod:`grison.remote.http`) — a PUT/POST call site that's provably safe to
+        retry (none are, today) would pass it explicitly."""
         resp = self._send(
             method, path, params=params, json=json, files=files, data=data,
             idempotent=idempotent,
@@ -72,9 +73,15 @@ class BookStackClient(BaseHttpClient):
                 f"BookStack request failed: {method} {path} -> "
                 f"HTTP {resp.status_code}: {resp.text[:200]}"
             )
-        if method == "DELETE":
-            return None
         return resp.json()
+
+    def _delete(self, path: str) -> None:
+        resp = self._send("DELETE", path)
+        if not resp.is_success:
+            raise BookStackError(
+                f"BookStack request failed: DELETE {path} -> "
+                f"HTTP {resp.status_code}: {resp.text[:200]}"
+            )
 
     def _list(self, path: str) -> list[dict]:
         """Fetch *every* row of a list endpoint. BookStack caps a response at ``count``
@@ -121,10 +128,10 @@ class BookStackClient(BaseHttpClient):
         return self._request("POST", "/api/chapters", json=body)
 
     def delete_chapter(self, chapter_id: int) -> None:
-        self._request("DELETE", f"/api/chapters/{chapter_id}")
+        self._delete(f"/api/chapters/{chapter_id}")
 
     def delete_book(self, book_id: int) -> None:
-        self._request("DELETE", f"/api/books/{book_id}")
+        self._delete(f"/api/books/{book_id}")
 
     def fetch_recycle_bin(self) -> list[dict]:
         return self._list("/api/recycle-bin")
@@ -195,7 +202,7 @@ class BookStackClient(BaseHttpClient):
         return self._request("POST", "/api/pages", json=body)
 
     def delete_page(self, page_id: int) -> None:
-        self._request("DELETE", f"/api/pages/{page_id}")
+        self._delete(f"/api/pages/{page_id}")
 
     # --- image gallery (D9) -----------------------------------------------------
     #
@@ -228,7 +235,7 @@ class BookStackClient(BaseHttpClient):
         )
 
     def delete_gallery_image(self, image_id: int) -> None:
-        self._request("DELETE", f"/api/image-gallery/{image_id}")
+        self._delete(f"/api/image-gallery/{image_id}")
 
     def download_gallery_image(self, path: str) -> bytes:
         """Raw bytes of a gallery image at its stored ``path`` (the relative

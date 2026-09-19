@@ -1560,10 +1560,13 @@ class _BoundAdapter:
 
     inner: Any
     bound_ctx: Any
+    kind: str = field(init=False)
 
-    @property
-    def kind(self) -> str:
-        return str(self.inner.kind)
+    def __post_init__(self) -> None:
+        # a plain settable attribute, not a read-only property: CreateUndoAdapter's
+        # `kind: str` protocol member is a settable variable, and a `dict[str,
+        # CreateUndoAdapter]` value must match that structurally.
+        self.kind = str(self.inner.kind)
 
     def refetch(self, ctx: Any, id: int) -> RemoteRecord | None:
         del ctx
