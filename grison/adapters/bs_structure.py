@@ -104,8 +104,14 @@ def _chapter_dirs(book_dir: Path) -> list[Path]:
 
 
 def _write_mirror_guarded(
-    root: Path, rel_path: str, text: str, mirrors: dict[str, str], result: StructureResult,
-    *, dry_run: bool, on_event: Callable[[str], None] | None,
+    root: Path,
+    rel_path: str,
+    text: str,
+    mirrors: dict[str, str],
+    result: StructureResult,
+    *,
+    dry_run: bool,
+    on_event: Callable[[str], None] | None,
 ) -> None:
     """Adapts :func:`grison.engine.mirrors.write_mirror_guarded`'s result onto this
     module's own :class:`StructureResult`/event shape."""
@@ -130,8 +136,14 @@ def _witness_unchanged(state: StateStore, kind: str, id: int, updated_at: str | 
 
 
 def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
-    root: Path, ctx: BSContext, index: Index, state: StateStore, snapshot: Snapshot,
-    *, dry_run: bool = False, on_event: Callable[[str], None] | None = None,
+    root: Path,
+    ctx: BSContext,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    *,
+    dry_run: bool = False,
+    on_event: Callable[[str], None] | None = None,
 ) -> StructureResult:
     """Create any missing book/chapter on BookStack for a new local directory, then
     (re)generate every book/chapter/shelf mirror. Call before syncing pages — pages
@@ -139,11 +151,13 @@ def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
     function refreshes after any create."""
     result = StructureResult()
     recycled_book_ids = {
-        e["deletable_id"] for e in ctx.client.fetch_recycle_bin()
+        e["deletable_id"]
+        for e in ctx.client.fetch_recycle_bin()
         if e.get("deletable_type") == "book"
     }
     recycled_chapter_ids = {
-        e["deletable_id"] for e in ctx.client.fetch_recycle_bin()
+        e["deletable_id"]
+        for e in ctx.client.fetch_recycle_bin()
         if e.get("deletable_type") == "chapter"
     }
 
@@ -161,8 +175,14 @@ def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
             except Exception as e:  # noqa: BLE001 — isolate this book, keep going
                 result.errors.append(f"{book_dir}: could not create book: {e}")
                 continue
-            snapshot.record(UndoOp(kind="bs.book", outcome="create", id=rec["id"],
-                                   path=f"methodology/library/{book_dir.name}"))
+            snapshot.record(
+                UndoOp(
+                    kind="bs.book",
+                    outcome="create",
+                    id=rec["id"],
+                    path=f"methodology/library/{book_dir.name}",
+                )
+            )
             result.created_books.append(book_dir.name)
             created_any = True
             if on_event:
@@ -206,8 +226,9 @@ def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
     for shelf in ctx.client.fetch_shelves():
         if not _witness_unchanged(state, "bs.shelf", shelf["id"], shelf.get("updated_at")):
             detail = ctx.client.fetch_shelf(shelf["id"])
-            state.put("bs.shelf", shelf["id"], base=None,
-                      witness={"updated_at": shelf.get("updated_at")})
+            state.put(
+                "bs.shelf", shelf["id"], base=None, witness={"updated_at": shelf.get("updated_at")}
+            )
         else:
             detail = None
         if detail is None:
@@ -216,16 +237,18 @@ def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
         for b in detail.get("books") or []:
             shelf_books.setdefault(b["id"], []).append(shelf["slug"])
         shelf_doc = mirrors_fmt.ShelfMirrorDoc(
-            name=detail.get("name") or shelf.get("name", ""), slug=shelf["slug"],
+            name=detail.get("name") or shelf.get("name", ""),
+            slug=shelf["slug"],
             description=detail.get("description") or "",
-            tags=[f"{t['name']}:{t['value']}" if t.get("value") else t["name"]
-                 for t in detail.get("tags") or []],
+            tags=[
+                f"{t['name']}:{t['value']}" if t.get("value") else t["name"]
+                for t in detail.get("tags") or []
+            ],
             books=ordered_books,
         )
         text = _MIRROR_HEADER + mirrors_fmt.dump_shelf_mirror(shelf_doc)
         rel = f"methodology/library/.shelves/{shelf['slug']}.yml"
-        _write_mirror_guarded(root, rel, text, mirrors, result, dry_run=dry_run,
-                              on_event=on_event)
+        _write_mirror_guarded(root, rel, text, mirrors, result, dry_run=dry_run, on_event=on_event)
         index.set(rel, IndexKind.BS_SHELF, shelf["id"])
 
     # --- books -----------------------------------------------------------------
@@ -233,23 +256,26 @@ def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
         index.set(f"methodology/library/{book['slug']}", IndexKind.BS_BOOK, book["id"])
         if not _witness_unchanged(state, "bs.book", book["id"], book.get("updated_at")):
             detail = ctx.client.fetch_book(book["id"])
-            state.put("bs.book", book["id"], base=None,
-                      witness={"updated_at": book.get("updated_at")})
+            state.put(
+                "bs.book", book["id"], base=None, witness={"updated_at": book.get("updated_at")}
+            )
         else:
             detail = None
         if detail is None:
             continue
         book_doc = mirrors_fmt.BookMirrorDoc(
-            name=detail.get("name", ""), slug=book["slug"],
+            name=detail.get("name", ""),
+            slug=book["slug"],
             description=detail.get("description") or "",
-            tags=[f"{t['name']}:{t['value']}" if t.get("value") else t["name"]
-                 for t in detail.get("tags") or []],
+            tags=[
+                f"{t['name']}:{t['value']}" if t.get("value") else t["name"]
+                for t in detail.get("tags") or []
+            ],
             shelves=shelf_books.get(book["id"], []),
         )
         text = _MIRROR_HEADER + mirrors_fmt.dump_book_mirror(book_doc)
         rel = f"methodology/library/{book['slug']}/.book.yml"
-        _write_mirror_guarded(root, rel, text, mirrors, result, dry_run=dry_run,
-                              on_event=on_event)
+        _write_mirror_guarded(root, rel, text, mirrors, result, dry_run=dry_run, on_event=on_event)
 
     # --- chapters ----------------------------------------------------------------
     books_by_id = ctx.books_by_id
@@ -261,23 +287,29 @@ def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
         index.set(rel_dir, IndexKind.BS_CHAPTER, chapter["id"])
         if not _witness_unchanged(state, "bs.chapter", chapter["id"], chapter.get("updated_at")):
             detail = ctx.client.fetch_chapter(chapter["id"])
-            state.put("bs.chapter", chapter["id"], base=None,
-                      witness={"updated_at": chapter.get("updated_at")})
+            state.put(
+                "bs.chapter",
+                chapter["id"],
+                base=None,
+                witness={"updated_at": chapter.get("updated_at")},
+            )
         else:
             detail = None
         if detail is None:
             continue
         chapter_doc = mirrors_fmt.ChapterMirrorDoc(
-            name=detail.get("name", ""), slug=chapter["slug"],
+            name=detail.get("name", ""),
+            slug=chapter["slug"],
             description=detail.get("description") or "",
-            tags=[f"{t['name']}:{t['value']}" if t.get("value") else t["name"]
-                 for t in detail.get("tags") or []],
+            tags=[
+                f"{t['name']}:{t['value']}" if t.get("value") else t["name"]
+                for t in detail.get("tags") or []
+            ],
             priority=chapter.get("priority"),
         )
         text = _MIRROR_HEADER + mirrors_fmt.dump_chapter_mirror(chapter_doc)
         rel = f"{rel_dir}/.chapter.yml"
-        _write_mirror_guarded(root, rel, text, mirrors, result, dry_run=dry_run,
-                              on_event=on_event)
+        _write_mirror_guarded(root, rel, text, mirrors, result, dry_run=dry_run, on_event=on_event)
 
     # --- recycle-bin awareness: an indexed book/chapter dir whose id vanished from
     # the live lists but is recoverable in the recycle bin is reported, not treated

@@ -50,8 +50,10 @@ from grison.remote.bookstack import BookStackClient
 def _to_data(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "filename": PurePosixPath(row.get("name") or f"image-{row['id']}.png").name,
-        "caption": "", "description": "",
-        "path": row.get("path", ""), "uploaded_to": row.get("uploaded_to"),
+        "caption": "",
+        "description": "",
+        "path": row.get("path", ""),
+        "uploaded_to": row.get("uploaded_to"),
     }
 
 
@@ -106,7 +108,13 @@ class BsImagesAdapter:
         return ctx.client.download_gallery_image(row["path"])
 
     def upload(
-        self, ctx: BSContext, *, filename: str, body: bytes, caption: str, description: str,
+        self,
+        ctx: BSContext,
+        *,
+        filename: str,
+        body: bytes,
+        caption: str,
+        description: str,
     ) -> RemoteRecord:
         del caption, description  # D9: no caption column at all
         anchor = self.anchor_for.get(filename, self.anchor_page_id)
@@ -116,7 +124,10 @@ class BsImagesAdapter:
                 "create at least one page in this book first"
             )
         row = ctx.client.upload_gallery_image(
-            uploaded_to=anchor, filename=filename, content=body, name=filename,
+            uploaded_to=anchor,
+            filename=filename,
+            content=body,
+            name=filename,
         )
         return RemoteRecord(id=row["id"], data=_to_data(row))
 
@@ -158,7 +169,9 @@ class BsImagesAdapter:
             )
         body = base64.b64decode(preimage["body_b64"])
         row = ctx.client.upload_gallery_image(
-            uploaded_to=anchor, filename=preimage["filename"], content=body,
+            uploaded_to=anchor,
+            filename=preimage["filename"],
+            content=body,
             name=preimage["filename"],
         )
         return RemoteRecord(id=row["id"], data=_to_data(row))

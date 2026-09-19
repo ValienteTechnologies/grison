@@ -58,6 +58,4 @@ def test_write_isolates_a_failing_finding(tmp_path: Path, monkeypatch: pytest.Mo
     assert len(result.errors) == 1
     assert "kaboom" in result.errors[0]
     # the other findings still landed on disk despite the failure
-    assert sorted(p.name for p in tmp_path.glob("*.md")) == sorted(
-        p.name for p in result.written
-    )
+    assert sorted(p.name for p in tmp_path.glob("*.md")) == sorted(p.name for p in result.written)

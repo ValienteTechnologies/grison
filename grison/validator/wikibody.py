@@ -80,8 +80,10 @@ def check_raw_html(path: str, tree: SyntaxTreeNode) -> list[Failure]:
         if node.type in ("html_block", "html_inline") and _is_real_html(node.content):
             out.append(
                 registry.fail(
-                    registry.WIKI_RAW_HTML, path,
-                    f"real HTML: {node.content.strip()[:60]!r}", line=_line_of(node),
+                    registry.WIKI_RAW_HTML,
+                    path,
+                    f"real HTML: {node.content.strip()[:60]!r}",
+                    line=_line_of(node),
                 )
             )
     return out
@@ -99,8 +101,10 @@ def check_link_schemes(path: str, tree: SyntaxTreeNode) -> list[Failure]:
         if scheme and scheme not in _ALLOWED_SCHEMES:
             out.append(
                 registry.fail(
-                    registry.WIKI_BAD_LINK_SCHEME, path,
-                    f"link scheme {scheme!r}: {href!r}", line=_line_of(node),
+                    registry.WIKI_BAD_LINK_SCHEME,
+                    path,
+                    f"link scheme {scheme!r}: {href!r}",
+                    line=_line_of(node),
                 )
             )
     return out
@@ -112,8 +116,10 @@ def check_control_chars(path: str, text: str) -> list[Failure]:
         for ch in _CONTROL_RE.findall(line):
             out.append(
                 registry.fail(
-                    registry.WIKI_CONTROL_CHAR, path,
-                    f"U+{ord(ch):04X} ({unicodedata.name(ch, 'UNKNOWN')})", line=i,
+                    registry.WIKI_CONTROL_CHAR,
+                    path,
+                    f"U+{ord(ch):04X} ({unicodedata.name(ch, 'UNKNOWN')})",
+                    line=i,
                 )
             )
     return out
@@ -129,8 +135,11 @@ def check_line_hygiene(path: str, raw_text: str) -> list[Failure]:
     body = raw_text.replace("\r\n", "\n")
     for i, line in enumerate(body.split("\n"), start=1):
         if line != line.rstrip():
-            out.append(registry.fail(registry.WIKI_TRAILING_WHITESPACE, path,
-                                     "trailing whitespace", line=i))
+            out.append(
+                registry.fail(
+                    registry.WIKI_TRAILING_WHITESPACE, path, "trailing whitespace", line=i
+                )
+            )
     if raw_text and not raw_text.endswith("\n"):
         out.append(registry.fail(registry.WIKI_BAD_EOF, path, "no trailing newline"))
     elif raw_text.endswith("\n\n"):
@@ -147,8 +156,10 @@ def check_headings(path: str, tree: SyntaxTreeNode, title: str) -> list[Failure]
         if level > prev_level + 1:
             out.append(
                 registry.fail(
-                    registry.WIKI_HEADING_SKIP, path,
-                    f"heading level {level} follows level {prev_level}", line=_line_of(node),
+                    registry.WIKI_HEADING_SKIP,
+                    path,
+                    f"heading level {level} follows level {prev_level}",
+                    line=_line_of(node),
                 )
             )
         prev_level = level
@@ -157,8 +168,10 @@ def check_headings(path: str, tree: SyntaxTreeNode, title: str) -> list[Failure]
             if text.casefold() == title.strip().casefold():
                 out.append(
                     registry.fail(
-                        registry.WIKI_TITLE_REPEATED, path,
-                        f"first heading repeats the title: {text!r}", line=_line_of(node),
+                        registry.WIKI_TITLE_REPEATED,
+                        path,
+                        f"first heading repeats the title: {text!r}",
+                        line=_line_of(node),
                     )
                 )
     return out

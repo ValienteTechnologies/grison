@@ -1483,11 +1483,16 @@ def _run_reports_phase(
             reason = f"{type(e).__name__}: {e}"
             events.append(Event(verb="failed", path=str(evidence_dir), detail=reason))
             plans.append(
-                Plan(kind=evidence_adapter.kind, outcome=Outcome.FAILED, path=evidence_dir,
-                    reason=reason)
+                Plan(
+                    kind=evidence_adapter.kind,
+                    outcome=Outcome.FAILED,
+                    path=evidence_dir,
+                    reason=reason,
+                )
             )
             summaries[f"gw.evidence[{report_dir}]"] = KindSummary(
-                kind=evidence_adapter.kind, counts={"failed": 1},
+                kind=evidence_adapter.kind,
+                counts={"failed": 1},
                 problem_paths=[str(evidence_dir)],
             )
             continue
@@ -1515,7 +1520,8 @@ def _run_reports_phase(
 
     # --- narrative sections + project notes ---------------------------------
     for adapter in (
-        NarrativeSectionAdapter(evidence_by_report=evidence_by_report), ReportNoteAdapter(),
+        NarrativeSectionAdapter(evidence_by_report=evidence_by_report),
+        ReportNoteAdapter(),
     ):
         p, adapter_events, s = engine_run(
             root,

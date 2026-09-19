@@ -29,12 +29,12 @@ def _code_lines(text: str) -> list[tuple[int, str]]:
             if fence_count % 2 == 1:
                 in_doc = False
             continue
-        if stripped.startswith('#'):
+        if stripped.startswith("#"):
             continue
         if fence_count >= 1:
             # a docstring opens (and, if fence_count is even, also closes) on this line
             before_fence = line.split('"""', 1)[0]
-            if before_fence.strip() and not before_fence.strip().startswith('#'):
+            if before_fence.strip() and not before_fence.strip().startswith("#"):
                 out.append((lineno, before_fence))
             if fence_count % 2 == 1:
                 in_doc = True

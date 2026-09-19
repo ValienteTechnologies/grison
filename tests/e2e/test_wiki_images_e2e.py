@@ -24,11 +24,14 @@ def _read_fm(path: Path) -> tuple[dict, str]:
 
 
 def test_new_local_image_and_page_reference_uploads_and_translates_to_the_gallery_url(
-    run_grison, bs_server,
+    run_grison,
+    bs_server,
 ):
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(
-        book_id=book["id"], name="Getting Started", markdown="# Getting Started\n",
+        book_id=book["id"],
+        name="Getting Started",
+        markdown="# Getting Started\n",
     )
     run_grison("sync")  # pull the book/page down first
 
@@ -37,8 +40,7 @@ def test_new_local_image_and_page_reference_uploads_and_translates_to_the_galler
     (images_dir / "diagram.png").write_bytes(b"\x89PNG-fake-bytes")
     page_path = Path.cwd() / "methodology/library/playbook/getting-started.md"
     page_path.write_text(
-        "---\ntitle: Getting Started\n---\n\n"
-        "![Network diagram](images/diagram.png)\n",
+        "---\ntitle: Getting Started\n---\n\n![Network diagram](images/diagram.png)\n",
         encoding="utf-8",
     )
 
@@ -84,18 +86,23 @@ def test_second_sync_after_image_upload_is_a_noop(run_grison, bs_server):
 
 
 def test_remote_gallery_image_pulls_into_images_dir_and_url_becomes_local_path(
-    run_grison, bs_server,
+    run_grison,
+    bs_server,
 ):
     book = bs_server.store.seed_book(name="Playbook")
     page = bs_server.store.seed_page(
-        book_id=book["id"], name="Network Diagram", markdown="# Network Diagram\n",
+        book_id=book["id"],
+        name="Network Diagram",
+        markdown="# Network Diagram\n",
     )
     image = bs_server.store.seed_gallery_image(
-        name="topology.png", uploaded_to=page["id"], content=b"remote-bytes",
+        name="topology.png",
+        uploaded_to=page["id"],
+        content=b"remote-bytes",
     )
     bs_server.store.edit_page(
         page["id"],
-        markdown=f'# Network Diagram\n\n![Topology]({image["url"]})\n',
+        markdown=f"# Network Diagram\n\n![Topology]({image['url']})\n",
     )
 
     result = run_grison("sync")
@@ -113,7 +120,9 @@ def test_chapter_page_image_reference_uses_the_dotdot_spelling(run_grison, bs_se
     book = bs_server.store.seed_book(name="Playbook")
     chapter = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     page = bs_server.store.seed_page(
-        book_id=book["id"], chapter_id=chapter["id"], name="Subdomains",
+        book_id=book["id"],
+        chapter_id=chapter["id"],
+        name="Subdomains",
         markdown="# Subdomains\n",
     )
     run_grison("sync")
@@ -135,7 +144,8 @@ def test_chapter_page_image_reference_uses_the_dotdot_spelling(run_grison, bs_se
 
 
 def test_new_image_anchors_to_the_page_that_references_it_not_the_books_first_page(
-    run_grison, bs_server,
+    run_grison,
+    bs_server,
 ):
     """BRIEF C: :attr:`~grison.adapters.bs_images.BsImagesAdapter.anchor_for` used to
     be built into the adapter but never populated by ``cli.py`` — every new upload
@@ -145,10 +155,14 @@ def test_new_image_anchors_to_the_page_that_references_it_not_the_books_first_pa
     before building the adapter (``grison/cli.py::_anchor_for_book``)."""
     book = bs_server.store.seed_book(name="Playbook")
     page_a = bs_server.store.seed_page(
-        book_id=book["id"], name="Overview", markdown="# Overview\n",
+        book_id=book["id"],
+        name="Overview",
+        markdown="# Overview\n",
     )
     page_b = bs_server.store.seed_page(
-        book_id=book["id"], name="Recon", markdown="# Recon\n",
+        book_id=book["id"],
+        name="Recon",
+        markdown="# Recon\n",
     )
     assert page_a["id"] < page_b["id"]  # the old first-page fallback would pick page_a
     run_grison("sync")  # pull both pages down first
@@ -170,7 +184,8 @@ def test_new_image_anchors_to_the_page_that_references_it_not_the_books_first_pa
 
 
 def test_page_push_reuses_the_per_run_gallery_cache_not_one_fetch_per_page(
-    run_grison, bs_server,
+    run_grison,
+    bs_server,
 ):
     """grison/adapters/bs_pages.py::_remote_body_for_push (and the pre-write
     re-fetch guard's own URL localization) used to call ``_gallery_by_name_for_book``
@@ -184,11 +199,14 @@ def test_page_push_reuses_the_per_run_gallery_cache_not_one_fetch_per_page(
         for i in range(4)
     ]
     image = bs_server.store.seed_gallery_image(
-        name="diagram.png", uploaded_to=pages[0]["id"], content=b"bytes",
+        name="diagram.png",
+        uploaded_to=pages[0]["id"],
+        content=b"bytes",
     )
     for i, page in enumerate(pages):
         bs_server.store.edit_page(
-            page["id"], markdown=f"# Page {i}\n\n![Diagram]({image['url']})\n",
+            page["id"],
+            markdown=f"# Page {i}\n\n![Diagram]({image['url']})\n",
         )
     run_grison("sync")  # pull all 4 pages + the image down (localizes the URL)
 
@@ -218,7 +236,8 @@ def test_page_push_reuses_the_per_run_gallery_cache_not_one_fetch_per_page(
 
 
 def test_undo_refuses_to_guess_the_book_for_an_image_restore_with_no_uploaded_to(
-    run_grison, bs_server,
+    run_grison,
+    bs_server,
 ):
     """Same undo-safety fix as ``GwEvidenceAdapter.restore`` (D3):
     ``grison.engine.undo.replay``'s adapter map holds ONE ``BsImagesAdapter`` per
@@ -266,7 +285,8 @@ def test_undo_refuses_to_guess_the_book_for_an_image_restore_with_no_uploaded_to
 
 
 def test_image_reupload_pushes_the_page_with_the_new_url_in_the_same_run(
-    run_grison, bs_server,
+    run_grison,
+    bs_server,
 ):
     """D9/D1, verbatim: "replacing an image's bytes must re-push every page
     referencing it" — automatically, no ``--force-local``.

@@ -114,8 +114,13 @@ def test_spec_and_templates_are_not_read_denied(rel: str) -> None:
 
 @pytest.mark.parametrize(
     "rel",
-    [".grison/env", ".grison/state/foo.json", ".grison/snapshots/2026-01-01/x.json",
-     ".grison/lock", ".grison/terms.txt"],
+    [
+        ".grison/env",
+        ".grison/state/foo.json",
+        ".grison/snapshots/2026-01-01/x.json",
+        ".grison/lock",
+        ".grison/terms.txt",
+    ],
 )
 def test_private_grison_entries_are_read_denied(rel: str) -> None:
     assert any(_matches(r, rel) for r in _deny_patterns("Read")), rel
@@ -123,8 +128,13 @@ def test_private_grison_entries_are_read_denied(rel: str) -> None:
 
 @pytest.mark.parametrize(
     "rel",
-    [".grison/SPEC.md", ".grison/templates/finding-library.md", ".grison/env",
-     ".grison/manifest.yml", ".grison/index.json"],
+    [
+        ".grison/SPEC.md",
+        ".grison/templates/finding-library.md",
+        ".grison/env",
+        ".grison/manifest.yml",
+        ".grison/index.json",
+    ],
 )
 def test_everything_under_grison_is_edit_denied(rel: str) -> None:
     assert any(_matches(r, rel) for r in _deny_patterns("Edit")), rel

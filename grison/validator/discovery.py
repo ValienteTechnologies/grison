@@ -18,6 +18,5 @@ def find_workspace_root(start: Path) -> Path:
         if (candidate / ".grison").is_dir():
             return candidate
     raise WorkspaceNotFound(
-        f"no grison workspace found: no .grison/ directory in {start} or any parent "
-        "directory"
+        f"no grison workspace found: no .grison/ directory in {start} or any parent directory"
     )

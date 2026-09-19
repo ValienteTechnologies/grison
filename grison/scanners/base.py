@@ -12,13 +12,13 @@ class ImportOptions:
     severity_filter: set[Severity] | None = None  # None = all severities
     include_plugins: list[str] = field(default_factory=list)
     exclude_plugins: list[str] = field(default_factory=list)
-    min_qod: int = 0          # OpenVAS: minimum quality-of-detection threshold
-    fmt: str = "xml"          # Nmap: "xml" | "grepable"
+    min_qod: int = 0  # OpenVAS: minimum quality-of-detection threshold
+    fmt: str = "xml"  # Nmap: "xml" | "grepable"
     no_snoozed: bool = False  # Nessus: skip snoozed findings
 
 
 class Scanner(ABC):
-    name: ClassVar[str]   # CLI subcommand slug, e.g. "burp"
+    name: ClassVar[str]  # CLI subcommand slug, e.g. "burp"
     label: ClassVar[str]  # Human display name, e.g. "Burp Suite"
 
     def __init_subclass__(cls, **kwargs: object) -> None:

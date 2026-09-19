@@ -22,8 +22,10 @@ def _gw_creds(gw: FakeGhostwriter, **kw: object) -> Creds:
 
 def _bs_creds(bs: FakeBookStack, **kw: object) -> Creds:
     return Creds(
-        bs_url="https://fake-bs.invalid", bs_token_id=bs.token_id,
-        bs_token_secret=bs.token_secret, **kw,  # type: ignore[arg-type]
+        bs_url="https://fake-bs.invalid",
+        bs_token_id=bs.token_id,
+        bs_token_secret=bs.token_secret,
+        **kw,  # type: ignore[arg-type]
     )
 
 

@@ -386,10 +386,7 @@ def _esc(text: str) -> str:
     """HTML-escape text/attribute content. ``"`` is escaped too so a URL containing a
     quote can't break out of the ``href="…"`` attribute and inject markup."""
     return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )
 
 
@@ -420,8 +417,10 @@ def _md_escape_run(text: str) -> str:
 
 def _parses_as_plain_text(text: str) -> bool:
     tree = _parse_inline_tree(text)
-    return len(tree.children) == 1 and tree.children[0].type == "text" and (
-        tree.children[0].content == text
+    return (
+        len(tree.children) == 1
+        and tree.children[0].type == "text"
+        and (tree.children[0].content == text)
     )
 
 
@@ -701,8 +700,7 @@ def _render_top_level_blocks(
         if text == "" and block.tag != "ul" and block.tag != "ol":
             _report_loss(
                 on_loss,
-                f"empty/whitespace-only <{block.tag}> block dropped "
-                "(no markdown representation)",
+                f"empty/whitespace-only <{block.tag}> block dropped (no markdown representation)",
             )
             continue
         rendered.append(text)
@@ -748,18 +746,12 @@ def _merge_adjacent_top_level_lists(
     push/pull round. Reported via ``on_loss`` as a normalization."""
     merged: list[_Node] = []
     for block in blocks:
-        if (
-            merged
-            and block.tag in ("ul", "ol")
-            and merged[-1].tag == block.tag
-        ):
+        if merged and block.tag in ("ul", "ol") and merged[-1].tag == block.tag:
             prev = merged[-1]
             merged[-1] = _Node(
                 prev.tag, dict(prev.attrs), list(prev.children) + list(block.children)
             )
-            _report_loss(
-                on_loss, f"adjacent <{block.tag}> lists merged into one (normalization)"
-            )
+            _report_loss(on_loss, f"adjacent <{block.tag}> lists merged into one (normalization)")
             continue
         merged.append(block)
     return merged
@@ -840,9 +832,7 @@ def _render_block(
     if node.tag in _HEADING_TAGS:
         _report_dropped_attrs(node, on_loss)
         return (
-            "#" * int(node.tag[1])
-            + " "
-            + _render_inline(node.children, refs, on_loss, raw_state)
+            "#" * int(node.tag[1]) + " " + _render_inline(node.children, refs, on_loss, raw_state)
         )
     if node.tag in ("ul", "ol"):
         return _render_list_node(node, refs, on_loss, raw_state)
@@ -954,16 +944,12 @@ def _render_li(
         else:
             bare_text = _is_bare_text(b.children)
             embed = (
-                _try_render_dot_embed(bare_text, refs, on_loss)
-                if bare_text is not None
-                else None
+                _try_render_dot_embed(bare_text, refs, on_loss) if bare_text is not None else None
             )
             if embed is not None:
                 text = embed
             else:
-                text = _finalize_line(
-                    _render_inline(b.children, refs, on_loss, raw_state), on_loss
-                )
+                text = _finalize_line(_render_inline(b.children, refs, on_loss, raw_state), on_loss)
         if lines:
             lines.append("")
         lines.append(text)
@@ -1050,9 +1036,7 @@ def _render_inline(
                 _report_loss(on_loss, f'link rel={rel!r} canonicalized to "noopener" on push')
             target = n.attrs.get("target")
             if target is not None and target.strip() != "_blank":
-                _report_loss(
-                    on_loss, f'link target={target!r} canonicalized to "_blank" on push'
-                )
+                _report_loss(on_loss, f'link target={target!r} canonicalized to "_blank" on push')
             _report_dropped_attrs(n, on_loss)
             title = n.attrs.get("title")
             title_part = f' "{_md_escape_quotes(title)}"' if title else ""
@@ -1740,8 +1724,7 @@ def _render_list_item_node(
             blocks_html.append(_render_paragraph_node(child, refs=refs, jinja_escape=jinja_escape))
         else:
             raise ConverterError(
-                f"unsupported markdown: {child.type} inside a list item "
-                f"(line {_node_line(child)})"
+                f"unsupported markdown: {child.type} inside a list item (line {_node_line(child)})"
             )
     return f"<li>{''.join(blocks_html)}{nested_html}</li>"
 
@@ -1879,9 +1862,7 @@ def _push_cross_ref(href: str, refs: RefResolver | None) -> str:
     return f'<span {_GW_REF_ENCODED_ATTR}="{_encode_gw_ref(remote.name)}"></span>'
 
 
-_GW_ACTIVE_EXPR_RE = re.compile(
-    r"^gw:(?P<expr>\{\{.*\}\}|\{%.*%\}|\{#.*#\})$", re.DOTALL
-)
+_GW_ACTIVE_EXPR_RE = re.compile(r"^gw:(?P<expr>\{\{.*\}\}|\{%.*%\}|\{#.*#\})$", re.DOTALL)
 
 
 def _render_md_code_inline_or_special(content: str, jinja_escape: bool) -> str:

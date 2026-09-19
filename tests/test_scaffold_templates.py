@@ -14,8 +14,10 @@ from tests._ws2_helpers import copy_fixture
 def test_all_four_templates_are_generated() -> None:
     all_t = templates.all_templates()
     assert set(all_t) == {
-        templates.FINDING_LIBRARY_NAME, templates.FINDING_REPORTED_NAME,
-        templates.WIKI_PAGE_NAME, templates.PROJECT_NOTE_NAME,
+        templates.FINDING_LIBRARY_NAME,
+        templates.FINDING_REPORTED_NAME,
+        templates.WIKI_PAGE_NAME,
+        templates.PROJECT_NOTE_NAME,
     }
     for text in all_t.values():
         assert text and text.endswith("\n")

@@ -66,7 +66,8 @@ def wiki_images(md: str) -> list[FoundRef]:
     decides which one is actually correct for a given page's location, this only
     recognizes the shape."""
     return [
-        r for r in scan_refs(md)
+        r
+        for r in scan_refs(md)
         if r.kind == "embed" and (r.path.startswith("images/") or r.path.startswith("../images/"))
     ]
 

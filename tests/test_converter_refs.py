@@ -76,8 +76,7 @@ def test_embed_in_list_item_own_block() -> None:
         by_remote={("gw-evidence", 9, None): LocalRef(path="evidence/y.png", caption="Y")},
     )
     html = (
-        '<ul><li><p>context</p>'
-        '<div class="richtext-evidence" data-evidence-id="9"></div></li></ul>'
+        '<ul><li><p>context</p><div class="richtext-evidence" data-evidence-id="9"></div></li></ul>'
     )
     md = html_to_md(html, refs=refs)
     assert md == "- context\n\n  ![Y](evidence/y.png)"
@@ -107,9 +106,7 @@ def test_unsupported_div_shape_raises() -> None:
 
 def test_evidence_div_with_content_raises() -> None:
     with pytest.raises(ConverterError):
-        html_to_md(
-            '<div class="richtext-evidence" data-evidence-id="1">x</div>', refs=_resolver()
-        )
+        html_to_md('<div class="richtext-evidence" data-evidence-id="1">x</div>', refs=_resolver())
 
 
 # --- embed: legacy dot-syntax text --------------------------------------------
@@ -322,9 +319,7 @@ def test_unresolved_id_marker_inline_is_rejected() -> None:
 
 def test_unresolved_placeholder_round_trip_is_stable() -> None:
     refs = _resolver()
-    once = html_to_md(
-        '<div class="richtext-evidence" data-evidence-id="1"></div>', refs=refs
-    )
+    once = html_to_md('<div class="richtext-evidence" data-evidence-id="1"></div>', refs=refs)
     twice = html_to_md(md_to_html(once, refs=refs), refs=refs)
     assert twice == once
 

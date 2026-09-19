@@ -89,9 +89,14 @@ def test_git_tracking_class_directly(tmp_path: Path) -> None:
         assert ignored(rel), f"{rel} should be git-ignored"
     # tracked, must NOT be ignored
     for rel in (
-        ".grison/manifest.yml", ".grison/index.json", ".grison/SPEC.md",
-        ".grison/templates", ".grison/templates/finding-library.md",
-        "CLAUDE.md", ".claude/settings.json", ".gitignore",
+        ".grison/manifest.yml",
+        ".grison/index.json",
+        ".grison/SPEC.md",
+        ".grison/templates",
+        ".grison/templates/finding-library.md",
+        "CLAUDE.md",
+        ".claude/settings.json",
+        ".gitignore",
     ):
         assert not ignored(rel), f"{rel} should NOT be git-ignored"
 

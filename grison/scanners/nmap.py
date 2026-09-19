@@ -55,9 +55,7 @@ class NmapScanner(Scanner):
                         "protocol": port_el.get("protocol", "tcp"),
                         "service": svc.get("name", "") if svc is not None else "",
                         "product": (
-                            " ".join(
-                                filter(None, [svc.get("product", ""), svc.get("version", "")])
-                            )
+                            " ".join(filter(None, [svc.get("product", ""), svc.get("version", "")]))
                             if svc is not None
                             else ""
                         ),
@@ -115,9 +113,7 @@ class NmapScanner(Scanner):
 
         return findings
 
-    def _build_finding(
-        self, label: str, ip: str, hostname: str, ports: list[dict]
-    ) -> ScanFinding:
+    def _build_finding(self, label: str, ip: str, hostname: str, ports: list[dict]) -> ScanFinding:
         rows = "".join(
             f"<tr><td>{p['port']}/{p['protocol']}</td>"
             f"<td>{p['service']}</td>"

@@ -105,7 +105,14 @@ def run(  # noqa: PLR0913
     remote_unindexed = {i for i in remote_records if i not in indexed_ids}
 
     plans: list[Plan] = _pairing_plans(
-        adapter, ctx, root, missing_paths, unindexed_paths, indexed, local_docs, remote_records,
+        adapter,
+        ctx,
+        root,
+        missing_paths,
+        unindexed_paths,
+        indexed,
+        local_docs,
+        remote_records,
         state,
     )
     paired_missing = {p.move_from for p in plans if p.move_from is not None}
@@ -113,8 +120,9 @@ def run(  # noqa: PLR0913
 
     for mpath in sorted(present_indexed, key=str):
         plans.append(
-            _classify_matched(adapter, mpath, indexed[mpath], local_docs, remote_records, state,
-                              options)
+            _classify_matched(
+                adapter, mpath, indexed[mpath], local_docs, remote_records, state, options
+            )
         )
     for mpath in sorted(missing_paths - paired_missing, key=str):
         plans.append(
@@ -150,8 +158,10 @@ def run(  # noqa: PLR0913
         _apply_one(root, ctx, adapter, p, index, state, snapshot, events, options)
         summary.bump(p.outcome)
         if p.is_problem:
-            label = str(p.path) if p.path is not None else (
-                adapter.remote_label(p.remote.data) if p.remote is not None else str(p.id)
+            label = (
+                str(p.path)
+                if p.path is not None
+                else (adapter.remote_label(p.remote.data) if p.remote is not None else str(p.id))
             )
             summary.problem_paths.append(label)
 
@@ -161,9 +171,14 @@ def run(  # noqa: PLR0913
 
 
 def _pairing_plans(  # noqa: PLR0913
-    adapter: Adapter, ctx: Any, root: Path, missing_paths: set[PurePosixPath],
-    unindexed_paths: set[PurePosixPath], indexed: dict[PurePosixPath, int],
-    local_docs: dict[PurePosixPath, LocalDoc], remote_records: dict[int, RemoteRecord],
+    adapter: Adapter,
+    ctx: Any,
+    root: Path,
+    missing_paths: set[PurePosixPath],
+    unindexed_paths: set[PurePosixPath],
+    indexed: dict[PurePosixPath, int],
+    local_docs: dict[PurePosixPath, LocalDoc],
+    remote_records: dict[int, RemoteRecord],
     state: StateStore,
 ) -> list[Plan]:
     kind = adapter.kind
@@ -184,8 +199,9 @@ def _pairing_plans(  # noqa: PLR0913
                 remote_records[rid] = fresh
                 remote = fresh
         remote_text = adapter.render_local(remote.data, path=p) if remote is not None else None
-        missing.append(Missing(path=p, id=rid, base_hash=st.base if st else None,
-                               remote_content=remote_text))
+        missing.append(
+            Missing(path=p, id=rid, base_hash=st.base if st else None, remote_content=remote_text)
+        )
     unindexed: list[Unindexed] = []
     for p in unindexed_paths:
         doc = local_docs[p]
@@ -200,7 +216,9 @@ def _pairing_plans(  # noqa: PLR0913
 
 
 def _pair_decision_to_plan(
-    adapter: Adapter, d: PairDecision, local_docs: dict[PurePosixPath, LocalDoc],
+    adapter: Adapter,
+    d: PairDecision,
+    local_docs: dict[PurePosixPath, LocalDoc],
     remote_records: dict[int, RemoteRecord],
 ) -> Plan:
     kind = adapter.kind
@@ -214,14 +232,24 @@ def _pair_decision_to_plan(
     else:
         outcome = Outcome.MOVE_EDIT
     return Plan(
-        kind=kind, outcome=outcome, path=d.new_path, id=d.id, local=doc, remote=remote,
+        kind=kind,
+        outcome=outcome,
+        path=d.new_path,
+        id=d.id,
+        local=doc,
+        remote=remote,
         move_from=d.old_path,
     )
 
 
 def _classify_matched(  # noqa: PLR0913
-    adapter: Adapter, path: PurePosixPath, rid: int, local_docs: dict[PurePosixPath, LocalDoc],
-    remote_records: dict[int, RemoteRecord], state: StateStore, options: RunOptions,
+    adapter: Adapter,
+    path: PurePosixPath,
+    rid: int,
+    local_docs: dict[PurePosixPath, LocalDoc],
+    remote_records: dict[int, RemoteRecord],
+    state: StateStore,
+    options: RunOptions,
 ) -> Plan:
     kind = adapter.kind
     doc = local_docs[path]
@@ -231,18 +259,29 @@ def _classify_matched(  # noqa: PLR0913
     local_hash = digest(adapter.canonical_local(doc.doc))
     remote_hash = _remote_hash(adapter, remote)
     outcome = classify(
-        indexed=True, local_present=True, remote_present=remote is not None,
-        local_hash=local_hash, remote_hash=remote_hash, base_hash=base_hash,
-        read_only=adapter.mode == "read-only", append_only=adapter.mode == "append-only",
-        force_local=path in options.force_local, force_remote=path in options.force_remote,
+        indexed=True,
+        local_present=True,
+        remote_present=remote is not None,
+        local_hash=local_hash,
+        remote_hash=remote_hash,
+        base_hash=base_hash,
+        read_only=adapter.mode == "read-only",
+        append_only=adapter.mode == "append-only",
+        force_local=path in options.force_local,
+        force_remote=path in options.force_remote,
     )
-    return Plan(kind=kind, outcome=outcome, path=path, id=rid, local=doc, remote=remote,
-                base_hash=base_hash)
+    return Plan(
+        kind=kind, outcome=outcome, path=path, id=rid, local=doc, remote=remote, base_hash=base_hash
+    )
 
 
 def _classify_missing(
-    adapter: Adapter, path: PurePosixPath, rid: int, remote_records: dict[int, RemoteRecord],
-    state: StateStore, options: RunOptions,
+    adapter: Adapter,
+    path: PurePosixPath,
+    rid: int,
+    remote_records: dict[int, RemoteRecord],
+    state: StateStore,
+    options: RunOptions,
 ) -> Plan:
     kind = adapter.kind
     remote = remote_records.get(rid)
@@ -250,10 +289,16 @@ def _classify_missing(
     base_hash = st.base if st else None
     remote_hash = _remote_hash(adapter, remote)
     outcome = classify(
-        indexed=True, local_present=False, remote_present=remote is not None,
-        local_hash=None, remote_hash=remote_hash, base_hash=base_hash,
-        read_only=adapter.mode == "read-only", append_only=adapter.mode == "append-only",
-        force_local=path in options.force_local, force_remote=path in options.force_remote,
+        indexed=True,
+        local_present=False,
+        remote_present=remote is not None,
+        local_hash=None,
+        remote_hash=remote_hash,
+        base_hash=base_hash,
+        read_only=adapter.mode == "read-only",
+        append_only=adapter.mode == "append-only",
+        force_local=path in options.force_local,
+        force_remote=path in options.force_remote,
     )
     return Plan(kind=kind, outcome=outcome, path=path, id=rid, remote=remote, base_hash=base_hash)
 
@@ -265,8 +310,9 @@ def _apply_change_guard(plans: list[Plan], options: RunOptions, summary: KindSum
         return 2 if p.outcome in (Outcome.DELETE_REMOTE, Outcome.DELETE_LOCAL) else 1
 
     def _is_forced(p: Plan) -> bool:
-        return p.path is not None and (p.path in options.force_local
-                                       or p.path in options.force_remote)
+        return p.path is not None and (
+            p.path in options.force_local or p.path in options.force_remote
+        )
 
     remote_writes = [p for p in plans if p.outcome in _REMOTE_WRITE_OUTCOMES and not _is_forced(p)]
     w = sum(_weight(p) for p in remote_writes)
@@ -282,8 +328,15 @@ def _apply_change_guard(plans: list[Plan], options: RunOptions, summary: KindSum
 
 
 def _apply_one(  # noqa: PLR0912, PLR0913, PLR0915
-    root: Path, ctx: Any, adapter: Adapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions,
+    root: Path,
+    ctx: Any,
+    adapter: Adapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
 ) -> None:
     try:
         _dispatch(root, ctx, adapter, p, index, state, snapshot, events, options)
@@ -294,8 +347,15 @@ def _apply_one(  # noqa: PLR0912, PLR0913, PLR0915
 
 
 def _dispatch(  # noqa: PLR0912, PLR0913, PLR0915
-    root: Path, ctx: Any, adapter: Adapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions,
+    root: Path,
+    ctx: Any,
+    adapter: Adapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
 ) -> None:
     kind = adapter.kind
     dry = options.dry_run
@@ -360,8 +420,15 @@ def _dispatch(  # noqa: PLR0912, PLR0913, PLR0915
 
 
 def _apply_create(  # noqa: PLR0913
-    root: Path, ctx: Any, adapter: Adapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], dry: bool,
+    root: Path,
+    ctx: Any,
+    adapter: Adapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    dry: bool,
 ) -> None:
     assert p.local is not None and p.path is not None
     if dry:
@@ -375,13 +442,21 @@ def _apply_create(  # noqa: PLR0913
     # local_preimage: the author's own pre-create bytes — undoing this create restores
     # them (grison.engine.undo._replay_one), rather than deleting the file or leaving
     # it in its post-create mirrored form.
-    snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=rec.id,
-                           local_preimage=p.local.raw_text))
+    snapshot.record(
+        UndoOp(
+            kind=adapter.kind,
+            outcome="create",
+            path=str(p.path),
+            id=rec.id,
+            local_preimage=p.local.raw_text,
+        )
+    )
     text = adapter.render_local(rec.data, path=p.path)
     if text != p.local.raw_text:
         atomic_write_text(root / p.path, text)
-    state.put(adapter.kind, rec.id, base=digest(adapter.canonical_remote(rec.data)),
-              witness=rec.witness)
+    state.put(
+        adapter.kind, rec.id, base=digest(adapter.canonical_remote(rec.data)), witness=rec.witness
+    )
     emit_losses(events, str(p.path), rec.losses)
     events.append(Event(verb="create", path=str(p.path)))
 
@@ -419,7 +494,10 @@ def refetch_guard(
 
 
 def _refetch_guard(
-    ctx: Any, adapter: Adapter, p: Plan, options: RunOptions,
+    ctx: Any,
+    adapter: Adapter,
+    p: Plan,
+    options: RunOptions,
 ) -> tuple[RemoteRecord | None, bool]:
     """The document-adapter binding of :func:`refetch_guard`: ``p.remote`` may be a
     skip-detail-fetch placeholder (a small sentinel dict, missing most fields — see
@@ -440,8 +518,15 @@ def _refetch_guard(
 
 
 def _apply_update(  # noqa: PLR0913
-    root: Path, ctx: Any, adapter: Adapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions,
+    root: Path,
+    ctx: Any,
+    adapter: Adapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
 ) -> None:
     assert p.local is not None and p.id is not None and p.path is not None
     dry = options.dry_run
@@ -449,8 +534,13 @@ def _apply_update(  # noqa: PLR0913
     if drifted:
         _write_collision_sidecar(root, adapter, p, fresh)
         p.outcome = Outcome.COLLISION
-        events.append(Event(verb="collision", path=str(p.path),
-                            detail="changed on the server since classification"))
+        events.append(
+            Event(
+                verb="collision",
+                path=str(p.path),
+                detail="changed on the server since classification",
+            )
+        )
         return
     # the wysiwyg/draft/recycle-bin guard is re-checked here, against the FRESH
     # pre-write data, not just the bulk-fetch snapshot classify() used — a page can
@@ -476,13 +566,24 @@ def _apply_update(  # noqa: PLR0913
         old_id = p.id
         index.set(str(p.path), IndexKind(adapter.kind), rec.id)
         state.forget(adapter.kind, old_id)
-        snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=rec.id,
-                               local_preimage=p.local.raw_text))
+        snapshot.record(
+            UndoOp(
+                kind=adapter.kind,
+                outcome="create",
+                path=str(p.path),
+                id=rec.id,
+                local_preimage=p.local.raw_text,
+            )
+        )
         text = adapter.render_local(rec.data, path=p.path)
         if text != p.local.raw_text:
             atomic_write_text(root / p.path, text)
-        state.put(adapter.kind, rec.id, base=digest(adapter.canonical_remote(rec.data)),
-                  witness=rec.witness)
+        state.put(
+            adapter.kind,
+            rec.id,
+            base=digest(adapter.canonical_remote(rec.data)),
+            witness=rec.witness,
+        )
         emit_losses(events, str(p.path), rec.losses)
         events.append(Event(verb="push", path=str(p.path), detail="re-created remotely"))
         return
@@ -498,9 +599,15 @@ def _apply_update(  # noqa: PLR0913
     # file-set caption push's `local_preimage` stays `None`, on purpose: a
     # caption/description change never touches the evidence file's own bytes).
     local_preimage = adapter.render_local(preimage, path=p.path)
-    op = UndoOp(kind=adapter.kind, outcome=p.outcome.value, path=str(p.path),
-               id=p.id, remote_preimage=preimage, move_from=str(p.move_from)
-               if p.move_from else None, local_preimage=local_preimage)
+    op = UndoOp(
+        kind=adapter.kind,
+        outcome=p.outcome.value,
+        path=str(p.path),
+        id=p.id,
+        remote_preimage=preimage,
+        move_from=str(p.move_from) if p.move_from else None,
+        local_preimage=local_preimage,
+    )
     snapshot.record(op)
     resp = adapter.update(ctx, p.id, p.local.doc)
     if p.move_from is not None:
@@ -521,8 +628,15 @@ def _apply_update(  # noqa: PLR0913
 
 
 def _apply_move(  # noqa: PLR0913
-    root: Path, ctx: Any, adapter: Adapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions,
+    root: Path,
+    ctx: Any,
+    adapter: Adapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
 ) -> None:
     """Identical content: index-only bookkeeping UNLESS the directory move implies a
     different remote parent — in which case exactly one write happens (never a no-op
@@ -533,8 +647,9 @@ def _apply_move(  # noqa: PLR0913
         adapter.canonical_local(p.local.doc) != adapter.canonical_remote(remote.data)
     )
     if options.dry_run:
-        events.append(Event(verb="move", path=str(p.path), detail=f"from {p.move_from}",
-                            dry_run=True))
+        events.append(
+            Event(verb="move", path=str(p.path), detail=f"from {p.move_from}", dry_run=True)
+        )
         return
     index.move(str(p.move_from), str(p.path))
     if needs_write:
@@ -545,8 +660,14 @@ def _apply_move(  # noqa: PLR0913
 
 
 def _apply_pull(  # noqa: PLR0913
-    root: Path, adapter: Adapter, p: Plan, index: Index, state: StateStore, snapshot: Snapshot,
-    events: list[Event], dry: bool,
+    root: Path,
+    adapter: Adapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    dry: bool,
 ) -> None:
     assert p.remote is not None
     path: PurePosixPath
@@ -585,8 +706,12 @@ def _apply_pull(  # noqa: PLR0913
         index.move(str(relocated_from), str(path))
     else:
         index.set(str(path), IndexKind(adapter.kind), p.remote.id)
-    state.put(adapter.kind, p.remote.id, base=digest(adapter.canonical_remote(p.remote.data)),
-              witness=p.remote.witness)
+    state.put(
+        adapter.kind,
+        p.remote.id,
+        base=digest(adapter.canonical_remote(p.remote.data)),
+        witness=p.remote.witness,
+    )
     emit_losses(events, str(path), p.remote.losses)
     events.append(Event(verb="pull", path=str(path), detail=detail))
 
@@ -604,23 +729,41 @@ def _dedupe(path: PurePosixPath, existing: set[PurePosixPath], root: Path) -> Pu
 
 
 def _apply_delete_remote(  # noqa: PLR0913
-    ctx: Any, adapter: Adapter, p: Plan, index: Index, state: StateStore, snapshot: Snapshot,
-    events: list[Event], options: RunOptions,
+    ctx: Any,
+    adapter: Adapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
 ) -> None:
     assert p.id is not None
     dry = options.dry_run
     fresh, drifted = _refetch_guard(ctx, adapter, p, options)
     if drifted:
         p.outcome = Outcome.COLLISION
-        events.append(Event(verb="collision", path=str(p.path),
-                            detail="changed on the server since classification"))
+        events.append(
+            Event(
+                verb="collision",
+                path=str(p.path),
+                detail="changed on the server since classification",
+            )
+        )
         return
     if dry:
         events.append(Event(verb="delete-remote", path=str(p.path), dry_run=True))
         return
     preimage = fresh.data if fresh is not None else None
-    snapshot.record(UndoOp(kind=adapter.kind, outcome="delete_remote", path=str(p.path),
-                           id=p.id, remote_preimage=preimage))
+    snapshot.record(
+        UndoOp(
+            kind=adapter.kind,
+            outcome="delete_remote",
+            path=str(p.path),
+            id=p.id,
+            remote_preimage=preimage,
+        )
+    )
     adapter.delete(ctx, p.id)
     if p.path is not None:
         index.remove(str(p.path))
@@ -629,8 +772,13 @@ def _apply_delete_remote(  # noqa: PLR0913
 
 
 def _apply_delete_local(
-    root: Path, p: Plan, index: Index, state: StateStore, snapshot: Snapshot,
-    events: list[Event], dry: bool,
+    root: Path,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    dry: bool,
 ) -> None:
     assert p.path is not None and p.id is not None
     del snapshot  # not a remote write — no undo entry (see grison.engine.undo's docstring)
@@ -645,7 +793,10 @@ def _apply_delete_local(
 
 
 def _write_collision_sidecar(
-    root: Path, adapter: Adapter, p: Plan, remote: RemoteRecord | None,
+    root: Path,
+    adapter: Adapter,
+    p: Plan,
+    remote: RemoteRecord | None,
 ) -> None:
     if p.path is None or remote is None:
         return
@@ -654,7 +805,11 @@ def _write_collision_sidecar(
 
 
 def _apply_collision(
-    root: Path, adapter: Adapter, p: Plan, events: list[Event], dry: bool,
+    root: Path,
+    adapter: Adapter,
+    p: Plan,
+    events: list[Event],
+    dry: bool,
 ) -> None:
     if dry:
         events.append(Event(verb="collision", path=str(p.path), dry_run=True))

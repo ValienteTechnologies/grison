@@ -172,8 +172,11 @@ def _apply_order_limit_offset(
     if order_by:
         for clause in reversed(order_by):
             key, direction = next(iter(clause.items()))
-            rows = sorted(rows, key=lambda r, k=key: (r.get(k) is None, r.get(k)),
-                           reverse=(direction == "desc"))
+            rows = sorted(
+                rows,
+                key=lambda r, k=key: (r.get(k) is None, r.get(k)),
+                reverse=(direction == "desc"),
+            )
     if offset:
         rows = rows[offset:]
     if limit is not None:
@@ -298,7 +301,8 @@ class GWStore:
         band; the fake mirrors that so grison's own "append at the end" behavior
         round-trips (0 for the first finding in a fresh band)."""
         siblings = [
-            r for r in self.reported_findings
+            r
+            for r in self.reported_findings
             if r["reportId"] == report_id and r["severityId"] == severity_id
         ]
         if not siblings:
@@ -364,8 +368,13 @@ class GWStore:
         return row
 
     _DEFAULT_REPORT_FIELDS = (
-        "about_us", "executive_summary", "attack_chain", "methodology", "disclaimer",
-        "scope_text", "appendix",
+        "about_us",
+        "executive_summary",
+        "attack_chain",
+        "methodology",
+        "disclaimer",
+        "scope_text",
+        "appendix",
     )
 
     def seed_report_extra_field_specs(self, fields: tuple[str, ...] | None = None) -> list[dict]:
@@ -378,8 +387,10 @@ class GWStore:
         again after clearing ``self.extra_field_specs`` first."""
         rows = [
             {
-                "id": self._next_id("extraFieldSpec", start=3), "internalName": name,
-                "displayName": name.replace("_", " ").title(), "position": i + 1,
+                "id": self._next_id("extraFieldSpec", start=3),
+                "internalName": name,
+                "displayName": name.replace("_", " ").title(),
+                "position": i + 1,
                 "targetModel": "reporting.Report",
             }
             for i, name in enumerate(fields or self._DEFAULT_REPORT_FIELDS)
@@ -393,8 +404,12 @@ class GWStore:
         join — see the module docstring's note on dict-shaped rows)."""
         user = fields.pop("user", {"name": "", "username": self.whoami_username})
         row = {
-            "id": self._next_id("projectNote"), "projectId": project_id,
-            "note": "", "operatorId": 1, "timestamp": date.today().isoformat(), "user": user,
+            "id": self._next_id("projectNote"),
+            "projectId": project_id,
+            "note": "",
+            "operatorId": 1,
+            "timestamp": date.today().isoformat(),
+            "user": user,
         }
         row.update(fields)
         self.project_notes.append(row)
@@ -560,7 +575,9 @@ class FakeGhostwriter:
         if name == "finding":
             rows = [r for r in store.findings if _matches_where(r, args.get("where"))]
             return _apply_order_limit_offset(
-                rows, order_by=args.get("order_by"), limit=args.get("limit"),
+                rows,
+                order_by=args.get("order_by"),
+                limit=args.get("limit"),
                 offset=args.get("offset"),
             )
         if name == "finding_by_pk":
@@ -568,7 +585,9 @@ class FakeGhostwriter:
         if name == "reportedFinding":
             rows = [r for r in store.reported_findings if _matches_where(r, args.get("where"))]
             return _apply_order_limit_offset(
-                rows, order_by=args.get("order_by"), limit=args.get("limit"),
+                rows,
+                order_by=args.get("order_by"),
+                limit=args.get("limit"),
                 offset=args.get("offset"),
             )
         if name == "reportedFinding_by_pk":
@@ -576,7 +595,9 @@ class FakeGhostwriter:
         if name == "evidence":
             rows = [r for r in store.evidence if _matches_where(r, args.get("where"))]
             return _apply_order_limit_offset(
-                rows, order_by=args.get("order_by"), limit=args.get("limit"),
+                rows,
+                order_by=args.get("order_by"),
+                limit=args.get("limit"),
                 offset=args.get("offset"),
             )
         if name == "evidence_by_pk":
@@ -584,7 +605,9 @@ class FakeGhostwriter:
         if name == "report":
             rows = [r for r in store.reports if _matches_where(r, args.get("where"))]
             return _apply_order_limit_offset(
-                rows, order_by=args.get("order_by"), limit=args.get("limit"),
+                rows,
+                order_by=args.get("order_by"),
+                limit=args.get("limit"),
                 offset=args.get("offset"),
             )
         if name == "report_by_pk":
@@ -592,7 +615,9 @@ class FakeGhostwriter:
         if name == "extraFieldSpec":
             rows = [r for r in store.extra_field_specs if _matches_where(r, args.get("where"))]
             return _apply_order_limit_offset(
-                rows, order_by=args.get("order_by"), limit=args.get("limit"),
+                rows,
+                order_by=args.get("order_by"),
+                limit=args.get("limit"),
                 offset=args.get("offset"),
             )
         if name == "projectNote_by_pk":
@@ -676,7 +701,8 @@ class FakeGhostwriter:
             ct = next((r for r in store.django_content_types if r["model"] == ct_model), None)
             if ct is not None:
                 store.tagged_items = [
-                    t for t in store.tagged_items
+                    t
+                    for t in store.tagged_items
                     if not (t["content_type_id"] == ct["id"] and t["object_id"] == args["id"])
                 ]
                 for tag in args["tags"]:
@@ -725,8 +751,15 @@ class FakeGhostwriter:
         raise NotImplementedError(f"fake_gw: no mutation resolver for {name!r} — add one")
 
     def _upload_evidence(
-        self, *, report: int, filename: str, caption: str, friendly_name: str,
-        file_base64: str, description: str | None = None, tags: str | None = None,
+        self,
+        *,
+        report: int,
+        filename: str,
+        caption: str,
+        friendly_name: str,
+        file_base64: str,
+        description: str | None = None,
+        tags: str | None = None,
     ) -> dict:
         store = self.store
         if not store.report_exists(report):
@@ -735,8 +768,7 @@ class FakeGhostwriter:
                 f'"evidence_report_id_fkey" — report {report} does not exist'
             )
         if any(
-            e["reportId"] == report and e["friendlyName"] == friendly_name
-            for e in store.evidence
+            e["reportId"] == report and e["friendlyName"] == friendly_name for e in store.evidence
         ):
             raise GhostwriterFakeError(
                 f"Uniqueness violation. duplicate key value violates unique constraint "

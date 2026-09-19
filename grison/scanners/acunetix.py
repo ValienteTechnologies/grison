@@ -17,6 +17,13 @@ _NUMERIC_SEV: dict[str, Severity] = {
 }
 
 
+def _ref_li(ref: str) -> str:
+    """One reference as a list item; http(s) references become links."""
+    if ref.startswith("http"):
+        return f'<li><a href="{html.escape(ref, quote=True)}">{html.escape(ref)}</a></li>'
+    return f"<li>{html.escape(ref)}</li>"
+
+
 def _parse_severity(raw: str) -> Severity:
     raw = raw.strip().lower()
     if raw in _NUMERIC_SEV:
@@ -80,12 +87,7 @@ class AcunetixScanner(Scanner):
                             refs.append(ref_text)
 
                     if refs:
-                        refs_html = "<ul>" + "".join(
-                            f'<li><a href="{html.escape(r, quote=True)}">{html.escape(r)}</a></li>'
-                            if r.startswith("http")
-                            else f"<li>{html.escape(r)}</li>"
-                            for r in refs
-                        ) + "</ul>"
+                        refs_html = "<ul>" + "".join(_ref_li(r) for r in refs) + "</ul>"
                     else:
                         refs_html = ""
 

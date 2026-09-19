@@ -14,9 +14,7 @@ from hypothesis import strategies as st
 from grison.formats import finding, mirrors, narrative, note, wiki
 from grison.formats.common import FormatError
 
-_SETTINGS = settings(
-    max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
+_SETTINGS = settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 _text = st.text(max_size=2000)
 _bytes_as_text = st.binary(max_size=2000).map(lambda b: b.decode("utf-8", errors="replace"))
@@ -61,8 +59,10 @@ def test_narrative_parse_never_raises(text: str) -> None:
 @_SETTINGS
 def test_mirror_parsers_never_raise_unexpectedly(text: str) -> None:
     for fn in (
-        mirrors.parse_report_meta, mirrors.parse_book_mirror,
-        mirrors.parse_chapter_mirror, mirrors.parse_shelf_mirror,
+        mirrors.parse_report_meta,
+        mirrors.parse_book_mirror,
+        mirrors.parse_chapter_mirror,
+        mirrors.parse_shelf_mirror,
     ):
         try:
             fn(text, path=Path("x"))

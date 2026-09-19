@@ -84,7 +84,12 @@ def _read_fm(path: Path) -> tuple[dict, str]:
 
 
 def _write_page_file(
-    path: Path, *, title: str, body: str, priority: int | None = None, tags: list | None = None,
+    path: Path,
+    *,
+    title: str,
+    body: str,
+    priority: int | None = None,
+    tags: list | None = None,
 ) -> None:
     """Author (or hand-edit) a format-v2 page file — title/priority/tags only, no
     machine fields; book/chapter come from ``path``'s own directory (D4)."""
@@ -115,7 +120,9 @@ def test_first_sync_pulls_everything(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     chapter = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     page = bs_server.store.seed_page(
-        book_id=book["id"], chapter_id=chapter["id"], name="Getting Started",
+        book_id=book["id"],
+        chapter_id=chapter["id"],
+        name="Getting Started",
         markdown="# Getting Started\n\nHello.",
     )
 
@@ -130,8 +137,10 @@ def test_first_sync_pulls_everything(run_grison, bs_server):
     assert (page_path.parent.parent / ".book.yml").exists()
     assert (page_path.parent / ".chapter.yml").exists()
     assert bs_server.operation_log == []  # pull never mutates BookStack
-    assert _indexed_id(Path.cwd(), "methodology/library/playbook/recon/getting-started.md") \
+    assert (
+        _indexed_id(Path.cwd(), "methodology/library/playbook/recon/getting-started.md")
         == page["id"]
+    )
 
 
 def test_second_sync_is_a_noop(run_grison, bs_server):
@@ -354,8 +363,9 @@ def test_server_failure_on_one_page_does_not_stop_the_other(run_grison, bs_serve
 
     result = run_grison("sync")
 
-    succeeded = [p for p in (p1, p2)
-                 if bs_server.store.page(p["id"])["markdown"].endswith("Edited.")]
+    succeeded = [
+        p for p in (p1, p2) if bs_server.store.page(p["id"])["markdown"].endswith("Edited.")
+    ]
     assert len(succeeded) == 1  # exactly one push got through; the other was isolated
     assert "failed" in result.output.lower()
 
@@ -411,7 +421,10 @@ def test_wysiwyg_page_is_skipped_not_mirrored(run_grison, bs_server):
     always would)."""
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(
-        book_id=book["id"], name="WYSIWYG Page", editor="wysiwyg", markdown="",
+        book_id=book["id"],
+        name="WYSIWYG Page",
+        editor="wysiwyg",
+        markdown="",
         raw_html="<p>Authored in the rich editor.</p>",
     )
 
@@ -449,7 +462,10 @@ def test_page_moved_to_another_chapter_locally_pushes(run_grison, bs_server):
     chap_a = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     chap_b = bs_server.store.seed_chapter(book_id=book["id"], name="Exploitation")
     page = bs_server.store.seed_page(
-        book_id=book["id"], chapter_id=chap_a["id"], name="Notes", markdown="Notes body.",
+        book_id=book["id"],
+        chapter_id=chap_a["id"],
+        name="Notes",
+        markdown="Notes body.",
     )
     run_grison("sync")
     old_path = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
@@ -461,9 +477,10 @@ def test_page_moved_to_another_chapter_locally_pushes(run_grison, bs_server):
 
     assert "move" in result.output
     assert bs_server.store.page(page["id"])["chapter_id"] == chap_b["id"]
-    assert Index.load(Path.cwd()).get(
-        "methodology/library/playbook/exploitation/notes.md"
-    ).id == page["id"]
+    assert (
+        Index.load(Path.cwd()).get("methodology/library/playbook/exploitation/notes.md").id
+        == page["id"]
+    )
 
 
 def test_page_moved_between_chapters_remotely_relocates_local_file(run_grison, bs_server):
@@ -474,7 +491,10 @@ def test_page_moved_between_chapters_remotely_relocates_local_file(run_grison, b
     chap_a = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     chap_b = bs_server.store.seed_chapter(book_id=book["id"], name="Exploitation")
     page = bs_server.store.seed_page(
-        book_id=book["id"], chapter_id=chap_a["id"], name="Notes", markdown="# Notes",
+        book_id=book["id"],
+        chapter_id=chap_a["id"],
+        name="Notes",
+        markdown="# Notes",
     )
     run_grison("sync")
     old_path = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"
@@ -486,9 +506,10 @@ def test_page_moved_between_chapters_remotely_relocates_local_file(run_grison, b
     assert "pull" in result.output
     assert not old_path.exists()
     assert new_path.exists()
-    assert Index.load(Path.cwd()).get(
-        "methodology/library/playbook/exploitation/notes.md"
-    ).id == page["id"]
+    assert (
+        Index.load(Path.cwd()).get("methodology/library/playbook/exploitation/notes.md").id
+        == page["id"]
+    )
 
 
 def test_remote_book_move_relocates_the_local_file(run_grison, bs_server):
@@ -538,9 +559,7 @@ def test_new_local_book_directory_creates_the_book_on_bookstack(run_grison, bs_s
 def test_new_local_chapter_directory_creates_the_chapter_on_bookstack(run_grison, bs_server):
     bs_server.store.seed_book(name="Playbook")
     run_grison("sync")
-    newp = (
-        Path.cwd() / "methodology" / "library" / "playbook" / "new-chapter" / "first-page.md"
-    )
+    newp = Path.cwd() / "methodology" / "library" / "playbook" / "new-chapter" / "first-page.md"
     _write_page_file(newp, title="First Page", body="First page body text.")
 
     result = run_grison("sync")
@@ -673,8 +692,11 @@ def test_remote_delete_lands_in_the_recycle_bin_and_is_skipped_not_deleted(run_g
     from grison.remote.creds import Creds
 
     BookStackClient(
-        Creds(bs_url="https://x", bs_token_id=bs_server.token_id,
-              bs_token_secret=bs_server.token_secret),
+        Creds(
+            bs_url="https://x",
+            bs_token_id=bs_server.token_id,
+            bs_token_secret=bs_server.token_secret,
+        ),
         transport=bs_server.transport,
     ).delete_page(page["id"])
 
@@ -708,8 +730,11 @@ def test_unknown_recycled_page_is_ignored_silently(run_grison, bs_server):
     from grison.remote.creds import Creds
 
     BookStackClient(
-        Creds(bs_url="https://x", bs_token_id=bs_server.token_id,
-              bs_token_secret=bs_server.token_secret),
+        Creds(
+            bs_url="https://x",
+            bs_token_id=bs_server.token_id,
+            bs_token_secret=bs_server.token_secret,
+        ),
         transport=bs_server.transport,
     ).delete_page(untracked["id"])
     assert any(d["deletable_id"] == untracked["id"] for d in bs_server.store.recycle_bin)
@@ -737,7 +762,8 @@ def test_corrupt_local_page_file_is_an_error_isolated_from_others(run_grison, bs
 
 
 def test_too_deeply_nested_local_file_is_never_scanned_but_validate_flags_it(
-    run_grison, bs_server,
+    run_grison,
+    bs_server,
 ):
     """tests changed on purpose: BookStack has no deeper nesting than book/chapter/
     page, so the adapter simply never looks past chapter depth (not a sync-time
@@ -779,10 +805,14 @@ def test_remote_relocation_onto_an_occupied_local_path_is_tripwired(run_grison, 
 
 
 def test_book_and_chapter_mirror_content_after_first_sync(run_grison, bs_server):
-    book = bs_server.store.seed_book(name="Playbook", description="Playbook description",
-                                     tags=[{"name": "topic", "value": "network"}])
-    chap = bs_server.store.seed_chapter(book_id=book["id"], name="Recon", priority=2,
-                                        description="Recon phase")
+    book = bs_server.store.seed_book(
+        name="Playbook",
+        description="Playbook description",
+        tags=[{"name": "topic", "value": "network"}],
+    )
+    chap = bs_server.store.seed_chapter(
+        book_id=book["id"], name="Recon", priority=2, description="Recon phase"
+    )
     run_grison("sync")
 
     book_mirror = yaml.safe_load(
@@ -794,8 +824,7 @@ def test_book_and_chapter_mirror_content_after_first_sync(run_grison, bs_server)
     assert book_mirror["tags"] == ["topic:network"]
 
     chap_mirror = yaml.safe_load(
-        (Path.cwd() / "methodology" / "library" / "playbook" / "recon" / ".chapter.yml")
-        .read_text()
+        (Path.cwd() / "methodology" / "library" / "playbook" / "recon" / ".chapter.yml").read_text()
     )
     assert chap_mirror["name"] == "Recon"
     assert chap_mirror["priority"] == 2
@@ -875,8 +904,11 @@ def test_second_sync_skips_page_detail_fetch_for_clean_pages(run_grison, bs_serv
     run_grison("sync")
 
     new_requests = bs_server.request_log[before:]
-    detail_gets = [r for r in new_requests if r.method == "GET" and r.path.startswith(
-        "/api/pages/") and r.path != "/api/pages"]
+    detail_gets = [
+        r
+        for r in new_requests
+        if r.method == "GET" and r.path.startswith("/api/pages/") and r.path != "/api/pages"
+    ]
     assert detail_gets == []  # the skip-detail-fetch fast path really skipped the GET
 
 
@@ -944,8 +976,9 @@ def test_local_move_to_a_different_book_pushes_with_the_new_book_id(run_grison, 
 
 def test_shelf_mirror_content_and_book_membership(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
-    bs_server.store.seed_shelf(name="Engagements", description="Client engagement books",
-                               book_ids=[book["id"]])
+    bs_server.store.seed_shelf(
+        name="Engagements", description="Client engagement books", book_ids=[book["id"]]
+    )
 
     run_grison("sync")
 
@@ -977,7 +1010,10 @@ def test_bare_content_push_does_not_eject_a_chaptered_page(run_grison, bs_server
     book = bs_server.store.seed_book(name="Playbook")
     chap = bs_server.store.seed_chapter(book_id=book["id"], name="Recon")
     page = bs_server.store.seed_page(
-        book_id=book["id"], chapter_id=chap["id"], name="Notes", markdown="# N",
+        book_id=book["id"],
+        chapter_id=chap["id"],
+        name="Notes",
+        markdown="# N",
     )
     run_grison("sync")
     path = Path.cwd() / "methodology" / "library" / "playbook" / "recon" / "notes.md"

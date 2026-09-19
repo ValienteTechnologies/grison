@@ -34,10 +34,12 @@ def test_merge_is_idempotent() -> None:
 
 def test_plain_run_restores_a_hand_removed_entry() -> None:
     once = gi.build_gitignore(None)
-    stripped = "\n".join(
-        line for line in once.splitlines()
-        if line not in (gi._BEGIN, gi._END, "*.remote.*")
-    ) + "\n"
+    stripped = (
+        "\n".join(
+            line for line in once.splitlines() if line not in (gi._BEGIN, gi._END, "*.remote.*")
+        )
+        + "\n"
+    )
     healed = gi.build_gitignore(stripped or None)
     assert "*.remote.*" in healed
 

@@ -39,21 +39,13 @@ def test_nested_list_renders_as_indented_sub_bullets() -> None:
 def test_three_level_nesting_degrades_to_one_sub_level() -> None:
     # A <ul> nested inside a nested <li> (3 levels deep) collapses into the SAME
     # single sub-level rather than growing a third indent — documented, deliberate.
-    html = (
-        "<ul><li><p>a</p><ul><li><p>b</p>"
-        "<ul><li><p>c</p></li></ul>"
-        "</li></ul></li></ul>"
-    )
+    html = "<ul><li><p>a</p><ul><li><p>b</p><ul><li><p>c</p></li></ul></li></ul></li></ul>"
     assert html_to_md(html) == "- a\n  - b\n  - c"
 
 
 def test_three_level_nesting_collapse_reports_on_loss() -> None:
     events: list[str] = []
-    html = (
-        "<ul><li><p>a</p><ul><li><p>b</p>"
-        "<ul><li><p>c</p></li></ul>"
-        "</li></ul></li></ul>"
-    )
+    html = "<ul><li><p>a</p><ul><li><p>b</p><ul><li><p>c</p></li></ul></li></ul></li></ul>"
     html_to_md(html, on_loss=events.append)
     assert any("collapsed" in e and "sub-level" in e for e in events)
 
@@ -84,7 +76,7 @@ def test_shell_pipe_in_code_is_not_a_table() -> None:
 
 def test_reference_link_idiom_drops_cosmetic_attrs_and_roundtrips() -> None:
     html = (
-        '<ul><li><p><strong>CWE-16:</strong> '
+        "<ul><li><p><strong>CWE-16:</strong> "
         '<a target="_blank" rel="noopener" class="ng-star-inserted" '
         'href="https://cwe.mitre.org/data/definitions/16.html">'
         "https://cwe.mitre.org/data/definitions/16.html</a></p></li></ul>"
@@ -131,10 +123,7 @@ def test_ol_li_unwraps_paragraph() -> None:
 
 
 def test_ol_nested_in_ul_renders_as_indented_sub_items() -> None:
-    html = (
-        "<ul><li><p>parent</p><ol><li><p>child a</p></li><li><p>child b</p></li></ol>"
-        "</li></ul>"
-    )
+    html = "<ul><li><p>parent</p><ol><li><p>child a</p></li><li><p>child b</p></li></ol></li></ul>"
     md = html_to_md(html)
     assert md == "- parent\n  1. child a\n  2. child b"
     # md -> html -> md is a fixed point (the merge base relies on this)
@@ -145,10 +134,7 @@ def test_ul_nested_in_ol_renders_as_indented_sub_items() -> None:
     # Outer marker "1. " is 3 chars — the nested sub-level's indent matches that
     # width (not a flat 2 spaces), so grison's own output is real, previewable
     # CommonMark (see _render_list_node).
-    html = (
-        "<ol><li><p>parent</p><ul><li><p>child a</p></li><li><p>child b</p></li></ul>"
-        "</li></ol>"
-    )
+    html = "<ol><li><p>parent</p><ul><li><p>child a</p></li><li><p>child b</p></li></ul></li></ol>"
     md = html_to_md(html)
     assert md == "1. parent\n   - child a\n   - child b"
     assert html_to_md(md_to_html(md)) == md
@@ -158,11 +144,7 @@ def test_three_level_nesting_with_mixed_ol_ul_degrades_to_one_sub_level() -> Non
     # A <ul> nested three levels deep (inside an <ol> nested inside a <ul>) collapses
     # into the SAME single sub-level as the 2nd-level <ol> — only the indent
     # collapses, each contributing list keeps its own marker style.
-    html = (
-        "<ul><li><p>a</p><ol><li><p>b</p>"
-        "<ul><li><p>c</p></li></ul>"
-        "</li></ol></li></ul>"
-    )
+    html = "<ul><li><p>a</p><ol><li><p>b</p><ul><li><p>c</p></li></ul></li></ol></li></ul>"
     assert html_to_md(html) == "- a\n  1. b\n  - c"
 
 
@@ -183,12 +165,15 @@ def _finding_field_htmls() -> list[tuple[str, str]]:
         for field in _FINDING_SECTIONS:
             html = row.get(field) or ""
             if html.strip():
-                out.append((f'finding {row["id"]} {field}', html))
+                out.append((f"finding {row['id']} {field}", html))
     return out
 
 
-@pytest.mark.parametrize("html", [h for _, h in _finding_field_htmls()],
-                         ids=[label for label, _ in _finding_field_htmls()])
+@pytest.mark.parametrize(
+    "html",
+    [h for _, h in _finding_field_htmls()],
+    ids=[label for label, _ in _finding_field_htmls()],
+)
 def test_real_gw_finding_fixture_never_raises_and_reaches_immediate_fixpoint(html: str) -> None:
     md = html_to_md(html, headings=True)  # must not raise (defect 1's regression, corpus-wide)
     md2 = html_to_md(md_to_html(md, headings=True), headings=True)

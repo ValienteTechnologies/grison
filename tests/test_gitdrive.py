@@ -23,7 +23,9 @@ def _init_repo(path: Path) -> None:
     )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
-        cwd=path, check=True, capture_output=True,
+        cwd=path,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -105,7 +107,10 @@ def test_commit_scoped_to_workspace_root(tmp_path: Path) -> None:
 
     show = subprocess.run(
         ["git", "show", "--stat", "--pretty=", "HEAD"],
-        cwd=tmp_path, check=True, capture_output=True, text=True,
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     assert "outside.txt" not in show
     assert "inside.txt" in show

@@ -65,7 +65,12 @@ class BookStackClient(BaseHttpClient):
         :mod:`grison.remote.http`) — a PUT/POST call site that's provably safe to
         retry (none are, today) would pass it explicitly."""
         resp = self._send(
-            method, path, params=params, json=json, files=files, data=data,
+            method,
+            path,
+            params=params,
+            json=json,
+            files=files,
+            data=data,
             idempotent=idempotent,
         )
         if not resp.is_success:
@@ -89,9 +94,7 @@ class BookStackClient(BaseHttpClient):
         silently truncate (and previously-synced pages beyond it would look deleted)."""
         rows: list[dict] = []
         while True:
-            data = self._request(
-                "GET", path, params={"count": _LIST_COUNT, "offset": len(rows)}
-            )
+            data = self._request("GET", path, params={"count": _LIST_COUNT, "offset": len(rows)})
             batch = data["data"]
             rows.extend(batch)
             if not batch or len(rows) >= data.get("total", len(rows)):
@@ -219,7 +222,12 @@ class BookStackClient(BaseHttpClient):
         return self._request("GET", f"/api/image-gallery/{image_id}")
 
     def upload_gallery_image(
-        self, *, uploaded_to: int, filename: str, content: bytes, name: str | None = None,
+        self,
+        *,
+        uploaded_to: int,
+        filename: str,
+        content: bytes,
+        name: str | None = None,
     ) -> dict:
         """``POST /api/image-gallery`` (multipart) — ``type=gallery`` always (never
         ``drawio``); ``uploaded_to`` is a page id the upload API requires (BookStack
@@ -230,9 +238,7 @@ class BookStackClient(BaseHttpClient):
         if name:
             data["name"] = name
         files = {"image": (filename, content)}
-        return self._request(
-            "POST", "/api/image-gallery", files=files, data=data, idempotent=False
-        )
+        return self._request("POST", "/api/image-gallery", files=files, data=data, idempotent=False)
 
     def delete_gallery_image(self, image_id: int) -> None:
         self._delete(f"/api/image-gallery/{image_id}")
@@ -245,7 +251,5 @@ class BookStackClient(BaseHttpClient):
         one BookStack request in this client with a raw-bytes response body."""
         resp = self._send("GET", path, idempotent=True)
         if not resp.is_success:
-            raise BookStackError(
-                f"BookStack request failed: GET {path} -> HTTP {resp.status_code}"
-            )
+            raise BookStackError(f"BookStack request failed: GET {path} -> HTTP {resp.status_code}")
         return resp.content

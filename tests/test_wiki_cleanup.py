@@ -595,9 +595,7 @@ def test_file_scheme_autolink_left_unresolved_no_text_to_keep() -> None:
     completely untouched and reported."""
     md, r = _clean("file-scheme-autolink.md")
     assert "<file:///C:/notes/note1.txt>" in r.text
-    assert any(
-        "autolink" in i.explanation and "file:" in i.explanation for i in r.unresolved
-    )
+    assert any("autolink" in i.explanation and "file:" in i.explanation for i in r.unresolved)
     assert not any(c.rule == R_FILE_LINK for c in r.changes)
 
 
@@ -657,9 +655,7 @@ def test_cross_block_notice_div_becomes_plain_paragraph() -> None:
     md, r = _clean("cross-block-notice-paragraph.md")
     assert "<div" not in r.text and "</div>" not in r.text
     assert "- Findings below reflect state as of the assessment date" in r.text
-    assert r.text.count(
-        "Results should be independently verified before relying on them"
-    ) == 1
+    assert r.text.count("Results should be independently verified before relying on them") == 1
     assert not r.text.split("\n\n")[3].startswith("#")
     rules = [c.rule for c in r.changes]
     assert rules.count(R_ARTIFACT) == 2
@@ -1001,13 +997,20 @@ def test_gallery_image_rewritten_with_the_dotdot_spelling_inside_a_chapter() -> 
         "https://192.168.122.177:8443/uploads/images/gallery/2026-09/legend.png": "legend.png",
     }
     r = clean_page(
-        md, title="Network Diagram", own_hosts=OWN_HOSTS, in_chapter=True, image_map=mapping,
+        md,
+        title="Network Diagram",
+        own_hosts=OWN_HOSTS,
+        in_chapter=True,
+        image_map=mapping,
     )
     assert "![Diagram](../images/network-diagram.png)" in r.text
     assert "![Legend](../images/legend.png)" in r.text
     assert "images/network-diagram.png)" not in r.text.replace("../images/network-diagram.png)", "")
     r2 = clean_page(
-        r.text, own_hosts=OWN_HOSTS, in_chapter=True, image_map=mapping,
+        r.text,
+        own_hosts=OWN_HOSTS,
+        in_chapter=True,
+        image_map=mapping,
     )
     assert r2.changes == []  # idempotent
 
@@ -1023,9 +1026,7 @@ def test_book_root_page_still_gets_the_bare_images_spelling() -> None:
 
 # --- idempotence on the masked real-shape page (read-only, never copied) -----
 
-_REAL_SHAPE_PAGE = Path(
-    "/home/tfp/repos/grison-rework/lab/real-shapes/big-page-masked.md"
-)
+_REAL_SHAPE_PAGE = Path("/home/tfp/repos/grison-rework/lab/real-shapes/big-page-masked.md")
 
 
 @pytest.mark.skipif(not _REAL_SHAPE_PAGE.is_file(), reason="lab real-shape fixture not present")
@@ -1247,9 +1248,7 @@ _toc_paragraph = st.builds(
     st.sampled_from(_MARKER_PREFIXES),
     st.lists(st.sampled_from(_TOC_WORDS), min_size=1, max_size=5),
 )
-_prose_paragraph = st.lists(st.sampled_from(_PROSE_WORDS), min_size=1, max_size=8).map(
-    " ".join
-)
+_prose_paragraph = st.lists(st.sampled_from(_PROSE_WORDS), min_size=1, max_size=8).map(" ".join)
 _toc_page = st.lists(st.one_of(_toc_paragraph, _prose_paragraph), min_size=1, max_size=12).map(
     "\n\n".join
 )
@@ -1284,9 +1283,7 @@ def test_generated_toc_pages_never_drift_block_type(page: str) -> None:
 # output — proving no marker-shaped item content ever silently adds an
 # extra (nested) container of any kind, at any of the generated depths.
 _NESTED_MARKER_PREFIXES = ["9. ", "1) ", "# ", "### ", "> ", "--- ", "=== "]
-_NBSP_OR_SPACE_RUN = st.integers(min_value=0, max_value=4).map(
-    lambda n: "\u00a0" * n
-)
+_NBSP_OR_SPACE_RUN = st.integers(min_value=0, max_value=4).map(lambda n: "\u00a0" * n)
 
 _marker_link_fragment = st.builds(
     lambda prefix, ws, words: f"[{prefix}{ws} {' '.join(words)}](file:///C:/old/report.htm#_Toc1)",
@@ -1512,9 +1509,7 @@ def test_file_link_stripped_even_when_sibling_link_has_unsupported_scheme() -> N
     assert_no_file_scheme_remains(r.text)
     assert "\\[9\\]" in r.text
     assert "<xmpp://old.example.com/room>" in r.text  # never guessed at
-    assert any(
-        "xmpp" in i.explanation or "scheme" in i.explanation for i in r.unresolved
-    )
+    assert any("xmpp" in i.explanation or "scheme" in i.explanation for i in r.unresolved)
     r2 = clean_page(r.text)
     assert r2.changes == []
 

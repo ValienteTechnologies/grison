@@ -13,9 +13,7 @@ from hypothesis import strategies as st
 from grison.validator import validate_workspace
 from tests._ws2_helpers import copy_fixture
 
-_SETTINGS = settings(
-    max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
+_SETTINGS = settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 _text = st.text(max_size=1500)
 _bytes_as_text = st.binary(max_size=1500).map(lambda b: b.decode("utf-8", errors="replace"))

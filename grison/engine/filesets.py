@@ -1,4 +1,4 @@
-""""A folder mirrors a remote file set; an image line is a reference into it"
+""" "A folder mirrors a remote file set; an image line is a reference into it"
 (BRIEF D1/D9) — the ONE mechanism, shared by :mod:`grison.adapters.gw_evidence`
 (a report's ``evidence/`` folder <-> Ghostwriter evidence rows) and
 :mod:`grison.adapters.bs_images` (a book's ``images/`` folder <-> BookStack's image
@@ -190,8 +190,7 @@ class CaptionConflict:
     @property
     def detail(self) -> str:
         return (
-            f"conflicting captions {list(self.captions)!r} across "
-            f"{', '.join(self.docs)} (REF-004)"
+            f"conflicting captions {list(self.captions)!r} across {', '.join(self.docs)} (REF-004)"
         )
 
 
@@ -227,10 +226,13 @@ def collect_captions(
             for doc_path, c, _t in entries:
                 if c and c not in doc_by_caption:
                     doc_by_caption[c] = doc_path
-            conflicts.append(CaptionConflict(
-                name=name, captions=tuple(sorted(captions)),
-                docs=tuple(str(doc_by_caption[c]) for c in sorted(captions)),
-            ))
+            conflicts.append(
+                CaptionConflict(
+                    name=name,
+                    captions=tuple(sorted(captions)),
+                    docs=tuple(str(doc_by_caption[c]) for c in sorted(captions)),
+                )
+            )
             continue
         caption = next(iter(captions), "")
         description = next(iter(descriptions), "") if len(descriptions) <= 1 else ""
@@ -242,18 +244,16 @@ def collect_captions(
 
 def _match_folder(ref_path: str, *, folder_name: str, prefix: str) -> str | None:
     if ref_path.startswith(prefix):
-        return ref_path[len(prefix):]
+        return ref_path[len(prefix) :]
     alt_prefix = f"../{folder_name}/"
     if ref_path.startswith(alt_prefix):
-        return ref_path[len(alt_prefix):]
+        return ref_path[len(alt_prefix) :]
     return None
 
 
 # --- referencing-document canonicalization helpers --------------------------
 
-_EMBED_LINE_RE = re.compile(
-    r'^(!\[)([^\]]*)(\]\()([^)\s]+)(?:\s+"([^"]*)")?(\)\s*)$', re.MULTILINE
-)
+_EMBED_LINE_RE = re.compile(r'^(!\[)([^\]]*)(\]\()([^)\s]+)(?:\s+"([^"]*)")?(\)\s*)$', re.MULTILINE)
 
 
 def strip_embed_captions(md: str) -> str:
@@ -382,9 +382,9 @@ def canonical_prose(md: str, resolver: ResolvesEmbeds) -> dict[str, Any]:
     record classifies PUSH, not a silent CLEAN or an unresolved-reference
     PULL overwrite (D1: "replacing an image's bytes must re-push every
     finding referencing it")."""
-    return {"text": _substitute_ref_identity(
-        md, lambda path: _id_token(resolver.to_remote_id(path))
-    )}
+    return {
+        "text": _substitute_ref_identity(md, lambda path: _id_token(resolver.to_remote_id(path)))
+    }
 
 
 def _id_token(eid: int | None) -> str:
@@ -411,9 +411,7 @@ class _LiteralEmbedResolver:
     docstring for why that is exactly the property this record's REMOTE
     canonical form needs."""
 
-    name_to_id: Mapping[str, int] | Callable[[], Mapping[str, int]] = field(
-        default_factory=dict
-    )
+    name_to_id: Mapping[str, int] | Callable[[], Mapping[str, int]] = field(default_factory=dict)
 
     def _rows(self) -> Mapping[str, int]:
         return self.name_to_id() if callable(self.name_to_id) else self.name_to_id
@@ -431,7 +429,9 @@ class _LiteralEmbedResolver:
 
 
 def canonical_remote_prose(
-    html: str, *, headings: bool = False,
+    html: str,
+    *,
+    headings: bool = False,
     name_to_id: Mapping[str, int] | Callable[[], Mapping[str, int]] = {},  # noqa: B006
 ) -> dict[str, Any]:
     """Canonical payload for one REMOTE prose field/section — the record-type
@@ -470,9 +470,9 @@ def rewrite_captions(md: str, resolved: dict[str, tuple[str, str]], *, folder_na
         path = m.group(4)
         name = None
         if path.startswith(prefix):
-            name = path[len(prefix):]
+            name = path[len(prefix) :]
         elif path.startswith(alt_prefix):
-            name = path[len(alt_prefix):]
+            name = path[len(alt_prefix) :]
         if name is None or name not in resolved:
             return m.group(0)
         caption, description = resolved[name]
@@ -588,11 +588,22 @@ def caption_only_canonical(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _event(
-    verb: str, *, path: PurePosixPath | None, label: str | None = None, detail: str = "",
-    dry_run: bool = False, severity: VetoSeverity | None = None,
+    verb: str,
+    *,
+    path: PurePosixPath | None,
+    label: str | None = None,
+    detail: str = "",
+    dry_run: bool = False,
+    severity: VetoSeverity | None = None,
 ) -> Event:
-    return Event(verb=verb, path=str(path) if path is not None else None, label=label,
-                detail=detail, dry_run=dry_run, severity=severity)
+    return Event(
+        verb=verb,
+        path=str(path) if path is not None else None,
+        label=label,
+        detail=detail,
+        dry_run=dry_run,
+        severity=severity,
+    )
 
 
 def sync_fileset(  # noqa: PLR0913
@@ -636,8 +647,7 @@ def sync_fileset(  # noqa: PLR0913
     local_files = _local_files(root, folder)
     remote_rows = adapter.list_remote(ctx)
     captions, caption_conflicts = (
-        collect_captions(doc_bodies or {}, folder=folder)
-        if adapter.supports_caption else ({}, [])
+        collect_captions(doc_bodies or {}, folder=folder) if adapter.supports_caption else ({}, [])
     )
 
     indexed = {
@@ -654,7 +664,13 @@ def sync_fileset(  # noqa: PLR0913
     remote_unindexed = set(remote_rows) - indexed_ids
 
     plans, paired_missing_names, paired_unindexed_names = _pairing_plans(
-        kind, folder, missing_names, unindexed_names, indexed, state, local_files,
+        kind,
+        folder,
+        missing_names,
+        unindexed_names,
+        indexed,
+        state,
+        local_files,
     )
     # a caption conflict (REF-004) that slipped past the validator degrades just
     # this one file to "no local caption opinion" (it has no entry in `captions`
@@ -662,15 +678,31 @@ def sync_fileset(  # noqa: PLR0913
     # would abort every other file/finding in this sync (module docstring,
     # ENGINE.md §5 per-record isolation).
     for conflict in caption_conflicts:
-        plans.append(Plan(kind=kind, outcome=Outcome.FAILED, path=folder / conflict.name,
-                          reason=conflict.detail))
+        plans.append(
+            Plan(
+                kind=kind,
+                outcome=Outcome.FAILED,
+                path=folder / conflict.name,
+                reason=conflict.detail,
+            )
+        )
 
     for name in sorted(present_names - paired_missing_names):
         path = folder / name
         rid = indexed[path]
-        plans.append(_classify_one(
-            adapter, ctx, path, rid, local_files[name], remote_rows, state, options, captions,
-        ))
+        plans.append(
+            _classify_one(
+                adapter,
+                ctx,
+                path,
+                rid,
+                local_files[name],
+                remote_rows,
+                state,
+                options,
+                captions,
+            )
+        )
     for name in sorted(missing_names - paired_missing_names):
         path = folder / name
         rid = indexed[path]
@@ -705,12 +737,15 @@ def sync_fileset(  # noqa: PLR0913
     _apply_change_guard(plans, options)
 
     for p in plans:
-        _apply_one(root, ctx, adapter, p, index, state, snapshot, events, options, local_files,
-                  captions)
+        _apply_one(
+            root, ctx, adapter, p, index, state, snapshot, events, options, local_files, captions
+        )
         summary.bump(p.outcome)
         if p.is_problem:
-            label = str(p.path) if p.path is not None else adapter.remote_label(
-                p.remote.data if p.remote is not None else {}
+            label = (
+                str(p.path)
+                if p.path is not None
+                else adapter.remote_label(p.remote.data if p.remote is not None else {})
             )
             summary.problem_paths.append(label)
 
@@ -764,8 +799,13 @@ def _rows_after(
 
 
 def _pairing_plans(
-    kind: str, folder: PurePosixPath, missing_names: set[str], unindexed_names: set[str],
-    indexed: dict[PurePosixPath, int], state: StateStore, local_files: dict[str, bytes],
+    kind: str,
+    folder: PurePosixPath,
+    missing_names: set[str],
+    unindexed_names: set[str],
+    indexed: dict[PurePosixPath, int],
+    state: StateStore,
+    local_files: dict[str, bytes],
 ) -> tuple[list[Plan], set[str], set[str]]:
     """Move pairing: identical bytes only (D1 — changed bytes under the same
     name is a new row, never a move+edit — see module docstring). Both sides of
@@ -780,12 +820,19 @@ def _pairing_plans(
     for name in missing_names:
         path = folder / name
         rid = indexed[path]
-        missing.append(Missing(path=path, id=rid, base_hash=_cached_body_hash(state, kind, rid),
-                               remote_content=None))
+        missing.append(
+            Missing(
+                path=path,
+                id=rid,
+                base_hash=_cached_body_hash(state, kind, rid),
+                remote_content=None,
+            )
+        )
     unindexed: list[Unindexed] = []
     for name in unindexed_names:
-        unindexed.append(Unindexed(path=folder / name, content="",
-                                   content_hash=_hash_bytes(local_files[name])))
+        unindexed.append(
+            Unindexed(path=folder / name, content="", content_hash=_hash_bytes(local_files[name]))
+        )
     result = pair(missing, unindexed)
     plans = [
         Plan(kind=kind, outcome=Outcome.MOVE, path=d.new_path, id=d.id, move_from=d.old_path)
@@ -805,13 +852,20 @@ def _wrap_remote(row: RemoteRecord | None, canon_hash: str | None) -> RemoteReco
     skip-detail-fetch placeholder."""
     if row is None:
         return None
-    return RemoteRecord(id=row.id, data=row.data, witness=row.witness, cached_hash=canon_hash,
-                        losses=row.losses)
+    return RemoteRecord(
+        id=row.id, data=row.data, witness=row.witness, cached_hash=canon_hash, losses=row.losses
+    )
 
 
 def _classify_one(  # noqa: PLR0913
-    adapter: FileSetAdapter, ctx: Any, path: PurePosixPath, rid: int, body: bytes,
-    remote_rows: dict[int, RemoteRecord], state: StateStore, options: RunOptions,
+    adapter: FileSetAdapter,
+    ctx: Any,
+    path: PurePosixPath,
+    rid: int,
+    body: bytes,
+    remote_rows: dict[int, RemoteRecord],
+    state: StateStore,
+    options: RunOptions,
     captions: dict[str, ReferenceCaption],
 ) -> Plan:
     kind = adapter.kind
@@ -834,13 +888,20 @@ def _classify_one(  # noqa: PLR0913
         if remote_body_hash is None:
             remote_body_hash = _hash_bytes(adapter.fetch_body(ctx, rid))
             if not options.dry_run:
-                state.put(kind, rid, base=base_hash,
-                         witness={**(st.witness if st else {}), "body_hash": remote_body_hash})
-        remote_canon_hash = digest(_canonical(
-            body_hash=remote_body_hash, caption=row.data.get("caption", ""),
-            description=row.data.get("description", ""),
-            supports_caption=adapter.supports_caption,
-        ))
+                state.put(
+                    kind,
+                    rid,
+                    base=base_hash,
+                    witness={**(st.witness if st else {}), "body_hash": remote_body_hash},
+                )
+        remote_canon_hash = digest(
+            _canonical(
+                body_hash=remote_body_hash,
+                caption=row.data.get("caption", ""),
+                description=row.data.get("description", ""),
+                supports_caption=adapter.supports_caption,
+            )
+        )
 
     opinion = captions.get(path.name)
     if opinion is not None and opinion.has_opinion:
@@ -848,28 +909,49 @@ def _classify_one(  # noqa: PLR0913
     else:
         local_caption = row.data.get("caption", "") if row else ""
         local_description = row.data.get("description", "") if row else ""
-    local_canon_hash = digest(_canonical(
-        body_hash=local_hash, caption=local_caption, description=local_description,
-        supports_caption=adapter.supports_caption,
-    ))
+    local_canon_hash = digest(
+        _canonical(
+            body_hash=local_hash,
+            caption=local_caption,
+            description=local_description,
+            supports_caption=adapter.supports_caption,
+        )
+    )
 
     outcome = classify(
-        indexed=True, local_present=True, remote_present=row is not None,
-        local_hash=local_canon_hash, remote_hash=remote_canon_hash, base_hash=base_hash,
-        force_local=path in options.force_local, force_remote=path in options.force_remote,
+        indexed=True,
+        local_present=True,
+        remote_present=row is not None,
+        local_hash=local_canon_hash,
+        remote_hash=remote_canon_hash,
+        base_hash=base_hash,
+        force_local=path in options.force_local,
+        force_remote=path in options.force_remote,
     )
     remote = _wrap_remote(row, remote_canon_hash)
     if outcome is Outcome.PUSH and remote_body_hash is not None and remote_body_hash != local_hash:
         # bytes changed under the same name — never a metadata-only update
         # (D1): re-upload as a new row instead (see _apply_reupload).
-        return Plan(kind=kind, outcome=Outcome.MOVE_EDIT, path=path, id=rid, remote=remote,
-                   base_hash=base_hash, reason="bytes changed under the same name")
+        return Plan(
+            kind=kind,
+            outcome=Outcome.MOVE_EDIT,
+            path=path,
+            id=rid,
+            remote=remote,
+            base_hash=base_hash,
+            reason="bytes changed under the same name",
+        )
     return Plan(kind=kind, outcome=outcome, path=path, id=rid, remote=remote, base_hash=base_hash)
 
 
 def _classify_missing(
-    adapter: FileSetAdapter, ctx: Any, path: PurePosixPath, rid: int,
-    remote_rows: dict[int, RemoteRecord], state: StateStore, options: RunOptions,
+    adapter: FileSetAdapter,
+    ctx: Any,
+    path: PurePosixPath,
+    rid: int,
+    remote_rows: dict[int, RemoteRecord],
+    state: StateStore,
+    options: RunOptions,
 ) -> Plan:
     kind = adapter.kind
     row = remote_rows.get(rid)
@@ -890,20 +972,38 @@ def _classify_missing(
         else:
             body_hash = _hash_bytes(adapter.fetch_body(ctx, rid))
             if not options.dry_run:
-                state.put(kind, rid, base=base_hash,
-                         witness={**(st.witness if st else {}), "body_hash": body_hash})
-        remote_hash = digest(_canonical(
-            body_hash=body_hash,
-            caption=row.data.get("caption", ""), description=row.data.get("description", ""),
-            supports_caption=adapter.supports_caption,
-        ))
+                state.put(
+                    kind,
+                    rid,
+                    base=base_hash,
+                    witness={**(st.witness if st else {}), "body_hash": body_hash},
+                )
+        remote_hash = digest(
+            _canonical(
+                body_hash=body_hash,
+                caption=row.data.get("caption", ""),
+                description=row.data.get("description", ""),
+                supports_caption=adapter.supports_caption,
+            )
+        )
     outcome = classify(
-        indexed=True, local_present=False, remote_present=row is not None,
-        local_hash=None, remote_hash=remote_hash, base_hash=base_hash,
-        force_local=path in options.force_local, force_remote=path in options.force_remote,
+        indexed=True,
+        local_present=False,
+        remote_present=row is not None,
+        local_hash=None,
+        remote_hash=remote_hash,
+        base_hash=base_hash,
+        force_local=path in options.force_local,
+        force_remote=path in options.force_remote,
     )
-    return Plan(kind=kind, outcome=outcome, path=path, id=rid,
-               remote=_wrap_remote(row, remote_hash), base_hash=base_hash)
+    return Plan(
+        kind=kind,
+        outcome=outcome,
+        path=path,
+        id=rid,
+        remote=_wrap_remote(row, remote_hash),
+        base_hash=base_hash,
+    )
 
 
 def _apply_change_guard(plans: list[Plan], options: RunOptions) -> None:
@@ -913,8 +1013,9 @@ def _apply_change_guard(plans: list[Plan], options: RunOptions) -> None:
         return 2 if p.outcome in (Outcome.DELETE_REMOTE, Outcome.DELETE_LOCAL) else 1
 
     def _forced(p: Plan) -> bool:
-        return p.path is not None and (p.path in options.force_local
-                                       or p.path in options.force_remote)
+        return p.path is not None and (
+            p.path in options.force_local or p.path in options.force_remote
+        )
 
     remote_writes = [p for p in plans if p.outcome in _REMOTE_WRITE_OUTCOMES and not _forced(p)]
     w = sum(_weight(p) for p in remote_writes)
@@ -930,7 +1031,11 @@ def _apply_change_guard(plans: list[Plan], options: RunOptions) -> None:
 
 
 def _refetch_guard(
-    ctx: Any, adapter: FileSetAdapter, p: Plan, state: StateStore, options: RunOptions,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    state: StateStore,
+    options: RunOptions,
 ) -> tuple[RemoteRecord | None, bool]:
     """The file-set binding of :func:`grison.engine.apply.refetch_guard` — same
     pre-write drift check every remote-destructive write (re-upload, caption push,
@@ -954,34 +1059,59 @@ def _refetch_guard(
     return refetch_guard(
         refetch=lambda: adapter.refetch(ctx, rid),
         expected_hash=p.remote.cached_hash if p.remote is not None else None,
-        canonical_hash=lambda fresh: digest(_canonical(
-            body_hash=body_hash, caption=fresh.data.get("caption", ""),
-            description=fresh.data.get("description", ""),
-            supports_caption=adapter.supports_caption,
-        )),
+        canonical_hash=lambda fresh: digest(
+            _canonical(
+                body_hash=body_hash,
+                caption=fresh.data.get("caption", ""),
+                description=fresh.data.get("description", ""),
+                supports_caption=adapter.supports_caption,
+            )
+        ),
         forced=forced,
     )
 
 
 def _apply_one(  # noqa: PLR0913
-    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions, local_files: dict[str, bytes],
+    root: Path,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
+    local_files: dict[str, bytes],
     captions: dict[str, ReferenceCaption],
 ) -> None:
     try:
-        _dispatch(root, ctx, adapter, p, index, state, snapshot, events, options, local_files,
-                 captions)
+        _dispatch(
+            root, ctx, adapter, p, index, state, snapshot, events, options, local_files, captions
+        )
     except Exception as e:  # noqa: BLE001 — per-record isolation (ENGINE.md §5)
         p.outcome = Outcome.FAILED
         p.reason = f"{type(e).__name__}: {e}"
-        events.append(_event("failed", path=p.path,
-                             label=adapter.remote_label(p.remote.data) if p.remote else None,
-                             detail=p.reason))
+        events.append(
+            _event(
+                "failed",
+                path=p.path,
+                label=adapter.remote_label(p.remote.data) if p.remote else None,
+                detail=p.reason,
+            )
+        )
 
 
 def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
-    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions, local_files: dict[str, bytes],
+    root: Path,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
+    local_files: dict[str, bytes],
     captions: dict[str, ReferenceCaption],
 ) -> None:
     kind = adapter.kind
@@ -1015,11 +1145,19 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
             if body is not None:
                 body_hash = _hash_bytes(body)
                 st = state.get(kind, p.id)
-                state.put(kind, p.id, base=digest(_canonical(
-                    body_hash=body_hash, caption=p.remote.data.get("caption", ""),
-                    description=p.remote.data.get("description", ""),
-                    supports_caption=adapter.supports_caption,
-                )), witness={**(st.witness if st else {}), "body_hash": body_hash})
+                state.put(
+                    kind,
+                    p.id,
+                    base=digest(
+                        _canonical(
+                            body_hash=body_hash,
+                            caption=p.remote.data.get("caption", ""),
+                            description=p.remote.data.get("description", ""),
+                            supports_caption=adapter.supports_caption,
+                        )
+                    ),
+                    witness={**(st.witness if st else {}), "body_hash": body_hash},
+                )
         events.append(_event("repair", path=p.path))
         return
     if p.outcome is Outcome.WITHHELD:
@@ -1046,8 +1184,9 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
         _apply_create(ctx, adapter, p, index, state, snapshot, events, dry, local_files, captions)
         return
     if p.outcome is Outcome.MOVE_EDIT:
-        _apply_reupload(root, ctx, adapter, p, index, state, snapshot, events, options,
-                        local_files, captions)
+        _apply_reupload(
+            root, ctx, adapter, p, index, state, snapshot, events, options, local_files, captions
+        )
         return
     if p.outcome is Outcome.PUSH:
         _apply_caption_push(root, ctx, adapter, p, state, snapshot, events, options, captions)
@@ -1070,7 +1209,10 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
 
 
 def _write_collision_sidecar(
-    root: Path, ctx: Any, adapter: FileSetAdapter, path: PurePosixPath | None,
+    root: Path,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    path: PurePosixPath | None,
     remote: RemoteRecord | None,
 ) -> None:
     """Mirrors :func:`grison.engine.apply._write_collision_sidecar` for a file
@@ -1101,9 +1243,14 @@ def _clear_stale_sidecars(root: Path, plans: list[Plan]) -> None:
 
 
 def _apply_delete_local(
-    root: Path, p: Plan, index: Index, state: StateStore, events: list[Event], dry: bool,
+    root: Path,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    events: list[Event],
+    dry: bool,
 ) -> None:
-    """"deleted remotely" (D1: the folder mirrors the remote set both ways — a row
+    """ "deleted remotely" (D1: the folder mirrors the remote set both ways — a row
     that disappeared on the server removes the local mirror file too), reachable
     when a file's remote row is gone but the local copy still matches the last
     synced base (classify.py's ordinary DELETE_LOCAL row)."""
@@ -1118,8 +1265,15 @@ def _apply_delete_local(
 
 
 def _apply_create(  # noqa: PLR0913
-    ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], dry: bool, local_files: dict[str, bytes],
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    dry: bool,
+    local_files: dict[str, bytes],
     captions: dict[str, ReferenceCaption],
 ) -> None:
     assert p.path is not None
@@ -1130,15 +1284,25 @@ def _apply_create(  # noqa: PLR0913
     opinion = captions.get(p.path.name)
     caption = opinion.caption if opinion is not None and opinion.has_opinion else ""
     description = opinion.description if opinion is not None and opinion.has_opinion else ""
-    row = adapter.upload(ctx, filename=p.path.name, body=body, caption=caption,
-                         description=description)
+    row = adapter.upload(
+        ctx, filename=p.path.name, body=body, caption=caption, description=description
+    )
     index.set(str(p.path), IndexKind(adapter.kind), row.id)
     snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=row.id))
     body_hash = _hash_bytes(body)
-    state.put(adapter.kind, row.id, base=digest(_canonical(
-        body_hash=body_hash, caption=row.data.get("caption", ""),
-        description=row.data.get("description", ""), supports_caption=adapter.supports_caption,
-    )), witness={**row.witness, "body_hash": body_hash})
+    state.put(
+        adapter.kind,
+        row.id,
+        base=digest(
+            _canonical(
+                body_hash=body_hash,
+                caption=row.data.get("caption", ""),
+                description=row.data.get("description", ""),
+                supports_caption=adapter.supports_caption,
+            )
+        ),
+        witness={**row.witness, "body_hash": body_hash},
+    )
     p.remote = row  # so _rows_after()'s caption-rewrite pass sees this newly-created row too
     events.append(_event("create", path=p.path))
 
@@ -1156,8 +1320,16 @@ def _preimage(adapter: FileSetAdapter, ctx: Any, row: RemoteRecord) -> dict[str,
 
 
 def _apply_reupload(  # noqa: PLR0913
-    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions, local_files: dict[str, bytes],
+    root: Path,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
+    local_files: dict[str, bytes],
     captions: dict[str, ReferenceCaption],
 ) -> None:
     """Bytes changed under the same name (D1): a new remote row, the old one
@@ -1179,12 +1351,14 @@ def _apply_reupload(  # noqa: PLR0913
         p.outcome = Outcome.COLLISION
         if not dry:
             _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
-        events.append(_event("collision", path=p.path,
-                             detail="changed on the server since classification"))
+        events.append(
+            _event("collision", path=p.path, detail="changed on the server since classification")
+        )
         return
     if dry:
-        events.append(_event("push", path=p.path, detail="bytes changed — new remote row",
-                             dry_run=True))
+        events.append(
+            _event("push", path=p.path, detail="bytes changed — new remote row", dry_run=True)
+        )
         return
     body = local_files[p.path.name]
     opinion = captions.get(p.path.name)
@@ -1193,28 +1367,51 @@ def _apply_reupload(  # noqa: PLR0913
     else:
         caption = fresh.data.get("caption", "") if fresh else ""
         description = fresh.data.get("description", "") if fresh else ""
-    new_row = adapter.upload(ctx, filename=p.path.name, body=body, caption=caption,
-                             description=description)
+    new_row = adapter.upload(
+        ctx, filename=p.path.name, body=body, caption=caption, description=description
+    )
     old_id = p.id
     if fresh is not None:
-        snapshot.record(UndoOp(kind=adapter.kind, outcome="delete_remote", path=str(p.path),
-                               id=old_id, remote_preimage=_preimage(adapter, ctx, fresh)))
+        snapshot.record(
+            UndoOp(
+                kind=adapter.kind,
+                outcome="delete_remote",
+                path=str(p.path),
+                id=old_id,
+                remote_preimage=_preimage(adapter, ctx, fresh),
+            )
+        )
         adapter.delete(ctx, old_id)
     snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=new_row.id))
     index.set(str(p.path), IndexKind(adapter.kind), new_row.id)
     state.forget(adapter.kind, old_id)
     body_hash = _hash_bytes(body)
-    state.put(adapter.kind, new_row.id, base=digest(_canonical(
-        body_hash=body_hash, caption=caption, description=description,
-        supports_caption=adapter.supports_caption,
-    )), witness={**new_row.witness, "body_hash": body_hash})
+    state.put(
+        adapter.kind,
+        new_row.id,
+        base=digest(
+            _canonical(
+                body_hash=body_hash,
+                caption=caption,
+                description=description,
+                supports_caption=adapter.supports_caption,
+            )
+        ),
+        witness={**new_row.witness, "body_hash": body_hash},
+    )
     p.remote = new_row  # so _rows_after()/the caller's caption-rewrite pass sees the new row
     events.append(_event("push", path=p.path, detail="bytes changed — new remote row"))
 
 
 def _apply_caption_push(  # noqa: PLR0913
-    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions,
+    root: Path,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
     captions: dict[str, ReferenceCaption],
 ) -> None:
     """Guarded by the SAME pre-write re-fetch check every remote-destructive write
@@ -1234,8 +1431,9 @@ def _apply_caption_push(  # noqa: PLR0913
         p.outcome = Outcome.COLLISION
         if not dry:
             _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
-        events.append(_event("collision", path=p.path,
-                             detail="changed on the server since classification"))
+        events.append(
+            _event("collision", path=p.path, detail="changed on the server since classification")
+        )
         return
     if dry:
         events.append(_event("push", path=p.path, detail="caption/description", dry_run=True))
@@ -1250,8 +1448,13 @@ def _apply_caption_push(  # noqa: PLR0913
         "produced PUSH for this record"
     )
     local_caption, local_description = opinion.caption, opinion.description
-    op = UndoOp(kind=adapter.kind, outcome="push", path=str(p.path), id=p.id,
-               remote_preimage=_preimage(adapter, ctx, fresh))
+    op = UndoOp(
+        kind=adapter.kind,
+        outcome="push",
+        path=str(p.path),
+        id=p.id,
+        remote_preimage=_preimage(adapter, ctx, fresh),
+    )
     snapshot.record(op)
     updated = adapter.update_caption(
         ctx, p.id, caption=local_caption, description=local_description
@@ -1265,20 +1468,35 @@ def _apply_caption_push(  # noqa: PLR0913
     # id somehow has no cached digest yet.
     cached = state.get(adapter.kind, p.id)
     cached_hash = cached.witness.get("body_hash") if cached else None
-    body_hash = cached_hash if isinstance(cached_hash, str) else _hash_bytes(
-        adapter.fetch_body(ctx, p.id)
+    body_hash = (
+        cached_hash if isinstance(cached_hash, str) else _hash_bytes(adapter.fetch_body(ctx, p.id))
     )
-    state.put(adapter.kind, p.id, base=digest(_canonical(
-        body_hash=body_hash, caption=updated.data.get("caption", ""),
-        description=updated.data.get("description", ""), supports_caption=True,
-    )), witness={**updated.witness, "body_hash": body_hash})
+    state.put(
+        adapter.kind,
+        p.id,
+        base=digest(
+            _canonical(
+                body_hash=body_hash,
+                caption=updated.data.get("caption", ""),
+                description=updated.data.get("description", ""),
+                supports_caption=True,
+            )
+        ),
+        witness={**updated.witness, "body_hash": body_hash},
+    )
     p.remote = updated
     events.append(_event("push", path=p.path, detail="caption/description"))
 
 
 def _apply_pull(
-    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
-    events: list[Event], dry: bool,
+    root: Path,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    events: list[Event],
+    dry: bool,
 ) -> None:
     assert p.remote is not None and p.path is not None
     row = p.remote
@@ -1292,16 +1510,32 @@ def _apply_pull(
     atomic_write_bytes(root / path, body)
     index.set(str(path), IndexKind(adapter.kind), row.id)
     body_hash = _hash_bytes(body)
-    state.put(adapter.kind, row.id, base=digest(_canonical(
-        body_hash=body_hash, caption=row.data.get("caption", ""),
-        description=row.data.get("description", ""), supports_caption=adapter.supports_caption,
-    )), witness={**row.witness, "body_hash": body_hash})
+    state.put(
+        adapter.kind,
+        row.id,
+        base=digest(
+            _canonical(
+                body_hash=body_hash,
+                caption=row.data.get("caption", ""),
+                description=row.data.get("description", ""),
+                supports_caption=adapter.supports_caption,
+            )
+        ),
+        witness={**row.witness, "body_hash": body_hash},
+    )
     events.append(_event("pull", path=path, label=label if is_new else None))
 
 
 def _apply_delete_remote(
-    root: Path, ctx: Any, adapter: FileSetAdapter, p: Plan, index: Index, state: StateStore,
-    snapshot: Snapshot, events: list[Event], options: RunOptions,
+    root: Path,
+    ctx: Any,
+    adapter: FileSetAdapter,
+    p: Plan,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    events: list[Event],
+    options: RunOptions,
 ) -> None:
     """Guarded by the SAME pre-write re-fetch check every remote-destructive write
     gets (:func:`_refetch_guard`, ENGINE.md §3): a row that changed on the server
@@ -1314,15 +1548,23 @@ def _apply_delete_remote(
         p.outcome = Outcome.COLLISION
         if not dry:
             _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
-        events.append(_event("collision", path=p.path,
-                             detail="changed on the server since classification"))
+        events.append(
+            _event("collision", path=p.path, detail="changed on the server since classification")
+        )
         return
     if dry:
         events.append(_event("delete-remote", path=p.path, dry_run=True))
         return
     if fresh is not None:
-        snapshot.record(UndoOp(kind=adapter.kind, outcome="delete_remote", path=str(p.path),
-                               id=p.id, remote_preimage=_preimage(adapter, ctx, fresh)))
+        snapshot.record(
+            UndoOp(
+                kind=adapter.kind,
+                outcome="delete_remote",
+                path=str(p.path),
+                id=p.id,
+                remote_preimage=_preimage(adapter, ctx, fresh),
+            )
+        )
         adapter.delete(ctx, p.id)
     if p.path is not None:
         index.remove(str(p.path))
@@ -1336,6 +1578,9 @@ def undo_restore(adapter: FileSetAdapter, ctx: Any, preimage: dict[str, Any]) ->
     the bytes in the snapshot)")."""
     body = base64.b64decode(preimage["body_b64"])
     return adapter.upload(
-        ctx, filename=preimage["filename"], body=body, caption=preimage.get("caption", ""),
+        ctx,
+        filename=preimage["filename"],
+        body=body,
+        caption=preimage.get("caption", ""),
         description=preimage.get("description", ""),
     )

@@ -39,7 +39,8 @@ def gw_client(gw: FakeGhostwriter):
 
 
 def test_cold_path_passes_clean_against_a_compatible_schema(
-    gw_client: GhostwriterClient, tmp_path: Path,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
 ) -> None:
     """No cache present -> cold path -> proves the real introspection round-trip
     works end to end and grison's own operations validate clean today, and that
@@ -51,10 +52,14 @@ def test_cold_path_passes_clean_against_a_compatible_schema(
 
 
 def test_names_the_first_offending_field_and_the_min_version(
-    gw_client: GhostwriterClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        gw_module, "_FINDING_SEVERITY_QUERY", "query { findingSeverity { id bogusField } }",
+        gw_module,
+        "_FINDING_SEVERITY_QUERY",
+        "query { findingSeverity { id bogusField } }",
     )
     with pytest.raises(SchemaCompatibilityError) as exc_info:
         check_ghostwriter_compatibility(gw_client, tmp_path)
@@ -68,12 +73,15 @@ def test_names_the_first_offending_field_and_the_min_version(
 
 
 def test_reproduces_the_historical_evidence_query_break(
-    gw_client: GhostwriterClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Same shape as the real, confirmed-live 7.2 production break this check
     exists to catch (see tests/test_gw_schema_conformance.py's docstring)."""
     monkeypatch.setattr(
-        gw_module, "_EVIDENCE_QUERY",
+        gw_module,
+        "_EVIDENCE_QUERY",
         "query { evidence { id findingId reportId document caption friendlyName description } }",
     )
     with pytest.raises(SchemaCompatibilityError, match="findingId"):
@@ -81,7 +89,9 @@ def test_reproduces_the_historical_evidence_query_break(
 
 
 def test_only_ever_reports_the_first_failure_deterministically(
-    gw_client: GhostwriterClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Operations are checked in sorted order — a caller can rely on the SAME
     operation being named first across runs when more than one is broken."""
@@ -92,7 +102,9 @@ def test_only_ever_reports_the_first_failure_deterministically(
 
 
 def test_warm_path_issues_exactly_one_request(
-    gw: FakeGhostwriter, gw_client: GhostwriterClient, tmp_path: Path,
+    gw: FakeGhostwriter,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
 ) -> None:
     """A cache whose fingerprint already matches the live server costs exactly
     the one fingerprint-probe request — no introspection, no per-operation
@@ -106,7 +118,9 @@ def test_warm_path_issues_exactly_one_request(
 
 
 def test_cold_path_runs_when_the_fingerprint_is_stale(
-    gw: FakeGhostwriter, gw_client: GhostwriterClient, tmp_path: Path,
+    gw: FakeGhostwriter,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
 ) -> None:
     """A cached fingerprint that no longer matches the live server (the schema
     changed) forces the full introspection + validate pass, and then re-caches
@@ -141,7 +155,9 @@ def test_fingerprint_changes_when_a_field_grison_writes_to_disappears() -> None:
 
 
 def test_per_sync_cost_with_a_warm_cache_stays_well_under_a_second(
-    gw: FakeGhostwriter, gw_client: GhostwriterClient, tmp_path: Path,
+    gw: FakeGhostwriter,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
 ) -> None:
     """Measures the actual warm-path wall time against the fake — the number
     this check exists to fix (originally ~10s/sync from a full introspection +
@@ -155,7 +171,9 @@ def test_per_sync_cost_with_a_warm_cache_stays_well_under_a_second(
 
 
 def test_introspection_denied_is_wrapped_as_a_compat_error(
-    gw: FakeGhostwriter, gw_client: GhostwriterClient, tmp_path: Path,
+    gw: FakeGhostwriter,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
 ) -> None:
     """Bug fix: BEFORE the fix, a ``GhostwriterError`` raised by
     ``introspect_schema()`` (a GraphQL authorization error, e.g. a restricted API
@@ -172,7 +190,9 @@ def test_introspection_denied_is_wrapped_as_a_compat_error(
 
 
 def test_transport_failure_during_the_probe_is_wrapped_as_a_compat_error(
-    gw: FakeGhostwriter, gw_client: GhostwriterClient, tmp_path: Path,
+    gw: FakeGhostwriter,
+    gw_client: GhostwriterClient,
+    tmp_path: Path,
 ) -> None:
     """Same fix: a transport failure surviving retries (four straight HTTP 503s,
     exhausting the client's default ``max_attempts``) on the cheap

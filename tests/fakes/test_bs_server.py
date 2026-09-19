@@ -23,15 +23,29 @@ from tests.fakes.bs_server import FakeBookStack
 LAB_SAMPLES = Path(__file__).resolve().parent.parent / "fixtures" / "lab-samples"
 
 _KEYS_LIST_ROW = {
-    "id", "book_id", "chapter_id", "name", "slug", "priority", "draft", "template",
-    "created_at", "updated_at", "owned_by", "created_by", "updated_by", "revision_count",
-    "editor", "book_slug",
+    "id",
+    "book_id",
+    "chapter_id",
+    "name",
+    "slug",
+    "priority",
+    "draft",
+    "template",
+    "created_at",
+    "updated_at",
+    "owned_by",
+    "created_by",
+    "updated_by",
+    "revision_count",
+    "editor",
+    "book_slug",
 }
 
 
 def _creds(bs: FakeBookStack) -> Creds:
-    return Creds(bs_url="https://fake-bs.invalid", bs_token_id=bs.token_id,
-                 bs_token_secret=bs.token_secret)
+    return Creds(
+        bs_url="https://fake-bs.invalid", bs_token_id=bs.token_id, bs_token_secret=bs.token_secret
+    )
 
 
 def _client(bs: FakeBookStack) -> BookStackClient:
@@ -143,7 +157,10 @@ def test_wysiwyg_page_seeded_with_editor_flag() -> None:
     bs = FakeBookStack()
     book = bs.store.seed_book(name="Book")
     page = bs.store.seed_page(
-        book_id=book["id"], name="WYSIWYG", editor="wysiwyg", markdown="",
+        book_id=book["id"],
+        name="WYSIWYG",
+        editor="wysiwyg",
+        markdown="",
         raw_html="<p>Authored in the editor.</p>",
     )
     detail = _client(bs).fetch_page(page["id"])
@@ -220,9 +237,15 @@ def test_fidelity_page_list_row_field_set_matches_lab_capture() -> None:
     bs = FakeBookStack()
     book = bs.store.seed_book(id=sample["book_id"], slug=sample["book_slug"], name="x")
     bs.store.seed_page(
-        id=sample["id"], book_id=book["id"], chapter_id=sample["chapter_id"] or 0,
-        name=sample["name"], slug=sample["slug"], priority=sample["priority"],
-        draft=sample["draft"], template=sample["template"], revision_count=1,
+        id=sample["id"],
+        book_id=book["id"],
+        chapter_id=sample["chapter_id"] or 0,
+        name=sample["name"],
+        slug=sample["slug"],
+        priority=sample["priority"],
+        draft=sample["draft"],
+        template=sample["template"],
+        revision_count=1,
         editor=sample["editor"],
     )
     got = _client(bs).fetch_pages()[0]

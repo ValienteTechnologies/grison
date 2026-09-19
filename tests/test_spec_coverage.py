@@ -68,9 +68,7 @@ def test_every_rule_has_a_failing_case_test() -> None:
 def test_every_rule_has_a_passing_case_test() -> None:
     marked = _marker_ids("rule_ok")
     missing = sorted(_active_rule_ids() - marked)
-    assert not missing, (
-        f"rule id(s) with no @pytest.mark.rule_ok(...) passing-case test: {missing}"
-    )
+    assert not missing, f"rule id(s) with no @pytest.mark.rule_ok(...) passing-case test: {missing}"
 
 
 def test_retired_rules_are_never_used_by_a_test_marker() -> None:

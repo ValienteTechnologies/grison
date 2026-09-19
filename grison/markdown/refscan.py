@@ -118,8 +118,9 @@ def scan_refs(md: str) -> list[FoundRef]:
             if len(kids) == 1 and kids[0].type == "image":
                 img = kids[0]
                 standalone_ids.add(id(img.token))
-                out.append(_from_image(img, _line_of(node), standalone=True,
-                                       in_list_item=in_list_item))
+                out.append(
+                    _from_image(img, _line_of(node), standalone=True, in_list_item=in_list_item)
+                )
         elif node.type in ("bullet_list", "ordered_list"):
             for li in node.children:
                 if li.type != "list_item":
@@ -146,8 +147,11 @@ def scan_refs(md: str) -> list[FoundRef]:
     # docstring), never walked into by markdown-it's own tree in the first place.
     for node in tree.walk():
         if node.type == "image" and id(node.token) not in standalone_ids:
-            out.append(_from_image(node, _nearest_line(node), standalone=False,
-                                   in_list_item=_in_list_item(node)))
+            out.append(
+                _from_image(
+                    node, _nearest_line(node), standalone=False, in_list_item=_in_list_item(node)
+                )
+            )
         elif node.type == "link":
             out.append(
                 FoundRef(
@@ -165,8 +169,9 @@ def scan_refs(md: str) -> list[FoundRef]:
     return out
 
 
-def _from_image(node: SyntaxTreeNode, line: int, *, standalone: bool,
-                in_list_item: bool) -> FoundRef:
+def _from_image(
+    node: SyntaxTreeNode, line: int, *, standalone: bool, in_list_item: bool
+) -> FoundRef:
     return FoundRef(
         kind="embed",
         path=decode_ref_path(str(node.attrs.get("src") or "")),

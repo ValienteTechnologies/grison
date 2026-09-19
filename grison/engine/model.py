@@ -71,9 +71,7 @@ QUIET_OUTCOMES = frozenset({Outcome.CLEAN})
 #: deliberately not here — it only counts as a problem when its veto's severity is
 #: ATTENTION (see :func:`is_problem`); an INFO-severity skip (a draft/template page)
 #: must never make a run permanently exit nonzero.
-PROBLEM_OUTCOMES = frozenset(
-    {Outcome.INVALID, Outcome.COLLISION, Outcome.FAILED, Outcome.WITHHELD}
-)
+PROBLEM_OUTCOMES = frozenset({Outcome.INVALID, Outcome.COLLISION, Outcome.FAILED, Outcome.WITHHELD})
 
 
 def is_problem(outcome: Outcome, severity: VetoSeverity | None = None) -> bool:

@@ -63,10 +63,7 @@ class ZapScanner(Scanner):
             for child in alert_el:
                 if child.tag == "instances":
                     alert["instances"] = [
-                        {
-                            gc.tag: (gc.text or "").strip()
-                            for gc in instance
-                        }
+                        {gc.tag: (gc.text or "").strip() for gc in instance}
                         for instance in child.findall("instance")
                     ]
                 else:
@@ -75,9 +72,7 @@ class ZapScanner(Scanner):
 
         return self._to_findings(aggregated)
 
-    def _aggregate(
-        self, alert: dict, aggregated: dict[str, dict], opts: ImportOptions
-    ) -> None:
+    def _aggregate(self, alert: dict, aggregated: dict[str, dict], opts: ImportOptions) -> None:
         alert_ref = alert.get("alertRef") or alert.get("pluginid") or alert.get("id", "")
         severity = self._severity_for(alert)
 

@@ -48,9 +48,7 @@ def _primary_report_dir(ctx: GWReportContext, project_id: int | None) -> tuple[i
     when its project has more than one report (see module docstring)."""
     if project_id is None:
         return None
-    candidates = sorted(
-        rid for rid, pid in ctx.project_id_by_report.items() if pid == project_id
-    )
+    candidates = sorted(rid for rid, pid in ctx.project_id_by_report.items() if pid == project_id)
     for rid in candidates:
         rdir = ctx.dir_by_report_id.get(rid)
         if rdir is not None:
@@ -84,21 +82,31 @@ class ReportNoteAdapter:
                 yield LocalDoc(path=rel, doc=doc, raw_text=raw)
 
     def _note_data(
-        self, ctx: GWReportContext, row: dict[str, Any], *, report_id: int, report_dir: str,
+        self,
+        ctx: GWReportContext,
+        row: dict[str, Any],
+        *,
+        report_id: int,
+        report_dir: str,
     ) -> dict[str, Any]:
         user = row.get("user") or {}
         losses: list[str] = []
         try:
             body_md = html_to_md(
-                row.get("note") or "", headings=True,
+                row.get("note") or "",
+                headings=True,
                 refs=IndexRefResolver(index=ctx.index, report_dir=report_dir),
                 on_loss=losses.append,
             ).strip()
         except ConverterError:
             body_md = row.get("note") or ""
         return {
-            "id": row.get("id"), "project_id": row.get("projectId"), "report_id": report_id,
-            "report_dir": report_dir, "body_md": body_md, "losses": losses,
+            "id": row.get("id"),
+            "project_id": row.get("projectId"),
+            "report_id": report_id,
+            "report_dir": report_dir,
+            "body_md": body_md,
+            "losses": losses,
             "author": (user.get("name") or user.get("username") or "").strip(),
             "timestamp": row.get("timestamp"),
         }
@@ -115,8 +123,9 @@ class ReportNoteAdapter:
                 nid = note.get("id")
                 if nid is None or nid in out:
                     continue  # already attached to an earlier (lower-id) report of this project
-                data = self._note_data(ctx, dict(note, projectId=project.get("id")),
-                                       report_id=rid, report_dir=rdir)
+                data = self._note_data(
+                    ctx, dict(note, projectId=project.get("id")), report_id=rid, report_dir=rdir
+                )
                 out[nid] = RemoteRecord(id=nid, data=data, losses=data["losses"])
         return out
 
@@ -142,8 +151,10 @@ class ReportNoteAdapter:
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         del path
         doc = note_fmt.NoteDoc(
-            author=data.get("author") or None, timestamp=data.get("timestamp"),
-            body=data["body_md"], has_frontmatter=True,
+            author=data.get("author") or None,
+            timestamp=data.get("timestamp"),
+            body=data["body_md"],
+            has_frontmatter=True,
         )
         return note_fmt.dump(doc)
 
@@ -166,14 +177,20 @@ class ReportNoteAdapter:
             raise LookupError(f"report {report_id} has no project — cannot push a note")
         operator_id, _username = ctx.resolve_operator()
         html = md_to_html(
-            doc.body.strip(), headings=True,
+            doc.body.strip(),
+            headings=True,
             refs=IndexRefResolver(index=ctx.index, report_dir=doc.report_dir),
         )
         note_id = ctx.client.insert_project_note(project_id, html, operator_id, date.today())
         row = ctx.client.fetch_project_note_by_pk(note_id)
         if row is None:  # pragma: no cover — defensive: the mutation just returned this id
-            row = {"id": note_id, "projectId": project_id, "note": html, "timestamp": None,
-                  "user": None}
+            row = {
+                "id": note_id,
+                "projectId": project_id,
+                "note": html,
+                "timestamp": None,
+                "user": None,
+            }
         data = self._note_data(ctx, row, report_id=report_id, report_dir=doc.report_dir)
         return RemoteRecord(id=note_id, data=data, losses=data["losses"])
 

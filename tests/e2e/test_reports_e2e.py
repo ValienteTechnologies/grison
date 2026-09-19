@@ -1019,11 +1019,18 @@ def test_captioned_evidence_embed_in_narrative_round_trips_clean(run_grison, gw_
     after the pull that introduced it, and stays CLEAN with the caption intact."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"scopes": REPORT_SCOPES},
     )
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
-        caption="Login screen", description="A close-up of the login form",
+        id=90,
+        reportId=7,
+        document="evidence/7/shot.png",
+        friendlyName="shot",
+        caption="Login screen",
+        description="A close-up of the login form",
     )
     run_grison("sync")  # report dir + empty narrative + evidence/shot.png, all indexed
 
@@ -1047,7 +1054,8 @@ def test_captioned_evidence_embed_in_narrative_round_trips_clean(run_grison, gw_
 
 
 def test_narrative_section_cross_reference_and_embed_converge_after_one_push(
-    run_grison, gw_server,
+    run_grison,
+    gw_server,
 ):
     """Item 1 (engine-findings-lab.md 'Two defects'/#2), narrative sections too:
     the same permanent push loop a reported finding's plain cross-reference
@@ -1057,13 +1065,22 @@ def test_narrative_section_cross_reference_and_embed_converge_after_one_push(
     identity through the same mechanism, so one push settles it for good."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"scopes": REPORT_SCOPES},
     )
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/login_page.png", friendlyName="login_page",
+        id=90,
+        reportId=7,
+        document="evidence/7/login_page.png",
+        friendlyName="login_page",
     )
     gw_server.store.seed_evidence(
-        id=91, reportId=7, document="evidence/7/db_dump.png", friendlyName="db_dump",
+        id=91,
+        reportId=7,
+        document="evidence/7/db_dump.png",
+        friendlyName="db_dump",
     )
     run_grison("sync")  # downloads + indexes both evidence files
 
@@ -1088,7 +1105,8 @@ def test_narrative_section_cross_reference_and_embed_converge_after_one_push(
 
 
 def test_evidence_reupload_pushes_the_narrative_section_with_the_new_id(
-    run_grison, gw_server,
+    run_grison,
+    gw_server,
 ):
     """D1, verbatim: "replacing an image's bytes must re-push every finding
     referencing it" — automatically, in the SAME run as the reupload, no
@@ -1113,10 +1131,16 @@ def test_evidence_reupload_pushes_the_narrative_section_with_the_new_id(
     engine_run call, right after the fileset sync that repointed the index."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"scopes": REPORT_SCOPES},
     )
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        id=90,
+        reportId=7,
+        document="evidence/7/shot.png",
+        friendlyName="shot",
         caption="Login screen",
     )
     run_grison("sync")
@@ -1138,9 +1162,9 @@ def test_evidence_reupload_pushes_the_narrative_section_with_the_new_id(
     assert "reports (gw.reportSection): push 1" in push_result.output
     assert "collision" not in push_result.output
     assert section.read_text(encoding="utf-8") == original_text  # local text never touched
-    new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
-        "shot.png"
-    ))
+    new_id = next(
+        row["id"] for row in gw_server.store.evidence if row["document"].endswith("shot.png")
+    )
     assert new_id != 90
     assert f'data-evidence-id="{new_id}"' in report["extraFields"]["executive_summary"]
 
@@ -1160,10 +1184,16 @@ def test_non_ascii_evidence_filename_pushes_from_a_narrative_embed(run_grison, g
     and raise ConverterError instead of pushing."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"scopes": REPORT_SCOPES},
     )
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/Sonuçları.png", friendlyName="Sonuçları",
+        id=90,
+        reportId=7,
+        document="evidence/7/Sonuçları.png",
+        friendlyName="Sonuçları",
     )
     run_grison("sync")  # downloads + indexes evidence/Sonuçları.png
 

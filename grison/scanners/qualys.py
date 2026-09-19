@@ -31,8 +31,7 @@ class QualysScanner(Scanner):
             return self._parse_vuln(root, opts)
         else:
             raise ValueError(
-                f"Unrecognised Qualys root element: {tag!r}. "
-                "Expected WAS_SCAN_REPORT or SCAN."
+                f"Unrecognised Qualys root element: {tag!r}. Expected WAS_SCAN_REPORT or SCAN."
             )
 
     def _parse_was(self, root: Element, opts: ImportOptions) -> list[ScanFinding]:
@@ -59,10 +58,7 @@ class QualysScanner(Scanner):
                     "impact": qid_el.findtext("IMPACT") or "",
                     "solution": qid_el.findtext("SOLUTION") or "",
                     "cvss_vector": cvss_vector,
-                    "cve_list": [
-                        c.text or ""
-                        for c in qid_el.findall(".//CVE_LIST/CVE/ID")
-                    ],
+                    "cve_list": [c.text or "" for c in qid_el.findall(".//CVE_LIST/CVE/ID")],
                 }
 
         # Aggregate vulnerabilities by QID
@@ -120,11 +116,7 @@ class QualysScanner(Scanner):
 
             cves = meta.get("cve_list", [])
             refs_html = (
-                "<ul>"
-                + "".join(f"<li>{c}</li>" for c in cves if c)
-                + "</ul>"
-                if cves
-                else ""
+                "<ul>" + "".join(f"<li>{c}</li>" for c in cves if c) + "</ul>" if cves else ""
             )
 
             findings.append(

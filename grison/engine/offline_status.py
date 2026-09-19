@@ -72,7 +72,11 @@ class OfflineStatus:
 
 
 def compute_offline_status(
-    root: Path, adapter: Adapter, index: Index, state: StateStore, failures: list[Failure],
+    root: Path,
+    adapter: Adapter,
+    index: Index,
+    state: StateStore,
+    failures: list[Failure],
 ) -> OfflineStatus:
     """This kind's offline status. ``failures`` is the validator's own failure list
     (already scoped to this kind's area by the caller, e.g. ``paths=[".../methodology"]``
@@ -91,13 +95,20 @@ def compute_offline_status(
     unindexed_paths = {p for p in local_docs if p not in indexed}
 
     missing = [
-        Missing(path=p, id=indexed[p], base_hash=_base_hash(state, kind, indexed[p]),
-               remote_content=None)
+        Missing(
+            path=p,
+            id=indexed[p],
+            base_hash=_base_hash(state, kind, indexed[p]),
+            remote_content=None,
+        )
         for p in missing_paths
     ]
     unindexed = [
-        Unindexed(path=p, content=local_docs[p].raw_text,
-                 content_hash=digest(adapter.canonical_local(local_docs[p].doc)))
+        Unindexed(
+            path=p,
+            content=local_docs[p].raw_text,
+            content_hash=digest(adapter.canonical_local(local_docs[p].doc)),
+        )
         for p in unindexed_paths
     ]
     result = pair(missing, unindexed)
@@ -124,15 +135,17 @@ def compute_offline_status(
         entries.append(_entry(p, "new", reasons_by_path))
 
     known_paths = present_indexed | missing_paths | unindexed_paths
-    sidecars = sorted(
-        p for p in known_paths if (root / sidecar_path(p)).exists()
+    sidecars = sorted(p for p in known_paths if (root / sidecar_path(p)).exists())
+    return OfflineStatus(
+        entries=sorted(entries, key=lambda e: str(e.path)), collision_sidecars=sidecars
     )
-    return OfflineStatus(entries=sorted(entries, key=lambda e: str(e.path)),
-                         collision_sidecars=sidecars)
 
 
 def _entry(
-    path: PurePosixPath, bucket: str, reasons_by_path: dict[str, tuple[str, ...]], *,
+    path: PurePosixPath,
+    bucket: str,
+    reasons_by_path: dict[str, tuple[str, ...]],
+    *,
     moved_from: PurePosixPath | None = None,
 ) -> StatusEntry:
     reasons = reasons_by_path.get(str(path))

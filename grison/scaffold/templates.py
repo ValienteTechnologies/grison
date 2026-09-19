@@ -33,7 +33,7 @@ _PLACEHOLDER_SECTIONS: dict[str, str] = {
     "impact": "Describe what an attacker could accomplish by exploiting this.",
     "mitigation": "Describe how to fix or mitigate the issue.",
     "replication_steps": "1. Describe the first step to reproduce the issue.\n"
-                          "2. Describe the next step.",
+    "2. Describe the next step.",
     "references": "- https://example.com/reference",
 }
 
@@ -117,8 +117,10 @@ def project_note_template() -> str:
     """``findings/reports/<dir>/notes/<name>.md`` — a NEW local note (never a
     frontmatter fence: that shape is reserved for an already-mirrored note grison
     itself regenerates — see ``docs/workspace-format.md`` §3.2)."""
-    return "Write a new note for the project here — grison pushes it as a new " \
+    return (
+        "Write a new note for the project here — grison pushes it as a new "
         "Ghostwriter project note on the next sync.\n"
+    )
 
 
 def all_templates() -> dict[str, str]:

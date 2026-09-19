@@ -56,9 +56,7 @@ class NessusScanner(Scanner):
                     cvss3_raw = (item.findtext("cvss3_vector") or "").strip()
                     if cvss3_raw:
                         cvss_raw = (
-                            cvss3_raw
-                            if cvss3_raw.startswith("CVSS:3")
-                            else f"CVSS:3.0/{cvss3_raw}"
+                            cvss3_raw if cvss3_raw.startswith("CVSS:3") else f"CVSS:3.0/{cvss3_raw}"
                         )
                     else:
                         cvss2_raw = (item.findtext("cvss_vector") or "").strip()
@@ -88,9 +86,7 @@ class NessusScanner(Scanner):
         findings: list[ScanFinding] = []
         for plugin_id, meta in aggregated.items():
             refs_html = (
-                "<ul>"
-                + "".join(f'<li><a href="{r}">{r}</a></li>' for r in meta["refs"])
-                + "</ul>"
+                "<ul>" + "".join(f'<li><a href="{r}">{r}</a></li>' for r in meta["refs"]) + "</ul>"
                 if meta["refs"]
                 else ""
             )

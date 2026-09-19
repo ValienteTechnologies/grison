@@ -161,10 +161,13 @@ def test_git_hygiene_noop_outside_a_repo(tmp_path: Path) -> None:
     """Not itself rule-marked (a negative-space proof, not a rule): confirms
     check_git_hygiene is a true no-op — not a false pass — outside any git repo."""
     root = copy_fixture(tmp_path, git=False)
-    assert subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
-        capture_output=True,
-    ).returncode != 0
+    assert (
+        subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+        ).returncode
+        != 0
+    )
     fails = validate_workspace(root)
     assert "WS-008" not in rule_ids(fails)
 
@@ -236,8 +239,9 @@ def test_ws012_template_content_drift_is_not_flagged(tmp_path: Path) -> None:
     ever checked for a template."""
     bootstrap_workspace(tmp_path)
     tmpl = tmp_path / ".grison" / "templates" / "finding-library.md"
-    tmpl.write_text(tmpl.read_text(encoding="utf-8") + "\ncustomized by the team\n",
-                    encoding="utf-8")
+    tmpl.write_text(
+        tmpl.read_text(encoding="utf-8") + "\ncustomized by the team\n", encoding="utf-8"
+    )
     fails = validate_workspace(tmp_path)
     assert "WS-012" not in rule_ids(fails)
 

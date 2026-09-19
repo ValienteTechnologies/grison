@@ -30,7 +30,7 @@ def test_ref001_image_not_alone(tmp_path: Path) -> None:
 @pytest.mark.rule("REF-002")
 def test_ref002_unresolved_image(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
-    edit(root / _XSS, "evidence/xss-alert.png \"captured", "evidence/missing.png \"captured")
+    edit(root / _XSS, 'evidence/xss-alert.png "captured', 'evidence/missing.png "captured')
     assert "REF-002" in rule_ids(validate_workspace(root))
 
 
@@ -51,7 +51,7 @@ def test_ref004_caption_conflict(tmp_path: Path) -> None:
     edit(
         narrative,
         "One critical and one high finding",
-        '![A completely different caption](evidence/xss-alert.png)\n\n'
+        "![A completely different caption](evidence/xss-alert.png)\n\n"
         "One critical and one high finding",
     )
     fails = validate_workspace(root)
@@ -167,9 +167,7 @@ def test_ref008_bad_fileset_names(tmp_path: Path) -> None:
 
     from grison.validator.core import _check_fileset_name
 
-    sep_fails = _check_fileset_name(
-        PurePosixPath("findings/reports/r/evidence"), "sub/dir.png"
-    )
+    sep_fails = _check_fileset_name(PurePosixPath("findings/reports/r/evidence"), "sub/dir.png")
     assert len(sep_fails) == 1 and sep_fails[0].rule_id == "REF-008"
 
 

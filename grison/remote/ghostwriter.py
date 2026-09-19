@@ -618,7 +618,8 @@ class GhostwriterClient(BaseHttpClient):
         content_types = self._resolve_content_types()
         table_by_ct_id = {ct_id: table for table, ct_id in content_types.items()}
         rows = self._post(
-            _TAGGED_ITEM_QUERY, {"content_type_ids": list(content_types.values())},
+            _TAGGED_ITEM_QUERY,
+            {"content_type_ids": list(content_types.values())},
             idempotent=True,
         )["taggedItem"]
         tag_map: dict[tuple[str, int], list[str]] = {}
@@ -646,7 +647,8 @@ class GhostwriterClient(BaseHttpClient):
         if ct_id is None:
             return []
         rows = self._post(
-            _TAGGED_ITEM_FOR_QUERY, {"content_type_id": ct_id, "object_id": object_id},
+            _TAGGED_ITEM_FOR_QUERY,
+            {"content_type_id": ct_id, "object_id": object_id},
             idempotent=True,
         )["taggedItem"]
         return [row["tag"]["name"] for row in rows]
@@ -681,9 +683,9 @@ class GhostwriterClient(BaseHttpClient):
         ``None`` if it no longer exists — used right after
         :meth:`insert_project_note` to build the local mirror, and by undo's
         create-refetch check."""
-        return self._post(
-            _PROJECT_NOTE_BY_PK_QUERY, {"id": note_id}, idempotent=True
-        )["projectNote_by_pk"]
+        return self._post(_PROJECT_NOTE_BY_PK_QUERY, {"id": note_id}, idempotent=True)[
+            "projectNote_by_pk"
+        ]
 
     def delete_project_note(self, note_id: int) -> None:
         """Delete a project note — used ONLY to undo a note create grison itself just
@@ -701,9 +703,9 @@ class GhostwriterClient(BaseHttpClient):
         """The GW user row id for a username (``None`` if no such user) — used once per
         sync to turn ``whoami()``'s username into the ``operatorId`` a project-note
         insert requires (no session-derived default)."""
-        rows = self._post(
-            _USER_ID_BY_USERNAME_QUERY, {"username": username}, idempotent=True
-        )["user"]
+        rows = self._post(_USER_ID_BY_USERNAME_QUERY, {"username": username}, idempotent=True)[
+            "user"
+        ]
         return rows[0]["id"] if rows else None
 
     def insert_project_note(
@@ -721,9 +723,9 @@ class GhostwriterClient(BaseHttpClient):
         return data["insert_projectNote_one"]["id"]
 
     def download_evidence(self, evidence_id: int) -> tuple[str, bytes]:
-        data = self._post(
-            _DOWNLOAD_EVIDENCE_QUERY, {"id": evidence_id}, idempotent=True
-        )["downloadEvidence"]
+        data = self._post(_DOWNLOAD_EVIDENCE_QUERY, {"id": evidence_id}, idempotent=True)[
+            "downloadEvidence"
+        ]
         raw = base64.b64decode(data["fileBase64"])
         return data["filename"], raw
 

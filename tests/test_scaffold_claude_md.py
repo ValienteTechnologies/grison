@@ -115,7 +115,7 @@ def test_payloads_section_replaces_the_generic_placeholder_wording() -> None:
     text = build_claude_md()
     assert "Payloads that look like template syntax" in text
     assert "Write it literally, exactly as it was sent" in text
-    assert "Do not escape, mangle, or \"defuse\" it" in text
+    assert 'Do not escape, mangle, or "defuse" it' in text
     assert "{7*7}" in text and "{% debug %}" in text
     # the old, wrong-scope wording must be gone
     assert "looks templated" not in text

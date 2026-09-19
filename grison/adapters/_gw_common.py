@@ -44,9 +44,7 @@ class GWContext:
     #: The org-wide evidence-row cache (:meth:`all_evidence`) — private: every
     #: reader/writer goes through the methods below so the cache is never read
     #: half-populated or mutated inconsistently with what the server actually holds.
-    _evidence_cache: list[dict[str, Any]] | None = field(
-        default=None, repr=False, compare=False
-    )
+    _evidence_cache: list[dict[str, Any]] | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def build(cls, client: GhostwriterClient, index: Index) -> GWContext:
@@ -95,9 +93,7 @@ class GWContext:
         """The delete-side counterpart of :meth:`evidence_cache_upsert`."""
         if self._evidence_cache is None:
             return
-        self._evidence_cache = [
-            r for r in self._evidence_cache if r.get("id") != evidence_id
-        ]
+        self._evidence_cache = [r for r in self._evidence_cache if r.get("id") != evidence_id]
 
 
 @dataclass
@@ -122,9 +118,7 @@ class GWReportContext:
     #: caching shape as :class:`GWContext`'s own :meth:`~GWContext.all_evidence`
     #: (Ghostwriter has no report-scoped evidence query); private, read only
     #: through that method so it's never read half-populated.
-    _evidence_cache: list[dict[str, Any]] | None = field(
-        default=None, repr=False, compare=False
-    )
+    _evidence_cache: list[dict[str, Any]] | None = field(default=None, repr=False, compare=False)
 
     @property
     def reports_by_id(self) -> dict[int, dict[str, Any]]:
@@ -221,8 +215,8 @@ class IndexRefResolver:
     #: without this, EVERY section of EVERY report would trigger the fetch merely
     #: by being scanned, breaking the "evidence fetched at most once per sync"
     #: invariant :mod:`grison.adapters.gw_evidence` already guarantees).
-    evidence_rows: dict[int, dict[str, Any]] | Callable[[], dict[int, dict[str, Any]]] = (
-        field(default_factory=dict)
+    evidence_rows: dict[int, dict[str, Any]] | Callable[[], dict[int, dict[str, Any]]] = field(
+        default_factory=dict
     )
 
     def _rows(self) -> dict[int, dict[str, Any]]:
@@ -285,8 +279,11 @@ class IndexRefResolver:
         if full is None or not full.startswith(prefix):
             return None
         row = self._rows().get(eid, {})
-        return LocalRef(path=full[len(prefix) :], caption=row.get("caption", ""),
-                        description=row.get("description", ""))
+        return LocalRef(
+            path=full[len(prefix) :],
+            caption=row.get("caption", ""),
+            description=row.get("description", ""),
+        )
 
 
 __all__: list[str] = [

@@ -71,12 +71,21 @@ class GwEvidenceAdapter:
         return data
 
     def upload(
-        self, ctx: GWContext, *, filename: str, body: bytes, caption: str, description: str,
+        self,
+        ctx: GWContext,
+        *,
+        filename: str,
+        body: bytes,
+        caption: str,
+        description: str,
     ) -> RemoteRecord:
         friendly = self._dedupe_friendly_name(ctx, PurePosixPath(filename).stem)
         eid = ctx.client.upload_evidence(
-            report_id=self.report_id, filename=filename, caption=caption,
-            friendly_name=friendly, file_base64=base64.b64encode(body).decode("ascii"),
+            report_id=self.report_id,
+            filename=filename,
+            caption=caption,
+            friendly_name=friendly,
+            file_base64=base64.b64encode(body).decode("ascii"),
             description=description,
         )
         row = ctx.client.evidence_by_pk(eid)
@@ -106,7 +115,12 @@ class GwEvidenceAdapter:
         return f"{stem}-{n}"
 
     def update_caption(
-        self, ctx: GWContext, id: int, *, caption: str, description: str,
+        self,
+        ctx: GWContext,
+        id: int,
+        *,
+        caption: str,
+        description: str,
     ) -> RemoteRecord:
         # D1: friendlyName is NEVER part of this call's `_set` — see module docstring.
         ctx.client.update_evidence(id, {"caption": caption, "description": description})
@@ -146,8 +160,10 @@ class GwEvidenceAdapter:
             ctx, report_id, PurePosixPath(preimage["filename"]).stem
         )
         eid = ctx.client.upload_evidence(
-            report_id=report_id, filename=preimage["filename"],
-            caption=preimage.get("caption", ""), friendly_name=friendly,
+            report_id=report_id,
+            filename=preimage["filename"],
+            caption=preimage.get("caption", ""),
+            friendly_name=friendly,
             file_base64=base64.b64encode(body).decode("ascii"),
             description=preimage.get("description", ""),
         )

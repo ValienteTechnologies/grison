@@ -54,8 +54,7 @@ def check_name(name: str, *, what: str = "name") -> None:
     if not NAME_RE.match(name):
         raise FormatError(
             "bad_name",
-            f"{what} {name!r} must match [a-z0-9][a-z0-9._-]* (lowercase, "
-            "start alphanumeric)",
+            f"{what} {name!r} must match [a-z0-9][a-z0-9._-]* (lowercase, start alphanumeric)",
         )
 
 
@@ -68,8 +67,7 @@ def validate_tags(raw: list[str]) -> list[str]:
     seen: set[str] = set()
     for t in raw:
         if not isinstance(t, str) or not t or t != t.strip():
-            raise ValueError(f"invalid tag {t!r}: must be non-empty with no surrounding "
-                             "whitespace")
+            raise ValueError(f"invalid tag {t!r}: must be non-empty with no surrounding whitespace")
         key = t.casefold()
         if key in seen:
             raise ValueError(f"duplicate tag {t!r} (case-insensitive)")
@@ -211,6 +209,7 @@ def translate_validation_error(
     expected = _TYPE_DESCRIPTIONS.get(etype)
     if expected is not None:
         got = first.get("input")
-        return FormatError(f"bad_{top_field}", f"{field} is {got!r}; expected {expected}",
-                           line=line)
+        return FormatError(
+            f"bad_{top_field}", f"{field} is {got!r}; expected {expected}", line=line
+        )
     return FormatError(f"bad_{top_field}", f"{field}: {msg}", line=line)

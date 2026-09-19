@@ -29,8 +29,21 @@ if TYPE_CHECKING:
 #: also renders as "move" — see :func:`grison.engine.apply.plan_event`).
 VERBS = frozenset(
     {
-        "pull", "push", "create", "delete-remote", "delete-local", "move", "repair",
-        "collision", "invalid", "withheld", "skip", "failed", "forget", "mirror", "loss",
+        "pull",
+        "push",
+        "create",
+        "delete-remote",
+        "delete-local",
+        "move",
+        "repair",
+        "collision",
+        "invalid",
+        "withheld",
+        "skip",
+        "failed",
+        "forget",
+        "mirror",
+        "loss",
     }
 )
 
@@ -46,7 +59,12 @@ def verb_for_outcome(outcome: str) -> str:
 
 
 def build_event(
-    verb: str, plan: Plan, adapter: Adapter, *, detail: str = "", dry_run: bool = False,
+    verb: str,
+    plan: Plan,
+    adapter: Adapter,
+    *,
+    detail: str = "",
+    dry_run: bool = False,
 ) -> Event:
     """Build the event for ``plan``, resolving its identity generically: ``plan.path``
     when present, else ``adapter.remote_label(plan.remote.data)`` (a record discovered
@@ -54,11 +72,14 @@ def build_event(
     path = str(plan.path) if plan.path is not None else None
     label = None
     if path is None:
-        label = adapter.remote_label(plan.remote.data) if plan.remote is not None else (
-            f"{plan.kind} {plan.id}" if plan.id is not None else None
+        label = (
+            adapter.remote_label(plan.remote.data)
+            if plan.remote is not None
+            else (f"{plan.kind} {plan.id}" if plan.id is not None else None)
         )
-    return Event(verb=verb, path=path, label=label, detail=detail, dry_run=dry_run,
-                severity=plan.severity)
+    return Event(
+        verb=verb, path=path, label=label, detail=detail, dry_run=dry_run, severity=plan.severity
+    )
 
 
 def emit_losses(events: list[Event], path: str, losses: Iterable[str]) -> None:
@@ -93,9 +114,7 @@ def render_text(event: Event) -> str:
 def render_text_lines(events: Iterable[Event], *, verbose: bool = False) -> list[str]:
     """Text rendering hides INFO-severity events (nothing the user must do — a draft/
     template page) unless ``verbose``; ATTENTION and unscored events always show."""
-    return [
-        render_text(e) for e in events if verbose or e.severity is not VetoSeverity.INFO
-    ]
+    return [render_text(e) for e in events if verbose or e.severity is not VetoSeverity.INFO]
 
 
 def render_json(events: Iterable[Event], *, summary: Mapping[str, object] | None = None) -> str:
@@ -108,8 +127,12 @@ def render_json(events: Iterable[Event], *, summary: Mapping[str, object] | None
         lines.append(
             json.dumps(
                 {
-                    "type": "event", "verb": e.verb, "path": e.path, "label": e.label,
-                    "detail": e.detail, "dry_run": e.dry_run,
+                    "type": "event",
+                    "verb": e.verb,
+                    "path": e.path,
+                    "label": e.label,
+                    "detail": e.detail,
+                    "dry_run": e.dry_run,
                     "severity": e.severity.value if e.severity is not None else None,
                 },
                 sort_keys=True,

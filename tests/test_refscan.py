@@ -33,7 +33,7 @@ def test_a_real_embed_after_a_fence_and_a_code_span_is_still_found_with_right_li
         "\n"
         "`![fake](evidence/fake2.png)`\n"
         "\n"
-        "![Real embed](evidence/real.png \"desc\")\n"
+        '![Real embed](evidence/real.png "desc")\n'
     )
     refs = scan_refs(md)
     assert len(refs) == 1
@@ -159,7 +159,7 @@ def test_decode_ref_path_leaves_invalid_utf8_percent_encoding_undecoded() -> Non
     st.text(
         alphabet=st.characters(
             blacklist_categories=("Cs", "Cc", "Co", "Zs", "Zl", "Zp"),
-            blacklist_characters="[]()\"`\\<>%",
+            blacklist_characters='[]()"`\\<>%',
         ),
         min_size=1,
         max_size=40,

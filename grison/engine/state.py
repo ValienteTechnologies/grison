@@ -66,14 +66,17 @@ class StateStore:
         )
 
     def put(
-        self, kind: str, id: int, *, base: str | None, witness: dict[str, Any] | None = None,
+        self,
+        kind: str,
+        id: int,
+        *,
+        base: str | None,
+        witness: dict[str, Any] | None = None,
         at: datetime | None = None,
     ) -> None:
         at = at or datetime.now(UTC)
         payload = {"base": base, "at": at.isoformat(), "witness": witness or {}}
-        atomic_write_text(
-            self._path(kind, id), json.dumps(payload, sort_keys=True), private=True
-        )
+        atomic_write_text(self._path(kind, id), json.dumps(payload, sort_keys=True), private=True)
 
     def forget(self, kind: str, id: int) -> None:
         self._path(kind, id).unlink(missing_ok=True)

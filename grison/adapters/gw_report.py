@@ -96,8 +96,14 @@ def _report_dir_name(index: Index, report_id: int, title: str) -> str | None:
 
 
 def sync_report_dirs(
-    root: Path, ctx: GWReportContext, index: Index, state: StateStore, snapshot: Snapshot,
-    *, dry_run: bool = False, on_event: Callable[[str], None] | None = None,
+    root: Path,
+    ctx: GWReportContext,
+    index: Index,
+    state: StateStore,
+    snapshot: Snapshot,
+    *,
+    dry_run: bool = False,
+    on_event: Callable[[str], None] | None = None,
 ) -> ReportDirResult:
     """Create any missing report directory for a report ``ctx.reports`` (fetched once
     per sync — the same heavy nested query that already supplies ``project.md``'s
@@ -147,25 +153,42 @@ def sync_report_dirs(
                     name=(project.get("client") or {}).get("name"),
                     short_name=(project.get("client") or {}).get("shortName"),
                 ),
-                start_date=project.get("startDate"), end_date=project.get("endDate"),
+                start_date=project.get("startDate"),
+                end_date=project.get("endDate"),
             ),
             status=mirrors_fmt.StatusMeta(
-                complete=rec.get("complete"), archived=rec.get("archived"),
+                complete=rec.get("complete"),
+                archived=rec.get("archived"),
                 delivered=rec.get("delivered"),
             ),
-            dates=mirrors_fmt.DatesMeta(creation=rec.get("creation"),
-                                        last_update=rec.get("last_update")),
+            dates=mirrors_fmt.DatesMeta(
+                creation=rec.get("creation"), last_update=rec.get("last_update")
+            ),
             narrative_order=order,
         )
         meta_text = mirrors_fmt.dump_report_meta(meta_doc)
-        _write_mirror(root, f"{rel_dir}/{REPORT_META}", meta_text, mirrors, result,
-                      dry_run=dry_run, on_event=on_event)
+        _write_mirror(
+            root,
+            f"{rel_dir}/{REPORT_META}",
+            meta_text,
+            mirrors,
+            result,
+            dry_run=dry_run,
+            on_event=on_event,
+        )
 
         if project.get("id") is not None:
             _check_scope(rid, project, result)
             ctx_text = project_context_to_md(project)
-            _write_mirror(root, f"{rel_dir}/{PROJECT_CONTEXT_FILE}", ctx_text, mirrors, result,
-                          dry_run=dry_run, on_event=on_event)
+            _write_mirror(
+                root,
+                f"{rel_dir}/{PROJECT_CONTEXT_FILE}",
+                ctx_text,
+                mirrors,
+                result,
+                dry_run=dry_run,
+                on_event=on_event,
+            )
 
     if not dry_run:
         state.save_mirrors(mirrors)
@@ -173,8 +196,14 @@ def sync_report_dirs(
 
 
 def _write_mirror(
-    root: Path, rel_path: str, text: str, mirrors: dict[str, str], result: ReportDirResult,
-    *, dry_run: bool, on_event: Callable[[str], None] | None,
+    root: Path,
+    rel_path: str,
+    text: str,
+    mirrors: dict[str, str],
+    result: ReportDirResult,
+    *,
+    dry_run: bool,
+    on_event: Callable[[str], None] | None,
 ) -> None:
     outcome = write_mirror_guarded(root, rel_path, text, mirrors, dry_run=dry_run)
     if outcome.outcome is MirrorWrite.UNCHANGED:
@@ -401,8 +430,9 @@ class NarrativeSectionAdapter:
     #: adapter's own lazy, per-report ``ctx.evidence_for_report`` fetch — see
     #: :meth:`_evidence_lookup_for`.
     evidence_by_report: dict[int, dict[int, dict[str, Any]]] | None = None
-    _index: Index = field(default_factory=lambda: Index(root=Path()), init=False, repr=False,
-                          compare=False)
+    _index: Index = field(
+        default_factory=lambda: Index(root=Path()), init=False, repr=False, compare=False
+    )
     #: A per-report evidence-rows lookup, captured during ``fetch_remote``/
     #: ``refetch`` so ``canonical_remote`` can resolve a legacy ``{{.friendlyName}}``
     #: dot-form embed's name to an id (:class:`~grison.engine.filesets.
@@ -415,7 +445,8 @@ class NarrativeSectionAdapter:
     )
 
     def _evidence_lookup_for(
-        self, ctx: GWReportContext,
+        self,
+        ctx: GWReportContext,
     ) -> Callable[[int], dict[int, dict[str, Any]]]:
         """``self.evidence_by_report`` (pre-built, shared — see that field's own
         docstring) when given, else ``ctx.evidence_for_report`` (this adapter's own
@@ -441,7 +472,8 @@ class NarrativeSectionAdapter:
                 raw = md.read_text(encoding="utf-8")
                 doc = narrative_fmt.parse(raw, path=md)
                 yield LocalDoc(
-                    path=rel, doc=SectionDoc(field=md.stem, body=doc.body, report_dir=rdir.name),
+                    path=rel,
+                    doc=SectionDoc(field=md.stem, body=doc.body, report_dir=rdir.name),
                     raw_text=raw,
                 )
 
@@ -462,8 +494,9 @@ class NarrativeSectionAdapter:
         :meth:`canonical_remote` does, rather than a second, independent org-wide
         fetch of the same rows."""
         lookup = self._evidence_lookup_for(ctx)
-        return IndexRefResolver(index=ctx.index, report_dir=report_dir,
-                                evidence_rows=lambda: lookup(report_id))
+        return IndexRefResolver(
+            index=ctx.index, report_dir=report_dir, evidence_rows=lambda: lookup(report_id)
+        )
 
     def _canon_resolver(self, report_dir: str) -> IndexRefResolver:
         """The id-folding-only resolver :meth:`canonical_local`/:meth:`canonical_remote`
@@ -474,20 +507,30 @@ class NarrativeSectionAdapter:
         return IndexRefResolver(index=self._index, report_dir=report_dir)
 
     def _section_data(
-        self, ctx: GWReportContext, report_id: int, spec: dict[str, Any], html: str,
+        self,
+        ctx: GWReportContext,
+        report_id: int,
+        spec: dict[str, Any],
+        html: str,
         report_dir: str,
     ) -> dict[str, Any]:
         losses: list[str] = []
         try:
             body_md = html_to_md(
-                html or "", headings=True, refs=self._resolver_for(ctx, report_id, report_dir),
+                html or "",
+                headings=True,
+                refs=self._resolver_for(ctx, report_id, report_dir),
                 on_loss=losses.append,
             ).strip()
         except ConverterError:
             body_md = html or ""
         return {
-            "report_id": report_id, "spec_id": spec["id"], "field": spec["internalName"],
-            "report_dir": report_dir, "body_md": body_md, "losses": losses,
+            "report_id": report_id,
+            "spec_id": spec["id"],
+            "field": spec["internalName"],
+            "report_dir": report_dir,
+            "body_md": body_md,
+            "losses": losses,
             # the RAW html, kept alongside the rendered body_md (above) so
             # canonical_remote can fold the LITERAL embed id (see class
             # docstring) instead of re-deriving one through body_md, which was
@@ -509,7 +552,9 @@ class NarrativeSectionAdapter:
                 html = raw_extra.get(spec["internalName"]) or ""
                 data = self._section_data(ctx, rid, spec, html, rdir)
                 out[section_id(rid, spec["id"])] = RemoteRecord(
-                    id=section_id(rid, spec["id"]), data=data, losses=data["losses"],
+                    id=section_id(rid, spec["id"]),
+                    data=data,
+                    losses=data["losses"],
                 )
         return out
 
@@ -539,12 +584,12 @@ class NarrativeSectionAdapter:
         if self._evidence_lookup is None:
             return {}
         rows = self._evidence_lookup(report_id)
-        return {row["friendly_name"]: eid for eid, row in rows.items()
-                if row.get("friendly_name")}
+        return {row["friendly_name"]: eid for eid, row in rows.items() if row.get("friendly_name")}
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
         return canonical_remote_prose(
-            data["html"], headings=True,
+            data["html"],
+            headings=True,
             name_to_id=lambda: self._name_to_id(data["report_id"]),
         )
 
@@ -554,15 +599,20 @@ class NarrativeSectionAdapter:
 
     def default_path(self, data: dict[str, Any], *, root: Path) -> PurePosixPath:
         del root
-        return PurePosixPath("findings", "reports", data["report_dir"], NARRATIVE_DIR,
-                             f"{data['field']}.md")
+        return PurePosixPath(
+            "findings", "reports", data["report_dir"], NARRATIVE_DIR, f"{data['field']}.md"
+        )
 
     def relocated_path(self, data: dict[str, Any], *, current: PurePosixPath) -> PurePosixPath:
         del data
         return current  # a report is never renamed/reparented (D+ENGINE.md) — no relocation
 
     def _push(
-        self, ctx: GWReportContext, report_id: int, field_name: str, doc: SectionDoc,
+        self,
+        ctx: GWReportContext,
+        report_id: int,
+        field_name: str,
+        doc: SectionDoc,
     ) -> dict[str, Any]:
         """Merge one field's new HTML over a FRESH re-fetch of the report's whole
         ``extraFields`` map (the old ``_guard_stale_push`` behaviour, now scoped to
@@ -607,7 +657,10 @@ class NarrativeSectionAdapter:
         return self._push_and_record(ctx, report_id, doc)
 
     def _push_and_record(
-        self, ctx: GWReportContext, report_id: int, doc: SectionDoc,
+        self,
+        ctx: GWReportContext,
+        report_id: int,
+        doc: SectionDoc,
     ) -> RemoteRecord:
         spec = self._spec_by_name(ctx).get(doc.field)
         if spec is None:
@@ -630,8 +683,12 @@ class NarrativeSectionAdapter:
         spec = next((s for s in ctx.field_specs if s["id"] == spec_id), None)
         if spec is None:
             raise LookupError(f"no extraFieldSpec {spec_id} on this Ghostwriter instance")
-        self._push(ctx, report_id, spec["internalName"],
-                  SectionDoc(field=spec["internalName"], body="", report_dir=""))
+        self._push(
+            ctx,
+            report_id,
+            spec["internalName"],
+            SectionDoc(field=spec["internalName"], body="", report_dir=""),
+        )
 
     def restore(self, ctx: GWReportContext, preimage: Any) -> RemoteRecord:
         report_id = preimage.get("report_id")

@@ -77,7 +77,10 @@ def test_upload_evidence_uses_report_argument_not_finding() -> None:
     c = _client(gw)
     report = gw.store.seed_report(id=1, title="R")
     evidence_id = c.upload_evidence(
-        report_id=report["id"], filename="x.png", caption="c", friendly_name="f",
+        report_id=report["id"],
+        filename="x.png",
+        caption="c",
+        friendly_name="f",
         file_base64=base64.b64encode(b"x").decode(),
     )
     assert evidence_id > 0
@@ -87,7 +90,8 @@ def test_unknown_field_error_shape_generalizes() -> None:
     gw = FakeGhostwriter()
     resp = gw.handle(
         httpx.Request(
-            "POST", "https://fake-gw.invalid/v1/graphql",
+            "POST",
+            "https://fake-gw.invalid/v1/graphql",
             headers={"Authorization": f"Bearer {gw.token}"},
             json={"query": "query { nonexistentField { id } }"},
         )
@@ -133,7 +137,8 @@ def test_fidelity_evidence_row_matches_lab_capture() -> None:
 
     resp = gw.handle(
         httpx.Request(
-            "POST", "https://fake-gw.invalid/v1/graphql",
+            "POST",
+            "https://fake-gw.invalid/v1/graphql",
             headers={"Authorization": f"Bearer {gw.token}"},
             json={
                 "query": "query { evidence { id reportId document caption friendlyName "
@@ -159,9 +164,9 @@ def test_fidelity_extra_field_spec_rows_match_lab_capture() -> None:
     """Captured live 2026-09-18 against the reset lab (report task E) —
     ``seed_defaults()``'s own 7-field default (ids 3-9, same internalName/position
     order) is this exact live shape, not a guess."""
-    sample = json.loads(
-        (LAB_SAMPLES / "gw-extra-field-spec.json").read_text()
-    )["data"]["extraFieldSpec"]
+    sample = json.loads((LAB_SAMPLES / "gw-extra-field-spec.json").read_text())["data"][
+        "extraFieldSpec"
+    ]
     gw = FakeGhostwriter()  # seed_defaults() already seeds the 7-field default
 
     got = _client(gw).fetch_report_extra_field_specs()
@@ -180,7 +185,8 @@ def test_where_eq_in_and_combinators() -> None:
 
     resp = gw.handle(
         httpx.Request(
-            "POST", "https://fake-gw.invalid/v1/graphql",
+            "POST",
+            "https://fake-gw.invalid/v1/graphql",
             headers={"Authorization": f"Bearer {gw.token}"},
             json={
                 "query": "query($ids: [bigint!]) { finding(where: {_and: ["
@@ -197,8 +203,15 @@ def test_insert_update_delete_finding_roundtrip() -> None:
     gw = FakeGhostwriter()
     c = _client(gw)
     fields = {
-        "title": "New", "severityId": 3, "findingTypeId": 4, "cvssVector": "", "cvssScore": None,
-        "description": "", "impact": "", "mitigation": "", "references": "",
+        "title": "New",
+        "severityId": 3,
+        "findingTypeId": 4,
+        "cvssVector": "",
+        "cvssScore": None,
+        "description": "",
+        "impact": "",
+        "mitigation": "",
+        "references": "",
         "replication_steps": "",
     }
     created = c.insert_finding(fields)
@@ -216,7 +229,10 @@ def test_upload_evidence_requires_a_valid_report() -> None:
     gw = FakeGhostwriter()
     with pytest.raises(GhostwriterFakeError, match="does not exist"):
         gw._upload_evidence(
-            report=999, filename="x.png", caption="", friendly_name="f",
+            report=999,
+            filename="x.png",
+            caption="",
+            friendly_name="f",
             file_base64=base64.b64encode(b"x").decode(),
         )
 
@@ -225,12 +241,18 @@ def test_upload_evidence_friendly_name_unique_per_report() -> None:
     gw = FakeGhostwriter()
     gw.store.seed_report(id=1)
     gw._upload_evidence(
-        report=1, filename="a.png", caption="", friendly_name="dup",
+        report=1,
+        filename="a.png",
+        caption="",
+        friendly_name="dup",
         file_base64=base64.b64encode(b"a").decode(),
     )
     with pytest.raises(GhostwriterFakeError, match="Uniqueness violation"):
         gw._upload_evidence(
-            report=1, filename="b.png", caption="", friendly_name="dup",
+            report=1,
+            filename="b.png",
+            caption="",
+            friendly_name="dup",
             file_base64=base64.b64encode(b"b").decode(),
         )
 
@@ -293,8 +315,7 @@ def test_timeout_injection_on_a_query_is_retried_and_succeeds() -> None:
 def test_timeout_injection_still_raises_once_attempts_are_exhausted() -> None:
     gw = FakeGhostwriter()
     gw.inject_timeout(times=10)  # far more than max_attempts
-    c = GhostwriterClient(_creds(gw), transport=gw.transport, sleep=lambda _: None,
-                           max_attempts=3)
+    c = GhostwriterClient(_creds(gw), transport=gw.transport, sleep=lambda _: None, max_attempts=3)
     with pytest.raises(httpx.TimeoutException):
         c.whoami()
 
@@ -311,11 +332,20 @@ def test_graphql_error_injection_targets_one_operation() -> None:
 def test_operation_log_records_mutations_in_order_with_variables() -> None:
     gw = FakeGhostwriter()
     c = _client(gw)
-    c.insert_finding({
-        "title": "A", "severityId": 3, "findingTypeId": 4, "cvssVector": "", "cvssScore": None,
-        "description": "", "impact": "", "mitigation": "", "references": "",
-        "replication_steps": "",
-    })
+    c.insert_finding(
+        {
+            "title": "A",
+            "severityId": 3,
+            "findingTypeId": 4,
+            "cvssVector": "",
+            "cvssScore": None,
+            "description": "",
+            "impact": "",
+            "mitigation": "",
+            "references": "",
+            "replication_steps": "",
+        }
+    )
     c.set_tags(1000, "finding", ["x"])
     names = [op.name for op in gw.operation_log]
     assert names == ["insert_finding_one", "setTags"]

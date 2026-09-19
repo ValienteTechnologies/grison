@@ -34,8 +34,7 @@ def test_parse_dir_autodetects_all_and_skips_unknown(tmp_path: Path) -> None:
 
     assert set(summary.files_parsed) == _ALL_SCANNERS  # every fixture auto-detected
     assert any(
-        p.name == "notes.txt" and "unrecognized" in reason
-        for p, reason in summary.skipped_files
+        p.name == "notes.txt" and "unrecognized" in reason for p, reason in summary.skipped_files
     )
 
     md_files = sorted(out.glob("*.md"))

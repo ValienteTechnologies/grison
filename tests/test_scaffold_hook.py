@@ -10,12 +10,14 @@ from grison.scaffold.hook import run_post_edit_hook
 
 
 def _payload(file_path: str, cwd: str) -> str:
-    return json.dumps({
-        "hook_event_name": "PostToolUse",
-        "tool_name": "Edit",
-        "tool_input": {"file_path": file_path},
-        "cwd": cwd,
-    })
+    return json.dumps(
+        {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Edit",
+            "tool_input": {"file_path": file_path},
+            "cwd": cwd,
+        }
+    )
 
 
 def test_clean_file_prints_nothing(tmp_path: Path) -> None:
@@ -94,9 +96,14 @@ def test_multiedit_tool_input_shape_is_supported(tmp_path: Path) -> None:
         "# x\n\n## Description\n\nx\n\n## Impact\n\nx\n\n## Mitigation\n\nx\n\n"
         "## Replication Steps\n\nx\n\n## References\n\nx\n"
     )
-    payload = json.dumps({
-        "tool_name": "MultiEdit",
-        "tool_input": {"file_path": str(good), "edits": [{"old_string": "x", "new_string": "y"}]},
-        "cwd": str(tmp_path),
-    })
+    payload = json.dumps(
+        {
+            "tool_name": "MultiEdit",
+            "tool_input": {
+                "file_path": str(good),
+                "edits": [{"old_string": "x", "new_string": "y"}],
+            },
+            "cwd": str(tmp_path),
+        }
+    )
     assert run_post_edit_hook(payload) is None

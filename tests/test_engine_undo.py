@@ -93,12 +93,17 @@ def test_push_undo_refuses_to_clobber_a_record_edited_again_since(tmp_path: Path
     (tmp_path / "a.md").write_text("post-push local text", encoding="utf-8")
     adapter = _PushableAdapter()
     snap = Snapshot()
-    snap.record(UndoOp(
-        kind="bs.page", outcome="push", path="a.md", id=1,
-        remote_preimage={"text": "original"},
-        post_write_hash=digest({"text": "current"}),  # what replay expects to still see
-        local_preimage="pre-push local text",
-    ))
+    snap.record(
+        UndoOp(
+            kind="bs.page",
+            outcome="push",
+            path="a.md",
+            id=1,
+            remote_preimage={"text": "original"},
+            post_write_hash=digest({"text": "current"}),  # what replay expects to still see
+            local_preimage="pre-push local text",
+        )
+    )
     name = snap.persist(tmp_path).name
 
     # someone edits the record again after the push this op would undo
@@ -120,12 +125,17 @@ def test_push_undo_restores_when_nothing_drifted(tmp_path: Path) -> None:
     (tmp_path / "a.md").write_text("post-push local text", encoding="utf-8")
     adapter = _PushableAdapter()
     snap = Snapshot()
-    snap.record(UndoOp(
-        kind="bs.page", outcome="push", path="a.md", id=1,
-        remote_preimage={"text": "original"},
-        post_write_hash=digest({"text": "current"}),
-        local_preimage="pre-push local text",
-    ))
+    snap.record(
+        UndoOp(
+            kind="bs.page",
+            outcome="push",
+            path="a.md",
+            id=1,
+            remote_preimage={"text": "original"},
+            post_write_hash=digest({"text": "current"}),
+            local_preimage="pre-push local text",
+        )
+    )
     name = snap.persist(tmp_path).name
 
     problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter})
@@ -143,10 +153,16 @@ def test_push_undo_refuses_a_snapshot_with_no_post_write_hash(tmp_path: Path) ->
     (tmp_path / "a.md").write_text("post-push local text", encoding="utf-8")
     adapter = _PushableAdapter()
     snap = Snapshot()
-    snap.record(UndoOp(
-        kind="bs.page", outcome="push", path="a.md", id=1,
-        remote_preimage={"text": "original"}, local_preimage="pre-push local text",
-    ))
+    snap.record(
+        UndoOp(
+            kind="bs.page",
+            outcome="push",
+            path="a.md",
+            id=1,
+            remote_preimage={"text": "original"},
+            local_preimage="pre-push local text",
+        )
+    )
     name = snap.persist(tmp_path).name
 
     problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter})
@@ -170,16 +186,22 @@ def test_push_undo_with_no_local_preimage_still_restores_remote_skips_local_writ
     (tmp_path / "a.md").write_text("untouched local content", encoding="utf-8")
     adapter = _PushableAdapter()
     snap = Snapshot()
-    snap.record(UndoOp(
-        kind="bs.page", outcome="push", path="a.md", id=1,
-        remote_preimage={"text": "original"},
-        post_write_hash=digest({"text": "current"}),
-    ))
+    snap.record(
+        UndoOp(
+            kind="bs.page",
+            outcome="push",
+            path="a.md",
+            id=1,
+            remote_preimage={"text": "original"},
+            post_write_hash=digest({"text": "current"}),
+        )
+    )
     name = snap.persist(tmp_path).name
     events: list[str] = []
 
-    problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter},
-                      on_event=events.append)
+    problems = replay(
+        tmp_path, name, ctx=None, adapters={"bs.page": adapter}, on_event=events.append
+    )
 
     assert problems == []
     assert adapter.store[1] == "original"  # remote side still restored

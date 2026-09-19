@@ -314,7 +314,8 @@ def test_two_independent_additions_merge_cleanly_with_git_merge_file(tmp_path: P
 
     result = subprocess.run(
         ["git", "merge-file", "-p", str(ours_file), str(base_file), str(theirs_file)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, f"git merge-file reported a conflict:\n{result.stdout}"
 

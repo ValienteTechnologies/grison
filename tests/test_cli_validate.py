@@ -31,9 +31,11 @@ def test_validate_reports_one_line_per_failure(
     manifest_mod.write(tmp_path)
     lib = tmp_path / "findings" / "library"
     lib.mkdir(parents=True)
-    (lib / "bad.md").write_text("---\nseverity: nope\nfinding_type: web\n---\n# T\n\n"
-                                "## Description\n\nd\n\n## Impact\n\ni\n\n## Mitigation\n\nm\n\n"
-                                "## Replication Steps\n\nr\n\n## References\n\nref\n")
+    (lib / "bad.md").write_text(
+        "---\nseverity: nope\nfinding_type: web\n---\n# T\n\n"
+        "## Description\n\nd\n\n## Impact\n\ni\n\n## Mitigation\n\nm\n\n"
+        "## Replication Steps\n\nr\n\n## References\n\nref\n"
+    )
     result = _runner.invoke(app, ["validate"])
     assert result.exit_code == 1
     assert "FND-003" in result.output
@@ -170,9 +172,7 @@ def test_validate_deleted_ok_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     without_flag = _runner.invoke(app, ["validate", "findings/reports/acme/gone.md"])
     assert without_flag.exit_code == 2
 
-    with_flag = _runner.invoke(
-        app, ["validate", "--deleted-ok", "findings/reports/acme/gone.md"]
-    )
+    with_flag = _runner.invoke(app, ["validate", "--deleted-ok", "findings/reports/acme/gone.md"])
     assert with_flag.exit_code == 0
 
 
@@ -227,9 +227,7 @@ def test_grisonerror_reaches_top_as_one_plain_line(
     monkeypatch.chdir(tmp_path)
     grison_dir = tmp_path / ".grison"
     grison_dir.mkdir()
-    (grison_dir / "env").write_text(
-        "GRISON_GW_URL=http://insecure.example\nGRISON_GW_TOKEN=tok\n"
-    )
+    (grison_dir / "env").write_text("GRISON_GW_URL=http://insecure.example\nGRISON_GW_TOKEN=tok\n")
     result = _runner.invoke(app, ["sync", "--dry-run"])
     assert result.exit_code == 1
     assert result.output.startswith("error: ")

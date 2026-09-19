@@ -188,7 +188,8 @@ def _tags_to_remote(local_tags: list[str]) -> list[dict[str, Any]]:
 
 
 def _normalize(
-    detail: dict[str, Any], books_by_id: dict[int, dict[str, Any]],
+    detail: dict[str, Any],
+    books_by_id: dict[int, dict[str, Any]],
     chapters_by_id: dict[int, dict[str, Any]],
 ) -> dict[str, Any]:
     book_id = detail["book_id"]
@@ -283,8 +284,14 @@ class BsPageAdapter:
             doc: PageDoc | None
             try:
                 wdoc = wiki_fmt.parse(raw, path=md)
-                doc = PageDoc(title=wdoc.title, priority=wdoc.priority, tags=list(wdoc.tags),
-                              body=wdoc.body, book=book, chapter=chapter)
+                doc = PageDoc(
+                    title=wdoc.title,
+                    priority=wdoc.priority,
+                    tags=list(wdoc.tags),
+                    body=wdoc.body,
+                    book=book,
+                    chapter=chapter,
+                )
             except FormatError:
                 doc = None
             yield LocalDoc(path=rel, doc=doc, raw_text=raw)
@@ -298,15 +305,22 @@ class BsPageAdapter:
         out: dict[int, RemoteRecord] = {}
         for row in rows:
             pid = row["id"]
-            witness = {"updated_at": row.get("updated_at"),
-                      "revision_count": row.get("revision_count")}
+            witness = {
+                "updated_at": row.get("updated_at"),
+                "revision_count": row.get("revision_count"),
+            }
             cached = ctx.state.get(self.kind, pid)
             if cached is not None and cached.witness == witness and cached.base is not None:
                 out[pid] = RemoteRecord(
                     id=pid,
-                    data={"_skipped": True, "id": pid, "book_id": row["book_id"],
-                         "chapter_id": row.get("chapter_id")},
-                    witness=witness, cached_hash=cached.base,
+                    data={
+                        "_skipped": True,
+                        "id": pid,
+                        "book_id": row["book_id"],
+                        "chapter_id": row.get("chapter_id"),
+                    },
+                    witness=witness,
+                    cached_hash=cached.base,
                 )
                 continue
             detail = ctx.client.fetch_page(pid)
@@ -328,7 +342,8 @@ class BsPageAdapter:
                 continue
             deletable = entry.get("deletable") or {}
             out[rid] = RemoteRecord(
-                id=rid, data={"_recycled": True, "id": rid, "name": deletable.get("name", "")},
+                id=rid,
+                data={"_recycled": True, "id": rid, "name": deletable.get("name", "")},
                 witness={},
             )
         return out
@@ -341,9 +356,14 @@ class BsPageAdapter:
             return None
         data = _normalize(detail, ctx.books_by_id, ctx.chapters_by_id)
         self._localize_gallery_urls(ctx, data)
-        return RemoteRecord(id=id, data=data,
-                            witness={"updated_at": detail.get("updated_at"),
-                                    "revision_count": detail.get("revision_count")})
+        return RemoteRecord(
+            id=id,
+            data=data,
+            witness={
+                "updated_at": detail.get("updated_at"),
+                "revision_count": detail.get("revision_count"),
+            },
+        )
 
     def _localize_gallery_urls(self, ctx: BSContext, data: dict[str, Any]) -> None:
         """Mutates ``data["markdown"]`` in place: absolute gallery URL -> the one
@@ -358,7 +378,9 @@ class BsPageAdapter:
         gallery_by_name = _gallery_by_name_for_book(ctx, book_id)
         gallery_by_url = {url: name for name, url in gallery_by_name.items()}
         data["markdown"] = _remote_body_to_local(
-            data["markdown"], gallery_by_url, in_chapter=data.get("chapter_id") is not None,
+            data["markdown"],
+            gallery_by_url,
+            in_chapter=data.get("chapter_id") is not None,
         )
 
     def canonical_local(self, doc: PageDoc | None) -> Canonical:
@@ -366,8 +388,14 @@ class BsPageAdapter:
             return {"_invalid": True}
         book_id = self._ctx.books_by_slug.get(doc.book, {}).get("id") if self._ctx else None
         body = _substitute_gallery_tokens(self._ctx, doc.body, book_id=book_id)
-        return {"title": doc.title, "priority": doc.priority, "tags": doc.tags,
-                "body": body, "book": doc.book, "chapter": doc.chapter}
+        return {
+            "title": doc.title,
+            "priority": doc.priority,
+            "tags": doc.tags,
+            "body": body,
+            "book": doc.book,
+            "chapter": doc.chapter,
+        }
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
         if data.get("_recycled") or data.get("_skipped"):
@@ -376,15 +404,22 @@ class BsPageAdapter:
             return {"_unavailable": True}
         raw_body = (data.get("markdown") or "").strip()
         body = _substitute_gallery_tokens(self._ctx, raw_body, book_id=data.get("book_id"))
-        return {"title": data["name"], "priority": data.get("priority"),
-                "tags": _tags_to_local(data.get("tags") or []),
-                "body": body, "book": data["book_slug"], "chapter": data.get("chapter_slug")}
+        return {
+            "title": data["name"],
+            "priority": data.get("priority"),
+            "tags": _tags_to_local(data.get("tags") or []),
+            "body": body,
+            "book": data["book_slug"],
+            "chapter": data.get("chapter_slug"),
+        }
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         del path
         doc = wiki_fmt.WikiPageDoc(
-            title=data["name"], priority=data.get("priority"),
-            tags=_tags_to_local(data.get("tags") or []), body=(data.get("markdown") or "").strip(),
+            title=data["name"],
+            priority=data.get("priority"),
+            tags=_tags_to_local(data.get("tags") or []),
+            body=(data.get("markdown") or "").strip(),
         )
         return wiki_fmt.dump(doc)
 
@@ -429,15 +464,23 @@ class BsPageAdapter:
             assert chapter_id is not None
             real_book_id = ctx.chapters_by_id[chapter_id]["book_id"]
         rec = ctx.client.create_page(
-            name=doc.title, markdown=self._remote_body_for_push(ctx, doc, real_book_id),
-            book_id=book_id, chapter_id=chapter_id,
-            tags=_tags_to_remote(doc.tags), priority=doc.priority,
+            name=doc.title,
+            markdown=self._remote_body_for_push(ctx, doc, real_book_id),
+            book_id=book_id,
+            chapter_id=chapter_id,
+            tags=_tags_to_remote(doc.tags),
+            priority=doc.priority,
         )
         data = _normalize(rec, ctx.books_by_id, ctx.chapters_by_id)
         self._localize_gallery_urls(ctx, data)
-        return RemoteRecord(id=rec["id"], data=data,
-                            witness={"updated_at": rec.get("updated_at"),
-                                    "revision_count": rec.get("revision_count")})
+        return RemoteRecord(
+            id=rec["id"],
+            data=data,
+            witness={
+                "updated_at": rec.get("updated_at"),
+                "revision_count": rec.get("revision_count"),
+            },
+        )
 
     def update(self, ctx: BSContext, id: int, doc: PageDoc) -> RemoteRecord:
         assert isinstance(ctx, BSContext)
@@ -449,15 +492,24 @@ class BsPageAdapter:
             assert chapter_id is not None
             real_book_id = ctx.chapters_by_id[chapter_id]["book_id"]
         rec = ctx.client.update_page(
-            id, markdown=self._remote_body_for_push(ctx, doc, real_book_id), name=doc.title,
-            book_id=book_id, chapter_id=chapter_id,
-            priority=doc.priority, tags=_tags_to_remote(doc.tags),
+            id,
+            markdown=self._remote_body_for_push(ctx, doc, real_book_id),
+            name=doc.title,
+            book_id=book_id,
+            chapter_id=chapter_id,
+            priority=doc.priority,
+            tags=_tags_to_remote(doc.tags),
         ) or ctx.client.fetch_page(id)
         data = _normalize(rec, ctx.books_by_id, ctx.chapters_by_id)
         self._localize_gallery_urls(ctx, data)
-        return RemoteRecord(id=id, data=data,
-                            witness={"updated_at": rec.get("updated_at"),
-                                    "revision_count": rec.get("revision_count")})
+        return RemoteRecord(
+            id=id,
+            data=data,
+            witness={
+                "updated_at": rec.get("updated_at"),
+                "revision_count": rec.get("revision_count"),
+            },
+        )
 
     def delete(self, ctx: BSContext, id: int) -> None:
         assert isinstance(ctx, BSContext)
@@ -490,16 +542,33 @@ class BsPageAdapter:
             except BookStackError:
                 existing = None
         if existing is not None:
-            rec = ctx.client.update_page(pid, markdown=markdown, name=name, book_id=book_id,
-                                         chapter_id=chapter_id, priority=priority,
-                                         tags=tags) or ctx.client.fetch_page(pid)
+            rec = ctx.client.update_page(
+                pid,
+                markdown=markdown,
+                name=name,
+                book_id=book_id,
+                chapter_id=chapter_id,
+                priority=priority,
+                tags=tags,
+            ) or ctx.client.fetch_page(pid)
         else:
-            rec = ctx.client.create_page(name=name, markdown=markdown, book_id=book_id,
-                                         chapter_id=chapter_id, tags=tags, priority=priority)
+            rec = ctx.client.create_page(
+                name=name,
+                markdown=markdown,
+                book_id=book_id,
+                chapter_id=chapter_id,
+                tags=tags,
+                priority=priority,
+            )
         data = _normalize(rec, ctx.books_by_id, ctx.chapters_by_id)
-        return RemoteRecord(id=rec["id"], data=data,
-                            witness={"updated_at": rec.get("updated_at"),
-                                    "revision_count": rec.get("revision_count")})
+        return RemoteRecord(
+            id=rec["id"],
+            data=data,
+            witness={
+                "updated_at": rec.get("updated_at"),
+                "revision_count": rec.get("revision_count"),
+            },
+        )
 
     def veto(self, local: Any | None, remote: Any | None) -> Veto | None:
         if not isinstance(remote, dict):
@@ -524,8 +593,9 @@ class BsPageAdapter:
         if remote.get("draft"):
             return Veto("remote page is a draft — grison never syncs drafts", VetoSeverity.INFO)
         if remote.get("template"):
-            return Veto("remote page is a template — grison never syncs templates",
-                        VetoSeverity.INFO)
+            return Veto(
+                "remote page is a template — grison never syncs templates", VetoSeverity.INFO
+            )
         return None
 
     def remote_label(self, data: Any) -> str:

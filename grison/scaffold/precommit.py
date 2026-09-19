@@ -35,7 +35,10 @@ def _git_hooks_dir(root: Path) -> Path | None:
     try:
         result = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "--git-path", "hooks"],
-            capture_output=True, text=True, timeout=_TIMEOUT, stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT,
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -78,8 +81,10 @@ def install_precommit_hook(root: Path, *, force: bool = False) -> PrecommitResul
 
     hooks_dir = _git_hooks_dir(root)
     if hooks_dir is None:
-        return PrecommitResult(installed=False, reason="could not determine the git hooks "
-                                "directory (is git installed?)")
+        return PrecommitResult(
+            installed=False,
+            reason="could not determine the git hooks directory (is git installed?)",
+        )
 
     hook_path = hooks_dir / "pre-commit"
     content = render_hook(root)
@@ -98,8 +103,10 @@ def install_precommit_hook(root: Path, *, force: bool = False) -> PrecommitResul
             + "\n".join(f"    {line}" for line in content.splitlines())
         )
         return PrecommitResult(
-            installed=False, reason="an existing foreign pre-commit hook was left untouched",
-            hook_path=hook_path, instructions=instructions,
+            installed=False,
+            reason="an existing foreign pre-commit hook was left untouched",
+            hook_path=hook_path,
+            instructions=instructions,
         )
 
     hooks_dir.mkdir(parents=True, exist_ok=True)

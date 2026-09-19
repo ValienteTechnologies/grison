@@ -49,7 +49,12 @@ class MirrorResult:
 
 
 def write_mirror_guarded(
-    root: Path, rel_path: str, text: str, digests: dict[str, str], *, dry_run: bool = False,
+    root: Path,
+    rel_path: str,
+    text: str,
+    digests: dict[str, str],
+    *,
+    dry_run: bool = False,
 ) -> MirrorResult:
     """Write ``text`` to ``root / rel_path`` unless a hand-edit is detected. See the
     module docstring for the exact rule. Never raises for a hand-edited file — that

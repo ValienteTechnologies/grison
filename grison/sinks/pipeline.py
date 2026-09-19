@@ -85,8 +85,6 @@ def run_parse(
             summary.keys.append(ir.plugin_id)
             summary.warnings.extend(res.warnings)
 
-    summary.sink = FileSink(out_dir).write(
-        summary.findings, keys=summary.keys, dry_run=dry_run
-    )
+    summary.sink = FileSink(out_dir).write(summary.findings, keys=summary.keys, dry_run=dry_run)
     summary.errors.extend(summary.sink.errors)  # sink failures must reach the exit code
     return summary

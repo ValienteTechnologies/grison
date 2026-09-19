@@ -44,8 +44,9 @@ def test_build_event_uses_path_when_present() -> None:
 
 def test_build_event_falls_back_to_remote_label_when_path_is_none() -> None:
     remote = RemoteRecord(id=28, data={"id": 28, "name": "WYSIWYG Created Page"})
-    plan = Plan(kind="bs.page", outcome=Outcome.SKIP, path=None, remote=remote,
-               severity=VetoSeverity.INFO)
+    plan = Plan(
+        kind="bs.page", outcome=Outcome.SKIP, path=None, remote=remote, severity=VetoSeverity.INFO
+    )
     e = events.build_event("skip", plan, _FakeAdapter(), detail="not markdown-native")
     assert e.path is None
     assert e.label == '"WYSIWYG Created Page" (page 28)'

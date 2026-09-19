@@ -144,9 +144,7 @@ class Index:
                 )
             kind_raw = entry.get("kind")
             if not isinstance(kind_raw, str):
-                raise IndexFileError(
-                    f"{path}: entry {rel_path!r} has unknown kind {kind_raw!r}"
-                )
+                raise IndexFileError(f"{path}: entry {rel_path!r} has unknown kind {kind_raw!r}")
             try:
                 kind = IndexKind(kind_raw)
             except ValueError:
@@ -155,9 +153,7 @@ class Index:
                 ) from None
             ident = entry.get("id")
             if not isinstance(ident, int) or isinstance(ident, bool):
-                raise IndexFileError(
-                    f"{path}: entry {rel_path!r} has a non-integer id {ident!r}"
-                )
+                raise IndexFileError(f"{path}: entry {rel_path!r} has a non-integer id {ident!r}")
             identity = (kind.value, ident)
             if identity in seen_identity:
                 raise IndexFileError(

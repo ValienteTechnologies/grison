@@ -12,8 +12,15 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-REPORT_SCOPES = [{"name": "Internal range", "scope": "10.0.0.0/24", "description": "",
-                   "disallowed": False, "requiresCaution": False}]
+REPORT_SCOPES = [
+    {
+        "name": "Internal range",
+        "scope": "10.0.0.0/24",
+        "description": "",
+        "disallowed": False,
+        "requiresCaution": False,
+    }
+]
 
 
 # ---------------------------------------------------------------------------
@@ -56,16 +63,17 @@ REPORT_SCOPES = [{"name": "Internal range", "scope": "10.0.0.0/24", "description
     ["methodology_collision", "reports_scope_failure", "methodology_mass_change"],
 )
 def test_exit_code_is_always_1_today_but_each_failure_class_reports_honestly(
-    run_grison, gw_server, bs_server, case_name,
+    run_grison,
+    gw_server,
+    bs_server,
+    case_name,
 ) -> None:
     if case_name == "methodology_collision":
         book = bs_server.store.seed_book(name="Playbook")
         page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
         run_grison("sync")
         path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
-        path.write_text(
-            path.read_text(encoding="utf-8") + "\nlocal change\n", encoding="utf-8"
-        )
+        path.write_text(path.read_text(encoding="utf-8") + "\nlocal change\n", encoding="utf-8")
         # a real BookStack write bumps updated_at/revision_count too (see
         # BSStore.edit_page's own docstring for why a bare dict mutation would not
         # be detected by the skip-detail-fetch fast path)
@@ -73,7 +81,9 @@ def test_exit_code_is_always_1_today_but_each_failure_class_reports_honestly(
         marker = "collision"
     elif case_name == "reports_scope_failure":
         gw_server.store.seed_report(
-            id=7, title="R", extraFields={"executive_summary": "<p>s</p>"},
+            id=7,
+            title="R",
+            extraFields={"executive_summary": "<p>s</p>"},
             project={"codename": "OP-X", "scopes": []},
         )
         marker = "no scope defined"
@@ -108,7 +118,10 @@ def test_a_lone_skip_does_not_by_itself_change_the_exit_code(run_grison, bs_serv
     ``grison.cli._print_wiki_summary``)."""
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(
-        book_id=book["id"], name="WYSIWYG", editor="wysiwyg", markdown="",
+        book_id=book["id"],
+        name="WYSIWYG",
+        editor="wysiwyg",
+        markdown="",
         raw_html="<p>rich</p>",
     )
 
@@ -178,7 +191,10 @@ def _log_subjects(path: Path) -> list[str]:
 
 
 def test_git_commit_checkpoints_and_commits_after_a_real_sync(
-    run_grison, workspace, bs_server, monkeypatch,
+    run_grison,
+    workspace,
+    bs_server,
+    monkeypatch,
 ) -> None:
     _init_repo(workspace)
     monkeypatch.setenv("GRISON_GIT", "commit")
@@ -206,7 +222,10 @@ def test_git_commit_dry_run_commits_nothing(run_grison, workspace, bs_server, mo
 
 
 def test_git_staging_is_scoped_to_the_workspace_root(
-    run_grison, workspace, bs_server, monkeypatch,
+    run_grison,
+    workspace,
+    bs_server,
+    monkeypatch,
 ) -> None:
     """The workspace may be a subdirectory of a larger repo — staging must never
     reach outside it (``git add -A -- .`` with ``-C <workspace root>``)."""
@@ -246,7 +265,8 @@ def test_claude_md_scaffolded_on_first_bootstrap_and_never_clobbered(run_grison,
 
 
 def test_first_run_bootstrap_creates_env_template_and_exits_with_message(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No ``run_grison``/``workspace`` fixture here on purpose — those pre-seed
     ``.grison/env`` with working fake creds; this test needs a genuinely fresh
@@ -315,7 +335,9 @@ def test_sync_exits_2_on_a_transport_failure_during_the_probe(run_grison, gw_ser
 
 
 def test_sync_re_introspects_and_updates_the_cache_after_a_server_upgrade(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ) -> None:
     """A stale cached fingerprint (as if Ghostwriter was upgraded since the last
     sync) forces the cold path — full introspection + validate-every-operation —

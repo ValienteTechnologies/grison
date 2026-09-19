@@ -136,9 +136,7 @@ def test_scope_one_report_dir(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
     _break(root, *_GLOBEX_BAD)
     _add_stray(root)
-    fails = rule_ids(
-        validate_workspace(root, paths=[root / "findings" / "reports" / "globex"])
-    )
+    fails = rule_ids(validate_workspace(root, paths=[root / "findings" / "reports" / "globex"]))
     assert {"FND-003", "WS-002"} <= fails
     # the OTHER report dir's content is not re-validated, but the stray file IS
     # inside the requested one, so nothing about this assertion depends on it
@@ -146,8 +144,7 @@ def test_scope_one_report_dir(tmp_path: Path) -> None:
 
 def test_scope_findings_inbox_dir(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
-    edit(root / "findings" / "inbox" / "sql-injection.md", "severity: high",
-        "severity: banana")
+    edit(root / "findings" / "inbox" / "sql-injection.md", "severity: high", "severity: banana")
     fails = rule_ids(validate_workspace(root, paths=[root / "findings" / "inbox"]))
     assert "FND-003" in fails
 
@@ -157,24 +154,33 @@ def test_scope_findings_inbox_dir(tmp_path: Path) -> None:
 
 def test_scope_methodology_dir(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
-    edit(root / "methodology" / "library" / "web-application-testing" / "recon.md",
-        "title: Reconnaissance overview", "title: ''")
+    edit(
+        root / "methodology" / "library" / "web-application-testing" / "recon.md",
+        "title: Reconnaissance overview",
+        "title: ''",
+    )
     fails = rule_ids(validate_workspace(root, paths=[root / "methodology"]))
     assert "WIKI-002" in fails
 
 
 def test_scope_methodology_library_dir(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
-    edit(root / "methodology" / "library" / "web-application-testing" / "recon.md",
-        "title: Reconnaissance overview", "title: ''")
+    edit(
+        root / "methodology" / "library" / "web-application-testing" / "recon.md",
+        "title: Reconnaissance overview",
+        "title: ''",
+    )
     fails = rule_ids(validate_workspace(root, paths=[root / "methodology" / "library"]))
     assert "WIKI-002" in fails
 
 
 def test_scope_one_book_dir(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
-    edit(root / "methodology" / "library" / "web-application-testing" / "recon.md",
-        "title: Reconnaissance overview", "title: ''")
+    edit(
+        root / "methodology" / "library" / "web-application-testing" / "recon.md",
+        "title: Reconnaissance overview",
+        "title: ''",
+    )
     book = root / "methodology" / "library" / "web-application-testing"
     fails = rule_ids(validate_workspace(root, paths=[book]))
     assert "WIKI-002" in fails
@@ -184,7 +190,8 @@ def test_scope_methodology_checklists_dir(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
     edit(
         root / "methodology" / "checklists" / "acme-2026-08" / "recon.md",
-        "title: Reconnaissance overview", "title: ''",
+        "title: Reconnaissance overview",
+        "title: ''",
     )
     fails = rule_ids(validate_workspace(root, paths=[root / "methodology" / "checklists"]))
     assert "WIKI-002" in fails
@@ -266,8 +273,11 @@ def test_union_of_top_level_directories_equals_whole_workspace(tmp_path: Path) -
     _break(root, *_LIB_BAD)
     _break(root, *_GLOBEX_BAD)
     _add_stray(root)
-    edit(root / "methodology" / "library" / "web-application-testing" / "recon.md",
-        "title: Reconnaissance overview", "title: ''")
+    edit(
+        root / "methodology" / "library" / "web-application-testing" / "recon.md",
+        "title: Reconnaissance overview",
+        "title: ''",
+    )
     (root / "methodology" / "junk.txt").write_text("stray\n")
     data = json.loads((root / ".grison" / "index.json").read_text(encoding="utf-8"))
     data["records"]["findings/inbox/sql-injection.md"] = {"kind": "gw.finding", "id": 999}

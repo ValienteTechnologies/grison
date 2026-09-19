@@ -244,8 +244,14 @@ def _restore_local_mirror(target: Path, adapter: Any, restored: Any, op: UndoOp)
 
 
 def _replay_one(  # noqa: PLR0912
-    root: Path, op: UndoOp, adapter: CreateUndoAdapter | None, ctx: Any, index: Index,
-    state: StateStore, problems: list[str], on_event: Callable[[str], None] | None,
+    root: Path,
+    op: UndoOp,
+    adapter: CreateUndoAdapter | None,
+    ctx: Any,
+    index: Index,
+    state: StateStore,
+    problems: list[str],
+    on_event: Callable[[str], None] | None,
 ) -> None:
     if op.outcome == "create":
         if adapter is None or op.id is None:
@@ -278,16 +284,19 @@ def _replay_one(  # noqa: PLR0912
     # such an adapter is never registered under a kind that records these outcomes
     # in the first place, so this is a defensive check, not an expected path.
     if adapter is None or not isinstance(adapter, RestorableUndoAdapter):
-        problems.append(f"{op.path}: adapter for kind {op.kind!r} cannot restore — "
-                        "cannot undo this op")
+        problems.append(
+            f"{op.path}: adapter for kind {op.kind!r} cannot restore — cannot undo this op"
+        )
         return
 
     if op.outcome in ("push", "move_edit"):
         if op.id is None or op.remote_preimage is None:
             return
         if not isinstance(adapter, PushUndoAdapter):
-            problems.append(f"{op.path}: adapter for kind {op.kind!r} cannot verify it is "
-                            "still safe to restore — not restoring")
+            problems.append(
+                f"{op.path}: adapter for kind {op.kind!r} cannot verify it is "
+                "still safe to restore — not restoring"
+            )
             return
         # No backward-compat fallback: every push/move_edit op recorded by the
         # current forward apply loop always carries a post_write_hash (item 4)
@@ -295,8 +304,10 @@ def _replay_one(  # noqa: PLR0912
         # one is a corrupt snapshot, refused outright rather than guessed at
         # (never a silent, unguarded restore).
         if op.post_write_hash is None:
-            problems.append(f"{op.path}: snapshot has no post-write hash recorded for this "
-                            "push — corrupt snapshot, not restoring")
+            problems.append(
+                f"{op.path}: snapshot has no post-write hash recorded for this "
+                "push — corrupt snapshot, not restoring"
+            )
             return
         # The same pre-write re-fetch guard the forward apply loop runs before
         # ANY remote write (ENGINE.md §3), turned around for undo: a record
@@ -307,6 +318,7 @@ def _replay_one(  # noqa: PLR0912
         # this module (`Snapshot`/`UndoOp`) at its own top level, so importing it
         # back from here at module scope would be circular.
         from grison.engine.apply import refetch_guard
+
         rid = op.id
         _fresh, drifted = refetch_guard(
             refetch=lambda: adapter.refetch(ctx, rid),
@@ -315,8 +327,9 @@ def _replay_one(  # noqa: PLR0912
             forced=False,
         )
         if drifted:
-            problems.append(f"{op.path}: changed since the sync that wrote it — "
-                            "not restoring (resolve by hand)")
+            problems.append(
+                f"{op.path}: changed since the sync that wrote it — not restoring (resolve by hand)"
+            )
             _emit(on_event, f"failed {op.path}: changed since the sync, not restoring")
             return
         restored = adapter.restore(ctx, op.remote_preimage)
@@ -344,8 +357,12 @@ def _replay_one(  # noqa: PLR0912
         # should look exactly as if the undone push never happened). `adapter`
         # already satisfies `PushUndoAdapter` (checked above), which is exactly
         # `RestorableUndoAdapter` plus this same `canonical_remote`.
-        state.put(op.kind, op.id, base=digest(adapter.canonical_remote(restored.data)),
-                 witness=restored.witness)
+        state.put(
+            op.kind,
+            op.id,
+            base=digest(adapter.canonical_remote(restored.data)),
+            witness=restored.witness,
+        )
         return
 
     if op.outcome == "delete_remote":
@@ -353,8 +370,10 @@ def _replay_one(  # noqa: PLR0912
             return
         current = adapter.refetch(ctx, op.id) if op.id is not None else None
         if current is not None:
-            problems.append(f"{op.path}: a record already exists at this identity — "
-                            "not restoring (resolve by hand)")
+            problems.append(
+                f"{op.path}: a record already exists at this identity — "
+                "not restoring (resolve by hand)"
+            )
             _emit(on_event, f"failed {op.path}: record already exists, not restoring")
             return
         restored = adapter.restore(ctx, op.remote_preimage)

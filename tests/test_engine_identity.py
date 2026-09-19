@@ -28,10 +28,17 @@ def test_identical_content_pairs_as_a_pure_move() -> None:
 
 
 def test_similar_content_pairs_as_move_and_edit() -> None:
-    m = Missing(path=PurePosixPath("a.md"), id=1, base_hash="h-base",
-               remote_content="the quick brown fox jumps over the lazy dog")
-    u = Unindexed(path=PurePosixPath("b.md"),
-                 content="the quick brown fox jumps over a lazy dog today", content_hash="h-new")
+    m = Missing(
+        path=PurePosixPath("a.md"),
+        id=1,
+        base_hash="h-base",
+        remote_content="the quick brown fox jumps over the lazy dog",
+    )
+    u = Unindexed(
+        path=PurePosixPath("b.md"),
+        content="the quick brown fox jumps over a lazy dog today",
+        content_hash="h-new",
+    )
     result = pair([m], [u])
     assert len(result.decisions) == 1
     assert result.decisions[0].edited is True
@@ -39,8 +46,11 @@ def test_similar_content_pairs_as_move_and_edit() -> None:
 
 def test_unrelated_content_does_not_pair() -> None:
     m = Missing(path=PurePosixPath("a.md"), id=1, base_hash="h-base", remote_content="alpha beta")
-    u = Unindexed(path=PurePosixPath("b.md"), content="completely different text entirely",
-                 content_hash="h-new")
+    u = Unindexed(
+        path=PurePosixPath("b.md"),
+        content="completely different text entirely",
+        content_hash="h-new",
+    )
     result = pair([m], [u])
     assert not result.decisions
     assert result.unpaired_missing == [m]
@@ -90,15 +100,19 @@ def _missing_and_unindexed(draw: st.DrawFn) -> tuple[list[Missing], list[Unindex
     m_paths = [PurePosixPath(f"m{i}.md") for i in range(n_m)]
     u_paths = [PurePosixPath(f"u{i}.md") for i in range(n_u)]
     hashes = st.sampled_from(["h1", "h2", "h3", "h4"])
-    texts = st.sampled_from(["alpha beta gamma", "delta epsilon zeta", "the quick fox",
-                             "completely unrelated text block here"])
+    texts = st.sampled_from(
+        [
+            "alpha beta gamma",
+            "delta epsilon zeta",
+            "the quick fox",
+            "completely unrelated text block here",
+        ]
+    )
     missing = [
         Missing(path=p, id=i + 1, base_hash=draw(hashes), remote_content=draw(texts))
         for i, p in enumerate(m_paths)
     ]
-    unindexed = [
-        Unindexed(path=p, content=draw(texts), content_hash=draw(hashes)) for p in u_paths
-    ]
+    unindexed = [Unindexed(path=p, content=draw(texts), content_hash=draw(hashes)) for p in u_paths]
     return missing, unindexed
 
 
@@ -112,7 +126,6 @@ def test_pairing_never_double_assigns(data: tuple[list[Missing], list[Unindexed]
     assert len(new_paths) == len(set(new_paths))  # never assigns one U twice
     # every M and U is accounted for exactly once, either paired or unpaired
     assert set(old_paths) | {m.path for m in result.unpaired_missing} == {m.path for m in missing}
-    assert (
-        set(new_paths) | {u.path for u in result.unpaired_unindexed}
-        == {u.path for u in unindexed}
-    )
+    assert set(new_paths) | {u.path for u in result.unpaired_unindexed} == {
+        u.path for u in unindexed
+    }

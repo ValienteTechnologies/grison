@@ -146,9 +146,24 @@ def test_rejected_constructs_stay_rejected(name: str, md: str) -> None:
 # --- seeded fuzz over the same whitelist vocabulary --------------------------
 
 WORDS = [
-    "user_id", "session_token", "api_key", "the", "quick", "brown", "fox",
-    "işık", "İstanbul", "kullanıcı", "café", "naïve",
-    "-rwxr-xr-x", "--flag", "-v", "10.0.0.1", "3.5", "CVE-2021-1234",
+    "user_id",
+    "session_token",
+    "api_key",
+    "the",
+    "quick",
+    "brown",
+    "fox",
+    "işık",
+    "İstanbul",
+    "kullanıcı",
+    "café",
+    "naïve",
+    "-rwxr-xr-x",
+    "--flag",
+    "-v",
+    "10.0.0.1",
+    "3.5",
+    "CVE-2021-1234",
 ]
 
 TEMPLATES = [

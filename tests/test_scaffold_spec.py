@@ -41,7 +41,10 @@ def test_spec_md_is_included_in_the_built_wheel(tmp_path: Path) -> None:
     out_dir.mkdir()
     result = subprocess.run(
         ["uv", "build", "--wheel", "-o", str(out_dir)],
-        cwd=_REPO_ROOT, capture_output=True, text=True, timeout=120,
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     assert result.returncode == 0, f"uv build failed:\n{result.stdout}\n{result.stderr}"
 

@@ -188,11 +188,7 @@ _ARTIFACT_DIV_RE = re.compile(r'<div class="?notice')
 #   U+FEFF ZERO WIDTH NO-BREAK SPACE (BOM)
 #   U+202A-U+202E (LRE/RLE/PDF/LRO/RLO — explicit bidi embedding/override)
 #   U+2066-U+2069 (LRI/RLI/FSI/PDI — bidi isolates)
-_ZERO_WIDTH_BIDI_CHARS = (
-    "​‌‍‎‏⁠﻿"
-    "‪‫‬‭‮"
-    "⁦⁧⁨⁩"
-)
+_ZERO_WIDTH_BIDI_CHARS = "​‌‍‎‏⁠﻿‪‫‬‭‮⁦⁧⁨⁩"
 _CONTROL_CHAR_RE = re.compile("[" + _ZERO_WIDTH_BIDI_CHARS + "]")
 
 _NBSP = " "
@@ -647,9 +643,7 @@ def _iter_table_cells(table: _HNode) -> Iterable[_HNode]:
 
 # --- inline rendering (span/div/sup/br/strong/b/em/i/code/a) ---------------
 
-_INLINE_CONVERTIBLE = frozenset(
-    {"span", "sup", "br", "strong", "b", "em", "i", "code", "a", "img"}
-)
+_INLINE_CONVERTIBLE = frozenset({"span", "sup", "br", "strong", "b", "em", "i", "code", "a", "img"})
 
 _FOOTNOTE_MARKER_RE = re.compile(r"^\s*[\[\(]?[0-9*†‡§]{1,3}[\]\)]?\s*$")
 
@@ -855,9 +849,7 @@ def _render_link_span(span: _LinkSpan, source: str, ctx: _RenderCtx) -> str:
     if span.is_image:
         return _render_image(span.text, span.href, ctx, orig=orig)
     scheme = urlsplit(span.href).scheme.lower()
-    unsupported_scheme = (
-        span.href.strip() not in ("", "/") and scheme not in _ALLOWED_LINK_SCHEMES
-    )
+    unsupported_scheme = span.href.strip() not in ("", "/") and scheme not in _ALLOWED_LINK_SCHEMES
     if span.syntax == "autolink":
         # A file: autolink is gated out earlier as hard-unsupported (no text
         # to keep at all — see _text_leaf_unsupported_reason). Any OTHER
@@ -1435,8 +1427,11 @@ def _convert_structural(
             start, end = slice_lines(tmap[0], tmap[1])
             raw = text[start:end]
             ctx = _RenderCtx(
-                own_hosts=own_hosts, image_map=image_map, bs_host=bs_host,
-                in_chapter=in_chapter, env=env,
+                own_hosts=own_hosts,
+                image_map=image_map,
+                bs_host=bs_host,
+                in_chapter=in_chapter,
+                env=env,
             )
             converted, reason = _convert_block_fragment(raw, ctx)
             if converted is None:
@@ -1486,8 +1481,11 @@ def _convert_structural(
         abs_end = abs_start + len(content)
         code_mask = _code_mask(content, getattr(tok, "children", None) or [])
         ctx = _RenderCtx(
-            own_hosts=own_hosts, image_map=image_map, bs_host=bs_host,
-            in_chapter=in_chapter, env=env,
+            own_hosts=own_hosts,
+            image_map=image_map,
+            bs_host=bs_host,
+            in_chapter=in_chapter,
+            env=env,
         )
         converted, reason = _convert_inline_content(content, code_mask, ctx)
         if converted is None:
@@ -1636,9 +1634,7 @@ def _first_h1_line_range(text: str) -> tuple[int, int, str] | None:
         if getattr(tok, "level", None) != 0:
             continue
         ttype = getattr(tok, "type", "")
-        if not (
-            ttype.endswith("_open") or ttype in ("hr", "fence", "code_block", "html_block")
-        ):
+        if not (ttype.endswith("_open") or ttype in ("hr", "fence", "code_block", "html_block")):
             continue
         if ttype == "heading_open" and getattr(tok, "tag", "") == "h1":
             tmap = getattr(tok, "map", None)
@@ -2032,9 +2028,7 @@ def _verify_block_structure(
 
     lines = final_text.split("\n")
     accounted: set[int] = {
-        _line_index_at(final_offsets, c)
-        for c in line_map[:n_orig_lines]
-        if c is not None
+        _line_index_at(final_offsets, c) for c in line_map[:n_orig_lines] if c is not None
     }
 
     def repair_or_report(report_oi: int | None, fi: int, osig: tuple[str, ...]) -> None:
@@ -2071,8 +2065,7 @@ def _verify_block_structure(
         rest_kind = _line_block_kind(rest)
         new_rest = _escape_block_marker(rest)
         if new_rest == rest or (
-            rest_kind is not None
-            and _line_already_this_kind_in_original(original, line, rest_kind)
+            rest_kind is not None and _line_already_this_kind_in_original(original, line, rest_kind)
         ):
             unresolved.append(
                 Issue(
@@ -2100,9 +2093,7 @@ def _verify_block_structure(
             # sweeps it up with its neighbours — an invisible paragraph
             # disappearing is exactly this module's intended hygiene, not a
             # structural drift, so it is never reported here.
-            invisible = (
-                oi < len(orig_lines) and orig_lines[oi].replace(_NBSP, " ").strip() == ""
-            )
+            invisible = oi < len(orig_lines) and orig_lines[oi].replace(_NBSP, " ").strip() == ""
             if osig and not invisible:
                 unresolved.append(
                     Issue(
@@ -2122,9 +2113,7 @@ def _verify_block_structure(
     # physical line) and that isn't inside a deliberately-converted span is
     # just as much a drift as a mismatched one — report/repair it against
     # the nearest PRECEDING original line for a meaningful line number.
-    mapped_pairs = sorted(
-        (c, oi) for oi, c in enumerate(line_map[:n_orig_lines]) if c is not None
-    )
+    mapped_pairs = sorted((c, oi) for oi, c in enumerate(line_map[:n_orig_lines]) if c is not None)
     mapped_chars = [c for c, _oi in mapped_pairs]
     for fi in sorted(final_sig):
         if fi in accounted or fi in final_exclude:
@@ -2243,8 +2232,12 @@ def clean_page(
     hosts = frozenset(own_hosts)
     mapping = image_map or {}
     text, ch, un, img, deliberate, orig_deliberate_lines, line_map = _convert_structural(
-        text, line_map, own_hosts=hosts, image_map=mapping,
-        bs_host=bs_host, in_chapter=in_chapter,
+        text,
+        line_map,
+        own_hosts=hosts,
+        image_map=mapping,
+        bs_host=bs_host,
+        in_chapter=in_chapter,
     )
     changes.extend(ch)
     unresolved.extend(un)

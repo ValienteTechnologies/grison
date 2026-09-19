@@ -80,9 +80,7 @@ class FakeFileSetAdapter:
         rid = self.store.upload(filename, body, caption, description)
         return RemoteRecord(id=rid, data=dict(self.store.rows[rid]))
 
-    def update_caption(
-        self, ctx: Any, id: int, *, caption: str, description: str
-    ) -> RemoteRecord:
+    def update_caption(self, ctx: Any, id: int, *, caption: str, description: str) -> RemoteRecord:
         del ctx
         self.store.update_caption_calls += 1
         self.store.rows[id]["caption"] = caption
@@ -104,8 +102,10 @@ class FakeFileSetAdapter:
         import base64
 
         rid = self.store.upload(
-            preimage["filename"], base64.b64decode(preimage["body_b64"]),
-            preimage.get("caption", ""), preimage.get("description", ""),
+            preimage["filename"],
+            base64.b64decode(preimage["body_b64"]),
+            preimage.get("caption", ""),
+            preimage.get("description", ""),
         )
         return RemoteRecord(id=rid, data=dict(self.store.rows[rid]))
 
@@ -124,8 +124,9 @@ def test_new_local_file_uploads(tmp_path: Path) -> None:
     adapter = FakeFileSetAdapter(store)
     index, state, snapshot = _env(tmp_path)
 
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
-                          snapshot=snapshot)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot
+    )
 
     assert store.upload_calls == 1
     assert [p.outcome for p in result.plans] == [Outcome.CREATE]
@@ -138,8 +139,9 @@ def test_new_remote_row_pulls(tmp_path: Path) -> None:
     adapter = FakeFileSetAdapter(store)
     index, state, snapshot = _env(tmp_path)
 
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
-                          snapshot=snapshot)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.PULL_NEW]
     pulled = tmp_path / FOLDER / "shot.png"
@@ -158,8 +160,9 @@ def test_locally_deleted_indexed_file_deletes_remote_row(tmp_path: Path) -> None
 
     (tmp_path / FOLDER / "shot.png").unlink()
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.DELETE_REMOTE]
     assert store.delete_calls == 1
@@ -180,8 +183,9 @@ def test_bytes_changed_under_same_name_creates_new_row_not_update(tmp_path: Path
 
     atomic_write_bytes(tmp_path / FOLDER / "shot.png", b"v2-different-bytes")
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert store.upload_calls == 2  # original + reupload
     assert store.delete_calls == 1  # old row removed
@@ -210,8 +214,16 @@ def test_local_caption_opinion_pushes_and_no_opinion_mirrors_remote(tmp_path: Pa
     doc_path = PurePosixPath("findings/reports/r1/f.md")
     doc_body = "# F\n\n![Login screen](evidence/shot.png)\n"
     index2, state2, snapshot2 = _env(tmp_path)
-    sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2,
-                doc_bodies={doc_path: doc_body})
+    sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
+        doc_bodies={doc_path: doc_body},
+    )
 
     assert store.update_caption_calls == 1
     assert store.rows[rid]["caption"] == "Login screen"
@@ -233,8 +245,16 @@ def test_mass_delete_trips_the_change_guard(tmp_path: Path) -> None:
     for f in (tmp_path / FOLDER).glob("*"):
         f.unlink()
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2, options=RunOptions(mass_change_ratio=0.2))
+    result = sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
+        options=RunOptions(mass_change_ratio=0.2),
+    )
 
     assert all(p.outcome == Outcome.WITHHELD for p in result.plans)
     assert len(store.rows) == 8  # nothing actually deleted while withheld
@@ -262,8 +282,9 @@ def test_rename_with_unchanged_bytes_pairs_as_a_move_not_create_plus_delete(
 
     (tmp_path / FOLDER / "a.png").rename(tmp_path / FOLDER / "b.png")
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.MOVE]
     assert store.upload_calls == 1  # no reupload
@@ -285,15 +306,17 @@ def test_clean_sync_after_first_pull_downloads_the_body_exactly_once(tmp_path: P
     (tmp_path / FOLDER).mkdir(parents=True)
     (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
 
-    result1 = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
-                           snapshot=snapshot)
+    result1 = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot
+    )
     assert [p.outcome for p in result1.plans] == [Outcome.CREATE]
     index.save()
 
     index2, state2, snapshot2 = _env(tmp_path)
     before = store.fetch_body_calls
-    result2 = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                           snapshot=snapshot2)
+    result2 = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert [p.outcome for p in result2.plans] == [Outcome.CLEAN]
     assert store.fetch_body_calls == before, "a clean sync must not download the body again"
@@ -315,8 +338,9 @@ def test_pull_then_clean_sync_of_a_purely_remote_file_downloads_it_only_once(
     assert after_pull >= 1  # the pull itself must download once to materialise the file
 
     index2, state2, snapshot2 = _env(tmp_path)
-    result2 = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                           snapshot=snapshot2)
+    result2 = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert [p.outcome for p in result2.plans] == [Outcome.CLEAN]
     assert store.fetch_body_calls == after_pull
@@ -369,8 +393,16 @@ def test_caption_push_drift_since_classification_is_a_collision_not_an_overwrite
     doc_path = PurePosixPath("findings/reports/r1/f.md")
     doc_body = "# F\n\n![Login screen](evidence/shot.png)\n"
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2, doc_bodies={doc_path: doc_body})
+    result = sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
+        doc_bodies={doc_path: doc_body},
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
     assert store.update_caption_calls == 0  # refused, never overwrote the concurrent edit
@@ -395,8 +427,9 @@ def test_reupload_drift_since_classification_is_a_collision_not_an_overwrite(
 
     atomic_write_bytes(tmp_path / FOLDER / "shot.png", b"v2-different-bytes")
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
     assert store.upload_calls == 1  # only the original upload — no reupload happened
@@ -423,8 +456,9 @@ def test_delete_remote_drift_since_classification_is_a_collision_not_a_delete(
 
     (tmp_path / FOLDER / "shot.png").unlink()
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
     assert store.delete_calls == 0
@@ -448,8 +482,9 @@ def test_two_remote_rows_with_the_same_filename_dedupe_against_each_other(tmp_pa
     adapter = FakeFileSetAdapter(store)
     index, state, snapshot = _env(tmp_path)
 
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
-                          snapshot=snapshot)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.PULL_NEW, Outcome.PULL_NEW]
     on_disk = sorted(p.name for p in (tmp_path / FOLDER).iterdir())
@@ -465,8 +500,9 @@ def test_two_remote_rows_with_the_same_filename_dedupe_against_each_other(tmp_pa
     # both files are now correctly tracked — a follow-up sync is clean, not a
     # repeat "new remote row" for whichever one used to get silently overwritten.
     index2, state2, snapshot2 = _env(tmp_path)
-    result2 = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                           snapshot=snapshot2)
+    result2 = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
     assert [p.outcome for p in result2.plans] == [Outcome.CLEAN, Outcome.CLEAN]
 
 
@@ -497,8 +533,16 @@ def test_caption_conflict_degrades_only_that_file_and_does_not_abort_the_sync(
         doc_b: "# B\n\n![Different caption](evidence/shot.png)\n",
     }
 
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
-                          snapshot=snapshot, doc_bodies=doc_bodies)
+    result = sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        doc_bodies=doc_bodies,
+    )
 
     plans_by_path = [(p.path, p.outcome) for p in result.plans]
     assert (FOLDER / "shot.png", Outcome.FAILED) in plans_by_path  # the conflict, isolated...
@@ -539,8 +583,9 @@ def test_collision_sidecar_file_is_never_treated_as_an_ordinary_local_file(
     (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
     (tmp_path / FOLDER / "shot.remote.png").write_bytes(b"stale-sidecar-bytes")
 
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
-                          snapshot=snapshot)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.CREATE]  # shot.png only
     assert store.upload_calls == 1
@@ -574,8 +619,9 @@ def test_cold_witness_cache_delete_remote_is_not_a_false_collision(tmp_path: Pat
 
     (tmp_path / FOLDER / "shot.png").unlink()
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.DELETE_REMOTE]
     assert store.delete_calls == 1
@@ -597,8 +643,16 @@ def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
     (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
     doc_path = PurePosixPath("findings/reports/r1/f.md")
 
-    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot,
-                doc_bodies={doc_path: "# F\n\n![Local caption](evidence/shot.png)\n"})
+    sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        doc_bodies={doc_path: "# F\n\n![Local caption](evidence/shot.png)\n"},
+    )
     index.save()
     rid = next(iter(store.rows))
 
@@ -607,7 +661,13 @@ def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
     store.rows[rid]["caption"] = "Remote caption"
     index2, state2, snapshot2 = _env(tmp_path)
     result = sync_fileset(
-        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2,
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
         doc_bodies={doc_path: "# F\n\n![A different local caption](evidence/shot.png)\n"},
     )
     index2.save()
@@ -619,7 +679,13 @@ def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
     # reclassifies away from COLLISION...
     index3, state3, snapshot3 = _env(tmp_path)
     result2 = sync_fileset(
-        tmp_path, store, adapter, FOLDER, index=index3, state=state3, snapshot=snapshot3,
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index3,
+        state=state3,
+        snapshot=snapshot3,
         doc_bodies={doc_path: "# F\n\n![Remote caption](evidence/shot.png)\n"},
         options=RunOptions(dry_run=True),
     )
@@ -656,8 +722,16 @@ def test_dry_run_on_a_cold_cache_never_writes_state(tmp_path: Path) -> None:
     assert not state_dir.exists()
 
     index2, state2, snapshot2 = _env(tmp_path)
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
-                          snapshot=snapshot2, options=RunOptions(dry_run=True))
+    result = sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
+        options=RunOptions(dry_run=True),
+    )
 
     assert [p.outcome for p in result.plans] == [Outcome.CLEAN]  # L == R even with no base
     assert not state_dir.exists(), "a dry-run classify must never warm/write private state"
@@ -676,8 +750,16 @@ def test_collision_writes_a_remote_bytes_sidecar_cleared_once_resolved(tmp_path:
     (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
     doc_path = PurePosixPath("findings/reports/r1/f.md")
 
-    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot,
-                doc_bodies={doc_path: "# F\n\n![Local caption](evidence/shot.png)\n"})
+    sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        doc_bodies={doc_path: "# F\n\n![Local caption](evidence/shot.png)\n"},
+    )
     index.save()
     rid = next(iter(store.rows))
     assert store.rows[rid]["caption"] == "Local caption"
@@ -689,7 +771,13 @@ def test_collision_writes_a_remote_bytes_sidecar_cleared_once_resolved(tmp_path:
     store.rows[rid]["caption"] = "Remote caption"
     index2, state2, snapshot2 = _env(tmp_path)
     result = sync_fileset(
-        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2,
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
         doc_bodies={doc_path: "# F\n\n![A different local caption](evidence/shot.png)\n"},
     )
 
@@ -705,15 +793,20 @@ def test_collision_writes_a_remote_bytes_sidecar_cleared_once_resolved(tmp_path:
     # remote's current value.
     index3, state3, snapshot3 = _env(tmp_path)
     result2 = sync_fileset(
-        tmp_path, store, adapter, FOLDER, index=index3, state=state3, snapshot=snapshot3,
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index3,
+        state=state3,
+        snapshot=snapshot3,
         doc_bodies={doc_path: "# F\n\n![Remote caption](evidence/shot.png)\n"},
     )
 
     assert all(p.outcome is not Outcome.COLLISION for p in result2.plans)
     assert not sidecar.exists()  # cleared once no longer in collision
     # and the now-cleared sidecar was never itself mistaken for a new local file
-    assert not any(p.path is not None and p.path.name == "shot.remote.png"
-                   for p in result2.plans)
+    assert not any(p.path is not None and p.path.name == "shot.remote.png" for p in result2.plans)
 
 
 # --- the validation gate, enforced for file-set creates too (item 2) --------
@@ -754,10 +847,25 @@ def test_invalid_fileset_create_is_withheld_others_proceed(tmp_path: Path) -> No
     (tmp_path / FOLDER / "bad-name.png").write_bytes(b"bad")
     (tmp_path / FOLDER / "good-name.png").write_bytes(b"good")
 
-    failures = [Failure(rule_id="REF-008", path=str(FOLDER / "bad-name.png"), line=None,
-                        message="bad name", fix="rename it")]
-    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
-                          snapshot=snapshot, failures=failures)
+    failures = [
+        Failure(
+            rule_id="REF-008",
+            path=str(FOLDER / "bad-name.png"),
+            line=None,
+            message="bad name",
+            fix="rename it",
+        )
+    ]
+    result = sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        failures=failures,
+    )
 
     plans_by_path = {p.path: p for p in result.plans}
     assert plans_by_path[FOLDER / "bad-name.png"].outcome is Outcome.INVALID
@@ -794,12 +902,7 @@ def test_canonical_prose_folds_a_real_reference_not_a_fenced_lookalike() -> None
     POSITION was inside one, so a same-text fenced copy poisoned the real
     occurrence too."""
     resolver = _FakeIdResolver({"evidence/shot.png": 7})
-    md = (
-        "see ![shot](evidence/shot.png) above\n\n"
-        "```\n"
-        "![shot](evidence/shot.png)\n"
-        "```\n"
-    )
+    md = "see ![shot](evidence/shot.png) above\n\n```\n![shot](evidence/shot.png)\n```\n"
     result = canonical_prose(md, resolver)["text"]
     assert "![](7)" in result  # the real one, outside the fence, IS folded
     assert "![shot](evidence/shot.png)" in result  # the fenced copy is untouched
@@ -846,10 +949,7 @@ def test_canonical_prose_leaves_an_external_link_byte_identical() -> None:
         "and the screenshot ![shot](evidence/shot.png) above."
     )
     result = canonical_prose(md, resolver)["text"]
-    assert (
-        "[OWASP: SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection)"
-        in result
-    )
+    assert "[OWASP: SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection)" in result
     assert "![](9)" in result
 
 
@@ -878,7 +978,7 @@ def test_canonical_remote_prose_leaves_an_ordinary_link_untouched() -> None:
                 "[external](https://example.com/x)",
                 "![shot](evidence/a.png)",
                 "[ref](evidence/a.png)",
-                "![shot](evidence/b.png \"cap\")",
+                '![shot](evidence/b.png "cap")',
                 "`![shot](evidence/a.png)`",
                 "```\n![shot](evidence/a.png)\n```",
             ]

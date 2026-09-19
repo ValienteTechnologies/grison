@@ -93,9 +93,7 @@ def commit(root: Path, message: str, *, validate: bool = True) -> bool:
     return True
 
 
-def _run(
-    root: Path, args: list[str], *, env_overrides: dict[str, str] | None = None
-) -> str:
+def _run(root: Path, args: list[str], *, env_overrides: dict[str, str] | None = None) -> str:
     env = {**os.environ, **env_overrides} if env_overrides else None
     try:
         result = subprocess.run(

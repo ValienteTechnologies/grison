@@ -79,7 +79,7 @@ def _norm(html: str) -> str:
 # to the <p>-wrapped form, so it's not itself a round-trip fixed point.
 HTML_SAMPLES = [
     "<p>Plain paragraph.</p>",
-    '<p>Mix <strong>bold</strong>, <code>code</code>, <em>em</em> and '
+    "<p>Mix <strong>bold</strong>, <code>code</code>, <em>em</em> and "
     '<a href="https://example.com/x" target="_blank" rel="noopener">link</a>.</p>',
     "<ul><li><p>Item one</p></li><li><p>Item two</p></li></ul>",
     "<p>Line one<br>Line two</p>",
@@ -481,8 +481,7 @@ def test_defect_link_url_with_trailing_paren_keeps_full_url() -> None:
     # to "http://example.com/path(1" and leaving a stray ")" as trailing text.
     html = md_to_html("[text](http://example.com/path(1))")
     assert html == (
-        '<p><a href="http://example.com/path(1)" target="_blank" '
-        'rel="noopener">text</a></p>'
+        '<p><a href="http://example.com/path(1)" target="_blank" rel="noopener">text</a></p>'
     )
 
 

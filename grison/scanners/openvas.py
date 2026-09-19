@@ -110,9 +110,7 @@ class OpenVASScanner(Scanner):
         findings: list[ScanFinding] = []
         for oid, meta in aggregated.items():
             refs_html = (
-                "<ul>"
-                + "".join(f"<li>{r}</li>" for r in meta["refs"] if r)
-                + "</ul>"
+                "<ul>" + "".join(f"<li>{r}</li>" for r in meta["refs"] if r) + "</ul>"
                 if meta["refs"]
                 else ""
             )

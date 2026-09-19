@@ -91,9 +91,7 @@ def test_txt001_pentest_vocabulary_never_fires() -> None:
 def test_txt002_confidential_term_outside_allowed_prefix(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
     (root / ".grison").mkdir(exist_ok=True)
-    (root / ".grison" / "terms.txt").write_text(
-        "Acme Corp => findings/reports/14-acme-corp\n"
-    )
+    (root / ".grison" / "terms.txt").write_text("Acme Corp => findings/reports/14-acme-corp\n")
     edit(
         root / "findings" / "reports" / "globex" / "broken-auth.md",
         "Session tokens increment sequentially",
@@ -112,9 +110,7 @@ def test_txt002_confidential_term_outside_allowed_prefix(tmp_path: Path) -> None
 def test_txt002_confidential_term_allowed_inside_its_prefix(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
     (root / ".grison").mkdir(exist_ok=True)
-    (root / ".grison" / "terms.txt").write_text(
-        "Acme Corp => findings/reports/14-acme-corp\n"
-    )
+    (root / ".grison" / "terms.txt").write_text("Acme Corp => findings/reports/14-acme-corp\n")
     # "Acme Corp" already appears legitimately inside findings/reports/14-acme-corp/
     # (.report.yml, project.md) — must not fire there.
     fails = validate_workspace(root)

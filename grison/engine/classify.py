@@ -54,21 +54,30 @@ def classify(  # noqa: PLR0911, PLR0913
     """
     if append_only:
         outcome = _classify_append_only(
-            indexed=indexed, local_present=local_present, remote_present=remote_present,
-            local_hash=local_hash, remote_hash=remote_hash, base_hash=base_hash,
+            indexed=indexed,
+            local_present=local_present,
+            remote_present=remote_present,
+            local_hash=local_hash,
+            remote_hash=remote_hash,
+            base_hash=base_hash,
         )
     elif indexed:
         outcome = _classify_indexed(
-            local_present=local_present, remote_present=remote_present,
-            local_hash=local_hash, remote_hash=remote_hash, base_hash=base_hash,
+            local_present=local_present,
+            remote_present=remote_present,
+            local_hash=local_hash,
+            remote_hash=remote_hash,
+            base_hash=base_hash,
         )
     elif local_present:
         outcome = Outcome.CREATE
     elif remote_present:
         outcome = Outcome.PULL_NEW
     else:
-        raise ValueError("classify() called for a slot with no local file, no remote "
-                         "record and no index entry — nothing to classify")
+        raise ValueError(
+            "classify() called for a slot with no local file, no remote "
+            "record and no index entry — nothing to classify"
+        )
 
     if read_only:
         outcome = _clamp_read_only(outcome)
@@ -114,8 +123,13 @@ def _classify_append_only(  # noqa: PLR0913
     enforcement is the validator, this is defense in depth, same as read-only)."""
     if indexed:
         return _clamp_read_only(
-            _classify_indexed(local_present=local_present, remote_present=remote_present,
-                              local_hash=local_hash, remote_hash=remote_hash, base_hash=base_hash)
+            _classify_indexed(
+                local_present=local_present,
+                remote_present=remote_present,
+                local_hash=local_hash,
+                remote_hash=remote_hash,
+                base_hash=base_hash,
+            )
         )
     if local_present:
         return Outcome.CREATE

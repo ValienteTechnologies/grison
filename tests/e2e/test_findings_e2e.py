@@ -179,7 +179,11 @@ def test_non_ascii_uppercase_evidence_name_validates_and_syncs(run_grison, gw_se
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     report_dir = _rdir(workspace)
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
     )
     run_grison("sync")
 
@@ -206,7 +210,9 @@ def test_non_ascii_uppercase_evidence_name_validates_and_syncs(run_grison, gw_se
 
 
 def test_reported_finding_cross_reference_and_embed_converge_after_one_push(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Item 1 (engine-findings-lab.md 'Two defects'/#2): a plain cross-reference
     link (``[caption](evidence/file "desc")``, no ``!``) used to never
@@ -219,7 +225,11 @@ def test_reported_finding_cross_reference_and_embed_converge_after_one_push(
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     report_dir = _rdir(workspace)
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="SQL Injection", severityId=5, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="SQL Injection",
+        severityId=5,
+        findingTypeId=4,
     )
     first = run_grison("sync")
     assert "findings (gw.reportedFinding): pull_new 1" in first.output, first.output
@@ -367,7 +377,9 @@ def test_undo_reverses_a_library_push_and_an_evidence_upload(run_grison, gw_serv
 
 
 def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Item 3 (engine-findings-lab.md Scenario 12): one ``grison sync`` that both
     uploads a new evidence file and pushes two reported findings (one of them
@@ -382,11 +394,17 @@ def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     report_dir = _rdir(workspace)
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Default Credentials", severityId=3,
+        id=50,
+        reportId=report["id"],
+        title="Default Credentials",
+        severityId=3,
         findingTypeId=4,
     )
     gw_server.store.seed_reported_finding(
-        id=51, reportId=report["id"], title="Unencrypted Telnet", severityId=4,
+        id=51,
+        reportId=report["id"],
+        title="Unencrypted Telnet",
+        severityId=4,
         findingTypeId=4,
     )
     run_grison("sync")
@@ -398,7 +416,9 @@ def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
 
     default_creds_path.write_text(
         default_creds_path.read_text(encoding="utf-8").replace(
-            "## Description\n\n", "## Description\n\nEdited by the undo-scenario test.\n\n", 1,
+            "## Description\n\n",
+            "## Description\n\nEdited by the undo-scenario test.\n\n",
+            1,
         ),
         encoding="utf-8",
     )
@@ -433,7 +453,9 @@ def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
 
 
 def test_undo_with_a_preexisting_cross_reference_is_fully_clean_afterward(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Item 3 (fix-undo-repair) root cause: ``grison undo``'s own
     ``GwReportedFindingAdapter`` (``grison.cli.undo``) used to be built with
@@ -458,10 +480,18 @@ def test_undo_with_a_preexisting_cross_reference_is_fully_clean_afterward(
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     report_dir = _rdir(workspace)
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Default Credentials", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Default Credentials",
+        severityId=3,
+        findingTypeId=4,
     )
     gw_server.store.seed_reported_finding(
-        id=51, reportId=report["id"], title="Unencrypted Telnet", severityId=4, findingTypeId=4,
+        id=51,
+        reportId=report["id"],
+        title="Unencrypted Telnet",
+        severityId=4,
+        findingTypeId=4,
     )
     run_grison("sync")
 
@@ -492,13 +522,17 @@ def test_undo_with_a_preexisting_cross_reference_is_fully_clean_afterward(
     # pushes").
     default_creds_path.write_text(
         default_creds_path.read_text(encoding="utf-8").replace(
-            "## Description\n\n", "## Description\n\nEdited by the undo-scenario test.\n\n", 1,
+            "## Description\n\n",
+            "## Description\n\nEdited by the undo-scenario test.\n\n",
+            1,
         ),
         encoding="utf-8",
     )
     telnet_path.write_text(
         telnet_path.read_text(encoding="utf-8").replace(
-            "## Description\n\n", "## Description\n\nAlso edited.\n\n", 1,
+            "## Description\n\n",
+            "## Description\n\nAlso edited.\n\n",
+            1,
         ),
         encoding="utf-8",
     )
@@ -527,7 +561,9 @@ def test_undo_with_a_preexisting_cross_reference_is_fully_clean_afterward(
 
 
 def test_n_new_evidence_uploads_fetch_the_org_wide_evidence_list_only_once(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Regression for the fetch_evidence() thundering herd: BEFORE the fix,
     GwEvidenceAdapter._dedupe_friendly_name_for called the org-wide
@@ -554,7 +590,9 @@ def test_n_new_evidence_uploads_fetch_the_org_wide_evidence_list_only_once(
 
 
 def test_undo_refuses_to_guess_the_report_for_an_evidence_restore_with_no_reportid(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """D3/undo safety: grison.engine.undo.replay's adapter map holds ONE
     GwEvidenceAdapter per bare kind string (bound to report_id=0 — see
@@ -595,7 +633,10 @@ def test_undo_refuses_to_guess_the_report_for_an_evidence_restore_with_no_report
 
 
 def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
-    run_grison, gw_server, workspace, monkeypatch,
+    run_grison,
+    gw_server,
+    workspace,
+    monkeypatch,
 ):
     """BRIEF task 2 (ENGINE.md §5 per-record isolation): before this fix, an
     unexpected exception out of one report's ``engine_sync_fileset`` call
@@ -610,7 +651,10 @@ def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_report(id=8, title="Report B", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_finding(
-        id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4,
+        id=1,
+        title="Weak TLS Ciphers",
+        severityId=3,
+        findingTypeId=4,
         description="<p>old text</p>",
     )
     first = run_grison("sync")  # creates both report directories + pulls the library finding
@@ -661,12 +705,18 @@ def test_cross_report_move_with_identical_content_reparents(run_grison, gw_serve
     ``apply.py::_apply_move``'s ``needs_write`` compared the two canonical
     payloads equal (report membership was invisible to both), so the finding
     kept its OLD ``reportId`` on Ghostwriter forever, silently."""
-    report_a = gw_server.store.seed_report(id=7, title="Report A",
-                                           project={"scopes": REPORT_SCOPES})
-    report_b = gw_server.store.seed_report(id=8, title="Report B",
-                                           project={"scopes": REPORT_SCOPES})
+    report_a = gw_server.store.seed_report(
+        id=7, title="Report A", project={"scopes": REPORT_SCOPES}
+    )
+    report_b = gw_server.store.seed_report(
+        id=8, title="Report B", project={"scopes": REPORT_SCOPES}
+    )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report_a["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report_a["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
     )
     first = run_grison("sync")
     assert first.exit_code == 0, first.output
@@ -694,12 +744,18 @@ def test_cross_report_move_with_identical_content_reparents(run_grison, gw_serve
 def test_cross_report_move_and_edit_reparents(run_grison, gw_server, workspace):
     """Same fix, the MOVE+EDIT path: content changed AND the directory changed in
     the same sync — both the edit and the reparent must land in one write."""
-    report_a = gw_server.store.seed_report(id=7, title="Report A",
-                                           project={"scopes": REPORT_SCOPES})
-    report_b = gw_server.store.seed_report(id=8, title="Report B",
-                                           project={"scopes": REPORT_SCOPES})
+    report_a = gw_server.store.seed_report(
+        id=7, title="Report A", project={"scopes": REPORT_SCOPES}
+    )
+    report_b = gw_server.store.seed_report(
+        id=8, title="Report B", project={"scopes": REPORT_SCOPES}
+    )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report_a["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report_a["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
         description="<p>old text</p>",
     )
     first = run_grison("sync")
@@ -770,11 +826,19 @@ def test_two_simultaneous_renames_pair_one_to_one(run_grison, gw_server, workspa
     kind."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
         description="<p>alpha</p>",
     )
     gw_server.store.seed_reported_finding(
-        id=51, reportId=report["id"], title="Finding Two", severityId=3, findingTypeId=4,
+        id=51,
+        reportId=report["id"],
+        title="Finding Two",
+        severityId=3,
+        findingTypeId=4,
         description="<p>beta</p>",
     )
     first = run_grison("sync")
@@ -790,10 +854,14 @@ def test_two_simultaneous_renames_pair_one_to_one(run_grison, gw_server, workspa
     index = Index.load(workspace)
     assert index.get("findings/reports/report-a/renamed-one.md").id == 50
     assert index.get("findings/reports/report-a/renamed-two.md").id == 51
-    assert gw_server.store._by_id(gw_server.store.reported_findings, 50)["description"] == \
-        "<p>alpha</p>"
-    assert gw_server.store._by_id(gw_server.store.reported_findings, 51)["description"] == \
-        "<p>beta</p>"
+    assert (
+        gw_server.store._by_id(gw_server.store.reported_findings, 50)["description"]
+        == "<p>alpha</p>"
+    )
+    assert (
+        gw_server.store._by_id(gw_server.store.reported_findings, 51)["description"]
+        == "<p>beta</p>"
+    )
 
 
 def test_position_preserved_across_plain_content_push(run_grison, gw_server, workspace):
@@ -802,8 +870,13 @@ def test_position_preserved_across_plain_content_push(run_grison, gw_server, wor
     for the record."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
-        description="<p>old text</p>", position=7,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
+        description="<p>old text</p>",
+        position=7,
     )
     first = run_grison("sync")
     assert first.exit_code == 0, first.output
@@ -828,7 +901,9 @@ def test_position_preserved_across_plain_content_push(run_grison, gw_server, wor
 
 
 def test_evidence_reupload_pushes_the_reported_finding_with_the_new_id(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Unlike a narrative section (reports phase, before findings phase), a
     reported finding's own evidence lives in the SAME phase as the reupload
@@ -838,11 +913,18 @@ def test_evidence_reupload_pushes_the_reported_finding_with_the_new_id(
     SAME sync, no second sync needed."""
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        id=90,
+        reportId=7,
+        document="evidence/7/shot.png",
+        friendlyName="shot",
         caption="Login screen",
     )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=7, title="SQLi", severityId=5, findingTypeId=4,
+        id=50,
+        reportId=7,
+        title="SQLi",
+        severityId=5,
+        findingTypeId=4,
         description='<div class="richtext-evidence" data-evidence-id="90"></div>',
     )
     run_grison("sync")
@@ -858,9 +940,9 @@ def test_evidence_reupload_pushes_the_reported_finding_with_the_new_id(
     assert "findings (gw.reportedFinding): push 1" in result.output, result.output
     assert "collision" not in result.output
     assert finding_path.read_text(encoding="utf-8") == original_text  # local text untouched
-    new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
-        "shot.png"
-    ))
+    new_id = next(
+        row["id"] for row in gw_server.store.evidence if row["document"].endswith("shot.png")
+    )
     assert new_id != 90
     row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
     assert f'data-evidence-id="{new_id}"' in row["description"]
@@ -873,21 +955,34 @@ def test_evidence_reupload_pushes_the_reported_finding_with_the_new_id(
 
 
 def test_evidence_reupload_pushes_every_finding_that_references_it(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """One evidence file referenced by TWO reported findings: a reupload must
     re-push BOTH, each with the SAME new id."""
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        id=90,
+        reportId=7,
+        document="evidence/7/shot.png",
+        friendlyName="shot",
         caption="Login screen",
     )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=7, title="SQLi", severityId=5, findingTypeId=4,
+        id=50,
+        reportId=7,
+        title="SQLi",
+        severityId=5,
+        findingTypeId=4,
         description='<div class="richtext-evidence" data-evidence-id="90"></div>',
     )
     gw_server.store.seed_reported_finding(
-        id=51, reportId=7, title="XSS", severityId=4, findingTypeId=4,
+        id=51,
+        reportId=7,
+        title="XSS",
+        severityId=4,
+        findingTypeId=4,
         description='<div class="richtext-evidence" data-evidence-id="90"></div>',
     )
     run_grison("sync")
@@ -898,9 +993,9 @@ def test_evidence_reupload_pushes_every_finding_that_references_it(
     result = run_grison("sync")
 
     assert "findings (gw.reportedFinding): push 2" in result.output, result.output
-    new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
-        "shot.png"
-    ))
+    new_id = next(
+        row["id"] for row in gw_server.store.evidence if row["document"].endswith("shot.png")
+    )
     row50 = gw_server.store._by_id(gw_server.store.reported_findings, 50)
     row51 = gw_server.store._by_id(gw_server.store.reported_findings, 51)
     assert f'data-evidence-id="{new_id}"' in row50["description"]
@@ -908,18 +1003,27 @@ def test_evidence_reupload_pushes_every_finding_that_references_it(
 
 
 def test_evidence_reupload_plus_a_concurrent_remote_edit_is_still_a_collision(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """The pre-write re-fetch guard must still catch a GENUINE concurrent
     edit — the reupload's automatic re-push must never blindly overwrite a
     finding someone else changed on Ghostwriter in between."""
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        id=90,
+        reportId=7,
+        document="evidence/7/shot.png",
+        friendlyName="shot",
         caption="Login screen",
     )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=7, title="SQLi", severityId=5, findingTypeId=4,
+        id=50,
+        reportId=7,
+        title="SQLi",
+        severityId=5,
+        findingTypeId=4,
         description='<div class="richtext-evidence" data-evidence-id="90"></div>',
     )
     run_grison("sync")
@@ -942,7 +1046,9 @@ def test_evidence_reupload_plus_a_concurrent_remote_edit_is_still_a_collision(
 
 
 def test_non_ascii_evidence_filename_pushes_from_a_reported_finding(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """grison.markdown.refscan item 3's fix also applies to GwRefResolver
     (grison/adapters/gw_findings.py) — markdown-it-py percent-encodes non-ASCII
@@ -952,11 +1058,17 @@ def test_non_ascii_evidence_filename_pushes_from_a_reported_finding(
     decoded path) and raise ConverterError instead of pushing."""
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/Phishing_Sonuçları.png",
+        id=90,
+        reportId=7,
+        document="evidence/7/Phishing_Sonuçları.png",
         friendlyName="Phishing_Sonuçları",
     )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=7, title="Phishing", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=7,
+        title="Phishing",
+        severityId=3,
+        findingTypeId=4,
     )
     run_grison("sync")  # downloads + indexes evidence/Phishing_Sonuçları.png
 
@@ -982,7 +1094,9 @@ def test_non_ascii_evidence_filename_pushes_from_a_reported_finding(
 
 
 def test_library_finding_with_a_real_editor_heading_pulls_and_stays_clean(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Defect 1: a real TipTap 7.2.6 editor writes h1-h6 into a plain FINDING
     field, not just report narrative — the exact stored HTML from
@@ -1017,7 +1131,9 @@ def test_library_finding_with_a_real_editor_heading_pulls_and_stays_clean(
 
 
 def test_library_finding_with_external_link_stays_clean_across_syncs(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """fix-f item 1 (+ coordinator addendum): ``_substitute_ref_identity`` used
     to fold ANY ``[text](dest)`` it found — including a plain external
@@ -1061,7 +1177,11 @@ def test_reported_finding_heading_edit_pushes_back_as_html(run_grison, gw_server
     ``headings=True`` (see ``grison.markdown.converter``'s module docstring)."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_reported_finding(
-        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
         description="<p>plain text</p>",
     )
     run_grison("sync")
@@ -1083,7 +1203,9 @@ def test_reported_finding_heading_edit_pushes_back_as_html(run_grison, gw_server
 
 
 def test_raw_wrapped_template_literal_pulls_as_plain_text_not_gw_markers(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Defect 2: existing stored HTML with a real Jinja ``{% raw %}...{% endraw %}``
     block (from an older grison push, or a human typing it directly — the exact
@@ -1121,19 +1243,20 @@ def test_raw_wrapped_template_literal_pulls_as_plain_text_not_gw_markers(
     # D10's ONE proven mechanism (per-token Jinja string-literal escaping) with
     # no nesting — never the old, broken "quoting inside a raw block" shape.
     path.write_text(
-        text.replace("## Impact", "## Impact\n\nedited", 1), encoding="utf-8",
+        text.replace("## Impact", "## Impact\n\nedited", 1),
+        encoding="utf-8",
     )
     result = run_grison("sync")
     assert "findings (gw.finding): push 1" in result.output, result.output
     row = gw_server.store._by_id(gw_server.store.findings, 12)
-    assert row["description"] == (
-        "<p>{{ '{{' }}7*7{{ '}}' }} and {{ '{%' }} debug {{ '%}' }}</p>"
-    )
+    assert row["description"] == ("<p>{{ '{{' }}7*7{{ '}}' }} and {{ '{%' }} debug {{ '%}' }}</p>")
     assert "{% raw %}" not in row["description"]  # never re-emitted; never nested inside one
 
 
 def test_nbsp_padded_trailing_paragraphs_pull_clean_with_no_settle_push(
-    run_grison, gw_server, workspace,
+    run_grison,
+    gw_server,
+    workspace,
 ):
     """Defect 3: the exact stored HTML of the real lab's "Missing HTTP Security
     Headers" library finding (id 4) — a real body paragraph followed by a

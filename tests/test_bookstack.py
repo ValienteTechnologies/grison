@@ -120,8 +120,9 @@ def _make_transport(captured: list[httpx.Request] | None = None) -> httpx.MockTr
         if method == "DELETE" and path == "/api/chapters/4":
             return httpx.Response(204)
         if method == "GET" and path == "/api/recycle-bin":
-            return httpx.Response(200, json={"data": [{"id": 1, "deletable_type": "page",
-                                                        "deletable_id": 10}]})
+            return httpx.Response(
+                200, json={"data": [{"id": 1, "deletable_type": "page", "deletable_id": 10}]}
+            )
 
         raise AssertionError(f"unexpected request: {method} {path}")
 
@@ -232,9 +233,7 @@ def test_list_endpoints_paginate_past_the_count_cap() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/pages"
         offset = int(request.url.params.get("offset", 0))
-        return httpx.Response(
-            200, json={"data": rows[offset : offset + 1000], "total": len(rows)}
-        )
+        return httpx.Response(200, json={"data": rows[offset : offset + 1000], "total": len(rows)})
 
     with BookStackClient(_CREDS, transport=httpx.MockTransport(handler)) as client:
         pages = client.fetch_pages()
@@ -259,8 +258,9 @@ def test_create_book_posts_name_and_description() -> None:
     with BookStackClient(_CREDS, transport=_make_transport(captured)) as client:
         rec = client.create_book(name="New Book", description="desc")
     assert rec["id"] == 55
-    body = json.loads([r for r in captured if r.method == "POST" and r.url.path == "/api/books"
-                       ][0].content)
+    body = json.loads(
+        [r for r in captured if r.method == "POST" and r.url.path == "/api/books"][0].content
+    )
     assert body == {"name": "New Book", "description": "desc"}
 
 
@@ -268,8 +268,9 @@ def test_create_book_omits_empty_description() -> None:
     captured: list[httpx.Request] = []
     with BookStackClient(_CREDS, transport=_make_transport(captured)) as client:
         client.create_book(name="New Book")
-    body = json.loads([r for r in captured if r.method == "POST" and r.url.path == "/api/books"
-                       ][0].content)
+    body = json.loads(
+        [r for r in captured if r.method == "POST" and r.url.path == "/api/books"][0].content
+    )
     assert body == {"name": "New Book"}
 
 
@@ -304,5 +305,3 @@ def test_fetch_recycle_bin_paginates_like_other_lists() -> None:
     with BookStackClient(_CREDS, transport=_make_transport()) as client:
         rows = client.fetch_recycle_bin()
     assert rows == [{"id": 1, "deletable_type": "page", "deletable_id": 10}]
-
-

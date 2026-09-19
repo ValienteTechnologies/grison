@@ -139,23 +139,30 @@ def _check_fileset_name(folder: PurePosixPath, name: str) -> list[Failure]:
     LAST component)."""
     full = f"{folder.as_posix()}/{name}"
     if "/" in name or "\\" in name:
-        return [fail(registry.REF_BAD_FILESET_NAME, full,
-                     f"{name!r} contains a path separator")]
+        return [fail(registry.REF_BAD_FILESET_NAME, full, f"{name!r} contains a path separator")]
     if name.startswith("."):
-        return [fail(registry.REF_BAD_FILESET_NAME, full,
-                     f"{name!r} starts with a leading dot")]
+        return [fail(registry.REF_BAD_FILESET_NAME, full, f"{name!r} starts with a leading dot")]
     if is_sidecar_name(name):
-        return [fail(registry.REF_BAD_FILESET_NAME, full,
-                     f"{name!r} is shaped like a collision sidecar (<name>.remote.<ext>) — "
-                     "never a real evidence/image file name")]
+        return [
+            fail(
+                registry.REF_BAD_FILESET_NAME,
+                full,
+                f"{name!r} is shaped like a collision sidecar (<name>.remote.<ext>) — "
+                "never a real evidence/image file name",
+            )
+        ]
     try:
         encoded = name.encode("utf-8")
     except UnicodeEncodeError:
         return [fail(registry.REF_BAD_FILESET_NAME, full, f"{name!r} is not valid UTF-8")]
     if len(encoded) > _FILESET_NAME_MAX_BYTES:
-        return [fail(registry.REF_BAD_FILESET_NAME, full,
-                     f"{name!r} is {len(encoded)} bytes, over the "
-                     f"{_FILESET_NAME_MAX_BYTES}-byte limit")]
+        return [
+            fail(
+                registry.REF_BAD_FILESET_NAME,
+                full,
+                f"{name!r} is {len(encoded)} bytes, over the {_FILESET_NAME_MAX_BYTES}-byte limit",
+            )
+        ]
     return []
 
 
@@ -194,7 +201,8 @@ def _validate_finding_file(
         if score is not None and doc.severity not in _severity_band(score):
             out.append(
                 fail(
-                    registry.FND_SEVERITY_CVSS_MISMATCH, rel,
+                    registry.FND_SEVERITY_CVSS_MISMATCH,
+                    rel,
                     f"severity={doc.severity.value!r} but CVSS score {score} implies "
                     f"{sorted(s.value for s in _severity_band(score))}",
                 )
@@ -229,9 +237,15 @@ def _check_finding_body(
         if found:
             noun = "library" if tier == "library" else "inbox (pre-triage)"
             for ref in found:
-                out.append(fail(registry.REF_IMAGE_IN_LIBRARY, rel,
-                                f"{field}: image embed {ref.path!r} — a {noun} finding has "
-                                "no report to hold evidence for", line=ref.line))
+                out.append(
+                    fail(
+                        registry.REF_IMAGE_IN_LIBRARY,
+                        rel,
+                        f"{field}: image embed {ref.path!r} — a {noun} finding has "
+                        "no report to hold evidence for",
+                        line=ref.line,
+                    )
+                )
             return out
         try:
             # headings=True: a real TipTap editor emits h1-h6 in finding fields
@@ -248,17 +262,35 @@ def _check_finding_body(
     ref_issue = False
     for ref in embeds(text, prefix="evidence"):
         if not ref.standalone:
-            out.append(fail(registry.REF_BAD_POSITION, rel,
-                            f"{field}: {ref.path!r} is not alone in its block", line=ref.line))
+            out.append(
+                fail(
+                    registry.REF_BAD_POSITION,
+                    rel,
+                    f"{field}: {ref.path!r} is not alone in its block",
+                    line=ref.line,
+                )
+            )
             ref_issue = True
         elif not (evidence_dir / ref.path[len("evidence/") :]).is_file():
-            out.append(fail(registry.REF_UNRESOLVED, rel,
-                            f"{field}: {ref.path!r} does not resolve", line=ref.line))
+            out.append(
+                fail(
+                    registry.REF_UNRESOLVED,
+                    rel,
+                    f"{field}: {ref.path!r} does not resolve",
+                    line=ref.line,
+                )
+            )
             ref_issue = True
     for ref in cross_refs(text, prefix="evidence"):
         if not (evidence_dir / ref.path[len("evidence/") :]).is_file():
-            out.append(fail(registry.REF_BAD_CROSS_REFERENCE, rel,
-                            f"{field}: {ref.path!r} does not resolve", line=ref.line))
+            out.append(
+                fail(
+                    registry.REF_BAD_CROSS_REFERENCE,
+                    rel,
+                    f"{field}: {ref.path!r} does not resolve",
+                    line=ref.line,
+                )
+            )
             ref_issue = True
     # Only fall through to the real converter when refscan found no reference problem
     # of its own — REF-001/002/006's rule assignment never depends on the converter's
@@ -276,15 +308,18 @@ def _check_finding_body(
 def _check_txt(rel: str, text: str, cterms: list[ConfidentialTerm]) -> list[Failure]:
     out: list[Failure] = []
     for lineno, phrase in terms_mod.find_banned_phrases(text):
-        out.append(fail(registry.TXT_BANNED_PHRASE, rel, f"banned phrase: {phrase!r}",
-                        line=lineno))
+        out.append(fail(registry.TXT_BANNED_PHRASE, rel, f"banned phrase: {phrase!r}", line=lineno))
     for term in cterms:
         if terms_mod.path_allows(rel, term.allowed_prefix):
             continue
         for lineno in terms_mod.find_term(text, term.term):
             out.append(
-                fail(registry.TXT_CONFIDENTIAL_TERM, rel,
-                    f"confidential term: {terms_mod.mask(term.term)}", line=lineno)
+                fail(
+                    registry.TXT_CONFIDENTIAL_TERM,
+                    rel,
+                    f"confidential term: {terms_mod.mask(term.term)}",
+                    line=lineno,
+                )
             )
     return out
 
@@ -354,8 +389,9 @@ def _check_scaffolded_files(root: Path) -> list[Failure]:  # WS-011/WS-012
         digest; ``False`` (nothing appended, caller proceeds to its own content
         check) otherwise. ``ok`` is whether ``rel`` currently exists."""
         if not ok:
-            out.append(fail(registry.WS_SCAFFOLD_MISSING, rel, "grison generated this; it is "
-                            "now missing"))
+            out.append(
+                fail(registry.WS_SCAFFOLD_MISSING, rel, "grison generated this; it is now missing")
+            )
         return not ok
 
     # .grison/SPEC.md — exact content match, like a sync-time mirror.
@@ -365,8 +401,13 @@ def _check_scaffolded_files(root: Path) -> list[Failure]:  # WS-011/WS-012
         if not _missing_or(spec_mod.SPEC_RELATIVE_PATH, spec_path.is_file()):
             text = spec_path.read_text(encoding="utf-8", errors="replace")
             if digest_text(text) != spec_digest:
-                out.append(fail(registry.WS_SCAFFOLD_EDITED, spec_mod.SPEC_RELATIVE_PATH,
-                                "content differs from what grison last generated"))
+                out.append(
+                    fail(
+                        registry.WS_SCAFFOLD_EDITED,
+                        spec_mod.SPEC_RELATIVE_PATH,
+                        "content differs from what grison last generated",
+                    )
+                )
 
     # .grison/templates/*.md — existence only (see docstring: content drift is
     # intended usage, not corruption).
@@ -385,9 +426,14 @@ def _check_scaffolded_files(root: Path) -> list[Failure]:  # WS-011/WS-012
             current_marker = current.splitlines()[0] if current else ""
             is_current = current_marker == claude_md_mod.marker_line()
             if not is_current and digest_text(current) != claude_digest:
-                out.append(fail(registry.WS_SCAFFOLD_EDITED, CLAUDE_MD_RELATIVE_PATH,
-                                "stale (older than this grison would generate now) and its "
-                                "content no longer matches what grison last generated"))
+                out.append(
+                    fail(
+                        registry.WS_SCAFFOLD_EDITED,
+                        CLAUDE_MD_RELATIVE_PATH,
+                        "stale (older than this grison would generate now) and its "
+                        "content no longer matches what grison last generated",
+                    )
+                )
 
     # .claude/settings.json — grison-owned fragment only (canonical deny rules
     # present + hook-entry present); a user's own additions never change the digest.
@@ -399,20 +445,23 @@ def _check_scaffolded_files(root: Path) -> list[Failure]:  # WS-011/WS-012
                 data = json.loads(settings_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 data = {}
-            deny = (data.get("permissions") or {}).get("deny", []) if isinstance(data, dict) \
-                else []
-            post_tool_use = (data.get("hooks") or {}).get("PostToolUse", []) \
-                if isinstance(data, dict) else []
+            deny = (data.get("permissions") or {}).get("deny", []) if isinstance(data, dict) else []
+            post_tool_use = (
+                (data.get("hooks") or {}).get("PostToolUse", []) if isinstance(data, dict) else []
+            )
             live_digest = settings_json_mod.fragment_digest(
                 deny if isinstance(deny, list) else [],
                 post_tool_use if isinstance(post_tool_use, list) else [],
             )
             if live_digest != settings_digest:
-                out.append(fail(
-                    registry.WS_SCAFFOLD_EDITED, settings_json_mod.SETTINGS_RELATIVE_PATH,
-                    "grison's own deny rules/post-edit hook no longer match what grison last "
-                    "merged in",
-                ))
+                out.append(
+                    fail(
+                        registry.WS_SCAFFOLD_EDITED,
+                        settings_json_mod.SETTINGS_RELATIVE_PATH,
+                        "grison's own deny rules/post-edit hook no longer match what grison last "
+                        "merged in",
+                    )
+                )
 
     return out
 
@@ -437,15 +486,25 @@ def _validate_report_dir(
     for p in sorted(abs_dir.iterdir()) if abs_dir.is_dir() else []:
         if p.name in known_top or (p.is_file() and p.name.endswith(".md")):
             continue
-        out.append(fail(registry.WS_UNKNOWN_FINDINGS_PATH, _rel(root, p),
-                        "unexpected entry directly inside a report directory"))
+        out.append(
+            fail(
+                registry.WS_UNKNOWN_FINDINGS_PATH,
+                _rel(root, p),
+                "unexpected entry directly inside a report directory",
+            )
+        )
     for sub in ("narrative", "notes"):
         subdir = abs_dir / sub
         if subdir.is_dir():
             for p in sorted(subdir.iterdir()):
                 if p.is_dir() or not p.name.endswith(".md"):
-                    out.append(fail(registry.WS_UNKNOWN_FINDINGS_PATH, _rel(root, p),
-                                    f"only *.md files are allowed directly in {sub}/"))
+                    out.append(
+                        fail(
+                            registry.WS_UNKNOWN_FINDINGS_PATH,
+                            _rel(root, p),
+                            f"only *.md files are allowed directly in {sub}/",
+                        )
+                    )
 
     all_files = sorted(p for p in abs_dir.rglob("*") if p.is_file())
     if index is not None and not indexed:
@@ -471,8 +530,13 @@ def _validate_report_dir(
             rel = _rel(root, md_path)
             out.extend(_check_names(PurePosixPath(rel)))
             if narrative_order is not None and md_path.stem not in narrative_order:
-                out.append(fail(registry.REP_UNKNOWN_NARRATIVE_FIELD, rel,
-                                f"field {md_path.stem!r} is not in {sorted(narrative_order)}"))
+                out.append(
+                    fail(
+                        registry.REP_UNKNOWN_NARRATIVE_FIELD,
+                        rel,
+                        f"field {md_path.stem!r} is not in {sorted(narrative_order)}",
+                    )
+                )
             ntext, read_fail = _read_text(root, rel, default_rule=registry.REP_BODY_NOT_CONVERTIBLE)
             if ntext is None:
                 out.extend([read_fail] if read_fail else [])
@@ -501,16 +565,17 @@ def _validate_report_dir(
         # REF-008 rejects the sidecar shape outright, it is never silently
         # exempt from having SOME valid name.
         filenames = sorted(
-            p.name for p in evidence_dir.iterdir()
-            if p.is_file() and not is_sidecar_name(p.name)
+            p.name for p in evidence_dir.iterdir() if p.is_file() and not is_sidecar_name(p.name)
         )
         for stem, group in stems(filenames).items():
             if len(group) > 1:
                 for name in group:
                     out.append(
-                        fail(registry.REF_STEM_COLLISION,
-                            _rel(root, evidence_dir / name), f"shares stem {stem!r} with "
-                            f"{[g for g in group if g != name]}")
+                        fail(
+                            registry.REF_STEM_COLLISION,
+                            _rel(root, evidence_dir / name),
+                            f"shares stem {stem!r} with {[g for g in group if g != name]}",
+                        )
                     )
         evidence_dir_rel = PurePosixPath(_rel(root, evidence_dir))
         for p in sorted(evidence_dir.iterdir()):
@@ -529,8 +594,12 @@ def _validate_report_dir(
         if len(captions) > 1:
             for h in hits:
                 out.append(
-                    fail(registry.REF_CAPTION_CONFLICT, h.doc_rel,
-                        f"{path!r} captioned {sorted(captions)} across this report", line=h.line)
+                    fail(
+                        registry.REF_CAPTION_CONFLICT,
+                        h.doc_rel,
+                        f"{path!r} captioned {sorted(captions)} across this report",
+                        line=h.line,
+                    )
                 )
 
     for name in (".report.yml", "project.md"):
@@ -574,17 +643,30 @@ def _check_narrative_body(rel: str, text: str, evidence_dir: Path) -> list[Failu
     ref_issue = False
     for ref in embeds(text, prefix="evidence"):
         if not ref.standalone:
-            out.append(fail(registry.REF_BAD_POSITION, rel,
-                            f"{ref.path!r} is not alone in its block", line=ref.line))
+            out.append(
+                fail(
+                    registry.REF_BAD_POSITION,
+                    rel,
+                    f"{ref.path!r} is not alone in its block",
+                    line=ref.line,
+                )
+            )
             ref_issue = True
         elif not (evidence_dir / ref.path[len("evidence/") :]).is_file():
-            out.append(fail(registry.REF_UNRESOLVED, rel, f"{ref.path!r} does not resolve",
-                            line=ref.line))
+            out.append(
+                fail(registry.REF_UNRESOLVED, rel, f"{ref.path!r} does not resolve", line=ref.line)
+            )
             ref_issue = True
     for ref in cross_refs(text, prefix="evidence"):
         if not (evidence_dir / ref.path[len("evidence/") :]).is_file():
-            out.append(fail(registry.REF_BAD_CROSS_REFERENCE, rel, f"{ref.path!r} does not "
-                            "resolve", line=ref.line))
+            out.append(
+                fail(
+                    registry.REF_BAD_CROSS_REFERENCE,
+                    rel,
+                    f"{ref.path!r} does not resolve",
+                    line=ref.line,
+                )
+            )
             ref_issue = True
     if not ref_issue:
         try:
@@ -595,7 +677,10 @@ def _check_narrative_body(rel: str, text: str, evidence_dir: Path) -> list[Failu
 
 
 def _validate_note_file(
-    root: Path, rel: str, index: Index | None, cterms: list[ConfidentialTerm],
+    root: Path,
+    rel: str,
+    index: Index | None,
+    cterms: list[ConfidentialTerm],
     evidence_dir: Path,
 ) -> list[Failure]:
     out: list[Failure] = []
@@ -612,11 +697,21 @@ def _validate_note_file(
     is_indexed = index is not None and _entry_kind(index, rel) == IndexKind.GW_PROJECT_NOTE
     if index is not None:
         if is_indexed and not doc.has_frontmatter:
-            out.append(fail(registry.REP_BAD_NOTE, rel,
-                            "indexed note has no frontmatter (expected a mirrored note)"))
+            out.append(
+                fail(
+                    registry.REP_BAD_NOTE,
+                    rel,
+                    "indexed note has no frontmatter (expected a mirrored note)",
+                )
+            )
         elif not is_indexed and doc.has_frontmatter:
-            out.append(fail(registry.REP_BAD_NOTE, rel,
-                            "unindexed note has frontmatter (a new local note must not)"))
+            out.append(
+                fail(
+                    registry.REP_BAD_NOTE,
+                    rel,
+                    "unindexed note has frontmatter (a new local note must not)",
+                )
+            )
 
     out.extend(_check_narrative_body(rel, doc.body, evidence_dir))
     return out
@@ -681,7 +776,8 @@ def _checklist_slugs(engagement_dir: Path, library_slugs: WikiSlugs) -> WikiSlug
     make every such inherited link fail)."""
     chapters, pages = _collect_one_book_slugs(engagement_dir)
     own = WikiSlugs(
-        frozenset({engagement_dir.name}), {engagement_dir.name: chapters},
+        frozenset({engagement_dir.name}),
+        {engagement_dir.name: chapters},
         {engagement_dir.name: pages},
     )
     return _merge_wiki_slugs(library_slugs, own)
@@ -725,16 +821,25 @@ def _check_internal_links(
         if not m:
             continue
         book, kind, slug = m.group("book"), m.group("kind"), m.group("slug")
-        target = slugs.chapters.get(book, frozenset()) if kind == "chapter" \
+        target = (
+            slugs.chapters.get(book, frozenset())
+            if kind == "chapter"
             else slugs.pages.get(book, frozenset())
+        )
         if book not in slugs.books or slug not in target:
             out.append(fail(registry.WIKI_BROKEN_INTERNAL_LINK, rel, f"{href!r} does not resolve"))
     return out
 
 
 def _validate_book_dir(
-    root: Path, book_dir: PurePosixPath, index: Index | None, cterms: list[ConfidentialTerm],
-    slugs: WikiSlugs, bs_host: str | None, *, check_mirror_digest: bool = True,
+    root: Path,
+    book_dir: PurePosixPath,
+    index: Index | None,
+    cterms: list[ConfidentialTerm],
+    slugs: WikiSlugs,
+    bs_host: str | None,
+    *,
+    check_mirror_digest: bool = True,
     noun: str = "book",
 ) -> list[Failure]:
     """Validates one book-shaped directory: a real ``methodology/library/<book>``, or
@@ -754,24 +859,37 @@ def _validate_book_dir(
             continue
         if p.name == ".book.yml":
             continue
-        out.append(fail(registry.WS_UNKNOWN_METHODOLOGY_PATH, _rel(root, p),
-                        f"unexpected entry directly inside a {noun} directory"))
+        out.append(
+            fail(
+                registry.WS_UNKNOWN_METHODOLOGY_PATH,
+                _rel(root, p),
+                f"unexpected entry directly inside a {noun} directory",
+            )
+        )
     for cdir in chapter_dirs:
         out.extend(_check_names(PurePosixPath(_rel(root, cdir))))
         page_files.extend(sorted(cdir.glob("*.md")))
         for p in sorted(cdir.iterdir()):
             if p.name == ".chapter.yml" or (p.is_file() and p.name.endswith(".md")):
                 continue
-            out.append(fail(registry.WS_UNKNOWN_METHODOLOGY_PATH, _rel(root, p),
-                            "unexpected entry directly inside a chapter directory"))
+            out.append(
+                fail(
+                    registry.WS_UNKNOWN_METHODOLOGY_PATH,
+                    _rel(root, p),
+                    "unexpected entry directly inside a chapter directory",
+                )
+            )
 
     embed_hits: list[_EmbedHit] = []
     for page in page_files:
         rel = _rel(root, page)
         out.extend(_check_names(PurePosixPath(rel)))
         chapter = page.parent != abs_book
-        out.extend(_validate_wiki_page(root, rel, page, is_in_chapter=chapter, cterms=cterms,
-                                       slugs=slugs, bs_host=bs_host))
+        out.extend(
+            _validate_wiki_page(
+                root, rel, page, is_in_chapter=chapter, cterms=cterms, slugs=slugs, bs_host=bs_host
+            )
+        )
         text = page.read_text(encoding="utf-8", errors="replace")
         try:
             doc = wiki_fmt.parse(text, path=page)
@@ -786,15 +904,17 @@ def _validate_book_dir(
         # it's excluded from REF-003/index-kind checking; its OWN name is still
         # checked below (REF-008 rejects the sidecar shape outright).
         filenames = sorted(
-            p.name for p in images_dir.iterdir()
-            if p.is_file() and not is_sidecar_name(p.name)
+            p.name for p in images_dir.iterdir() if p.is_file() and not is_sidecar_name(p.name)
         )
         for stem, group in stems(filenames).items():
             if len(group) > 1:
                 for name in group:
                     out.append(
-                        fail(registry.REF_STEM_COLLISION, _rel(root, images_dir / name),
-                            f"shares stem {stem!r} with {[g for g in group if g != name]}")
+                        fail(
+                            registry.REF_STEM_COLLISION,
+                            _rel(root, images_dir / name),
+                            f"shares stem {stem!r} with {[g for g in group if g != name]}",
+                        )
                     )
         images_dir_rel = PurePosixPath(_rel(root, images_dir))
         for p in sorted(images_dir.iterdir()):
@@ -812,8 +932,12 @@ def _validate_book_dir(
         if len(captions) > 1:
             for h in hits:
                 out.append(
-                    fail(registry.REF_CAPTION_CONFLICT, h.doc_rel,
-                        f"image captioned {sorted(captions)} across this book", line=h.line)
+                    fail(
+                        registry.REF_CAPTION_CONFLICT,
+                        h.doc_rel,
+                        f"image captioned {sorted(captions)} across this book",
+                        line=h.line,
+                    )
                 )
 
     for mirror_path, parser in (
@@ -834,8 +958,14 @@ def _validate_book_dir(
 
 
 def _validate_wiki_page(
-    root: Path, rel: str, path: Path, *, is_in_chapter: bool, cterms: list[ConfidentialTerm],
-    slugs: WikiSlugs, bs_host: str | None,
+    root: Path,
+    rel: str,
+    path: Path,
+    *,
+    is_in_chapter: bool,
+    cterms: list[ConfidentialTerm],
+    slugs: WikiSlugs,
+    bs_host: str | None,
 ) -> list[Failure]:
     out: list[Failure] = []
     raw_text, read_fail = _read_text(root, rel, default_rule=registry.WIKI_BAD_FRONTMATTER)
@@ -854,15 +984,21 @@ def _validate_wiki_page(
     for ref in wiki_images(doc.body):
         expected_prefix = "../images" if is_in_chapter else "images"
         if not ref.path.startswith(expected_prefix + "/"):
-            out.append(fail(registry.REF_BAD_WIKI_IMAGE_PATH, rel,
-                            f"{ref.path!r}: expected the {expected_prefix}/ spelling here",
-                            line=ref.line))
+            out.append(
+                fail(
+                    registry.REF_BAD_WIKI_IMAGE_PATH,
+                    rel,
+                    f"{ref.path!r}: expected the {expected_prefix}/ spelling here",
+                    line=ref.line,
+                )
+            )
             continue
         book_dir = path.parent.parent if is_in_chapter else path.parent
         fname = ref.path.rsplit("/", 1)[-1]
         if not (book_dir / "images" / fname).is_file():
-            out.append(fail(registry.REF_UNRESOLVED, rel, f"{ref.path!r} does not resolve",
-                            line=ref.line))
+            out.append(
+                fail(registry.REF_UNRESOLVED, rel, f"{ref.path!r} does not resolve", line=ref.line)
+            )
     return out
 
 
@@ -890,9 +1026,8 @@ def _is_local_only(rel: PurePosixPath) -> bool:
     ``_validate_inbox_dir``/``_validate_book_dir``), but NEVER synced and therefore
     NEVER a legitimate index entry."""
     parts = rel.parts
-    return (
-        (len(parts) >= 2 and parts[0] == "findings" and parts[1] == "inbox")
-        or (len(parts) >= 2 and parts[0] == "methodology" and parts[1] == "checklists")
+    return (len(parts) >= 2 and parts[0] == "findings" and parts[1] == "inbox") or (
+        len(parts) >= 2 and parts[0] == "methodology" and parts[1] == "checklists"
     )
 
 
@@ -904,10 +1039,15 @@ def _check_index_shapes(root: Path, index: Index) -> list[Failure]:
     for path, rec in sorted(index.records.items()):
         p = PurePosixPath(path)
         if _is_local_only(p):
-            out.append(fail(registry.IDX_KIND_PATH_MISMATCH, path,
-                            f"indexed as {rec.kind.value}, but this path is under a "
-                            "local-only tree (findings/inbox/ or methodology/checklists/) "
-                            "and must never be indexed"))
+            out.append(
+                fail(
+                    registry.IDX_KIND_PATH_MISMATCH,
+                    path,
+                    f"indexed as {rec.kind.value}, but this path is under a "
+                    "local-only tree (findings/inbox/ or methodology/checklists/) "
+                    "and must never be indexed",
+                )
+            )
             continue
         expected = _expected_kind(p)
         if expected is None:
@@ -918,8 +1058,13 @@ def _check_index_shapes(root: Path, index: Index) -> list[Failure]:
                 if "evidence" in p.parts or "images" in p.parts
                 else registry.IDX_KIND_PATH_MISMATCH
             )
-            out.append(fail(rule_id, path, f"indexed as {rec.kind.value}, path shape implies "
-                            f"{expected.value}"))
+            out.append(
+                fail(
+                    rule_id,
+                    path,
+                    f"indexed as {rec.kind.value}, path shape implies {expected.value}",
+                )
+            )
     return out
 
 
@@ -1032,8 +1177,13 @@ def _validate_inbox_dir(
         return out
     for p in sorted(inbox_dir.iterdir()):
         if p.is_dir() or not p.name.endswith(".md"):
-            out.append(fail(registry.WS_UNKNOWN_FINDINGS_PATH, _rel(root, p),
-                            "only *.md files are allowed directly in findings/inbox/"))
+            out.append(
+                fail(
+                    registry.WS_UNKNOWN_FINDINGS_PATH,
+                    _rel(root, p),
+                    "only *.md files are allowed directly in findings/inbox/",
+                )
+            )
             continue
         rel = _rel(root, p)
         out.extend(_check_names(PurePosixPath(rel)))
@@ -1060,8 +1210,13 @@ def _check_library_flat(root: Path) -> list[Failure]:
         return out
     for p in sorted(lib.iterdir()):
         if p.is_dir() or not p.name.endswith(".md"):
-            out.append(fail(registry.WS_UNKNOWN_FINDINGS_PATH, _rel(root, p),
-                            "only *.md files are allowed directly in findings/library/"))
+            out.append(
+                fail(
+                    registry.WS_UNKNOWN_FINDINGS_PATH,
+                    _rel(root, p),
+                    "only *.md files are allowed directly in findings/library/",
+                )
+            )
     return out
 
 
@@ -1086,8 +1241,13 @@ def _check_shelves(root: Path) -> list[Failure]:
         return out
     for p in sorted(shelves_dir.iterdir()):
         if p.is_dir() or not p.name.endswith(".yml"):
-            out.append(fail(registry.WS_UNKNOWN_METHODOLOGY_PATH, _rel(root, p),
-                            "only *.yml files are allowed directly in .shelves/"))
+            out.append(
+                fail(
+                    registry.WS_UNKNOWN_METHODOLOGY_PATH,
+                    _rel(root, p),
+                    "only *.yml files are allowed directly in .shelves/",
+                )
+            )
             continue
         rel = _rel(root, p)
         text = p.read_text(encoding="utf-8", errors="replace")
@@ -1377,7 +1537,20 @@ def validate_workspace(
         )
     for d in sorted(scope.checklist_dirs):
         cslugs = _checklist_slugs(root / d, library_slugs)
-        out.extend(_narrowed(scope, d, _validate_book_dir(
-            root, d, None, cterms, cslugs, bs_host, check_mirror_digest=False, noun="checklist",
-        )))
+        out.extend(
+            _narrowed(
+                scope,
+                d,
+                _validate_book_dir(
+                    root,
+                    d,
+                    None,
+                    cterms,
+                    cslugs,
+                    bs_host,
+                    check_mirror_digest=False,
+                    noun="checklist",
+                ),
+            )
+        )
     return out

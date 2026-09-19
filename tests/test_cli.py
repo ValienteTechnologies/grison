@@ -191,8 +191,14 @@ def test_sync_exit_code_reflects_result_errors(
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
 
     def fake_run_sync(
-        root, client, *, dry_run=False, force_local=None, force_remote=None,
-        evidence_by_report=None, snapshot=None,
+        root,
+        client,
+        *,
+        dry_run=False,
+        force_local=None,
+        force_remote=None,
+        evidence_by_report=None,
+        snapshot=None,
     ):
         plan = Plan(
             kind="gw.finding",
@@ -206,7 +212,13 @@ def test_sync_exit_code_reflects_result_errors(
         return FindingsPhaseResult(plans=[plan], events=[event], summaries={"gw.finding": summary})
 
     def fake_reports_phase(
-        root, client, *, dry_run=False, force_local=None, force_remote=None, snapshot=None,
+        root,
+        client,
+        *,
+        dry_run=False,
+        force_local=None,
+        force_remote=None,
+        snapshot=None,
     ):
         return ReportsPhaseResult(), {}
 
@@ -239,8 +251,14 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
     monkeypatch.setenv("GRISON_CF_CLIENT_SECRET", "csecret")
 
     def fake_run_sync(
-        root, client, *, dry_run=False, force_local=None, force_remote=None,
-        evidence_by_report=None, snapshot=None,
+        root,
+        client,
+        *,
+        dry_run=False,
+        force_local=None,
+        force_remote=None,
+        evidence_by_report=None,
+        snapshot=None,
     ):
         plan = Plan(
             kind="gw.finding",
@@ -260,7 +278,13 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
         return FindingsPhaseResult(plans=[plan], events=[event], summaries={"gw.finding": summary})
 
     def fake_reports_phase(
-        root, client, *, dry_run=False, force_local=None, force_remote=None, snapshot=None,
+        root,
+        client,
+        *,
+        dry_run=False,
+        force_local=None,
+        force_remote=None,
+        snapshot=None,
     ):
         return ReportsPhaseResult(), {}
 
@@ -303,8 +327,14 @@ def test_sync_git_driving_commits_checkpoint_and_summary(
     (tmp_path / "pre.txt").write_text("dirty before sync even starts\n")
 
     def fake_run_sync(
-        root, client, *, dry_run=False, force_local=None, force_remote=None,
-        evidence_by_report=None, snapshot=None,
+        root,
+        client,
+        *,
+        dry_run=False,
+        force_local=None,
+        force_remote=None,
+        evidence_by_report=None,
+        snapshot=None,
     ):
         (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
         summary = KindSummary(kind="gw.finding")
@@ -335,8 +365,14 @@ def test_sync_git_driving_notes_failures_in_message(
     _init_repo(tmp_path)
 
     def fake_run_sync(
-        root, client, *, dry_run=False, force_local=None, force_remote=None,
-        evidence_by_report=None, snapshot=None,
+        root,
+        client,
+        *,
+        dry_run=False,
+        force_local=None,
+        force_remote=None,
+        evidence_by_report=None,
+        snapshot=None,
     ):
         (root / "findings" / "library" / "new.md").write_text(_VALID_LIBRARY_FINDING)
         plan = Plan(

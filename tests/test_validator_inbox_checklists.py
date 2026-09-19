@@ -69,7 +69,8 @@ def test_idx_checklist_path_must_never_be_indexed(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
     data = json.loads((root / ".grison" / "index.json").read_text(encoding="utf-8"))
     data["records"]["methodology/checklists/acme-2026-08/recon.md"] = {
-        "kind": "bs.page", "id": 999,
+        "kind": "bs.page",
+        "id": 999,
     }
     (root / ".grison" / "index.json").write_text(json.dumps(data), encoding="utf-8")
     fails = validate_workspace(root)
@@ -86,9 +87,9 @@ def test_ref005_image_in_inbox_finding_has_its_own_message(tmp_path: Path) -> No
     )
     p = root / "findings" / "inbox" / "sql-injection.md"
     text = p.read_text(encoding="utf-8")
-    p.write_text(text.replace(
-        "## Description\n\n", "## Description\n\n![Screenshot](evidence/x.png)\n\n", 1
-    ))
+    p.write_text(
+        text.replace("## Description\n\n", "## Description\n\n![Screenshot](evidence/x.png)\n\n", 1)
+    )
     fails = validate_workspace(root)
     matches = [f for f in fails if f.rule_id == "REF-005"]
     assert matches, fails
@@ -162,11 +163,16 @@ def test_checklist_mirror_edit_does_not_trigger_ws009(tmp_path: Path) -> None:
     original = lib_book_yml.read_text(encoding="utf-8")
 
     from grison.hashing import digest_text
+
     state_dir = root / ".grison" / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "mirrors.json").write_text(json.dumps({
-        "methodology/checklists/acme-2026-08/.book.yml": digest_text(original),
-    }))
+    (state_dir / "mirrors.json").write_text(
+        json.dumps(
+            {
+                "methodology/checklists/acme-2026-08/.book.yml": digest_text(original),
+            }
+        )
+    )
 
     checklist_book_yml = root / "methodology" / "checklists" / "acme-2026-08" / ".book.yml"
     checklist_book_yml.write_text(original.replace("Web Application Testing", "Edited Copy"))

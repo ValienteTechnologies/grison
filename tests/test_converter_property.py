@@ -734,8 +734,14 @@ def html_with_raw_region_split(draw: st.DrawFn) -> str:
     trail = _esc_html_text(draw(st.sampled_from(WORDS)))
     tag = draw(st.sampled_from(_INLINE_TAGS_FOR_RAW_SPLIT))
     across_block = draw(st.booleans())
-    wrapped_inner = inner if tag is None else (
-        f'<a href="http://example.com/x">{inner}</a>' if tag == "a" else f"<{tag}>{inner}</{tag}>"
+    wrapped_inner = (
+        inner
+        if tag is None
+        else (
+            f'<a href="http://example.com/x">{inner}</a>'
+            if tag == "a"
+            else f"<{tag}>{inner}</{tag}>"
+        )
     )
     if across_block:
         return f"<p>{lead} {{% raw %}}{wrapped_inner}</p><p>{{% endraw %}} {trail}</p>"

@@ -90,12 +90,14 @@ def run_post_edit_hook(stdin_text: str) -> str | None:
 
     if not failures:
         return None
-    return json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "systemMessage": _render_feedback(failures),
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "systemMessage": _render_feedback(failures),
+            }
         }
-    })
+    )
 
 
 def main() -> int:

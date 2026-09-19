@@ -89,7 +89,11 @@ DENY_SYNC = "Bash(*grison sync*)"
 DENY_UNDO = "Bash(*grison undo*)"
 
 CANONICAL_DENY: tuple[str, ...] = (
-    *DENY_GRISON_PRIVATE_READ, DENY_GRISON_WRITE_ALL, *DENY_MIRRORS, DENY_SYNC, DENY_UNDO,
+    *DENY_GRISON_PRIVATE_READ,
+    DENY_GRISON_WRITE_ALL,
+    *DENY_MIRRORS,
+    DENY_SYNC,
+    DENY_UNDO,
 )
 
 HOOK_MATCHER = "Edit|Write|MultiEdit"
@@ -201,9 +205,7 @@ def fragment_digest(deny: list[Any], post_tool_use: list[Any]) -> str:
     Called with the MERGED settings at scaffold time (records the full-canonical-set
     baseline) and with the LIVE on-disk settings at validate time (WS-011/WS-012) —
     same function, so the two can never drift apart on what "matches" means."""
-    canonical_present = sorted(
-        {d for d in deny if isinstance(d, str)} & set(CANONICAL_DENY)
-    )
+    canonical_present = sorted({d for d in deny if isinstance(d, str)} & set(CANONICAL_DENY))
     hook_present = isinstance(post_tool_use, list) and any(
         _is_grison_hook_entry(h) for h in post_tool_use
     )

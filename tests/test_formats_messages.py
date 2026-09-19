@@ -91,15 +91,7 @@ def test_type_error_describes_what_grison_expects() -> None:
 
 
 def test_nested_field_path_is_dotted_and_line_located() -> None:
-    text = (
-        "title: Foo\n"
-        "project:\n"
-        "  id: 1\n"
-        "  client:\n"
-        "    id: 2\n"
-        "status:\n"
-        "  complete: notabool\n"
-    )
+    text = "title: Foo\nproject:\n  id: 1\n  client:\n    id: 2\nstatus:\n  complete: notabool\n"
     with pytest.raises(FormatError) as ei:
         M.parse_report_meta(text, path=Path("x"))
     assert ei.value.detail == "status.complete is 'notabool'; expected true or false"

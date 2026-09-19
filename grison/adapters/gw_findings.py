@@ -109,7 +109,7 @@ def _affected_entities_to_html(text: str) -> str:
 def _affected_entities_from_html(html: str) -> str:
     inner = html.strip()
     if inner.startswith("<p>") and inner.endswith("</p>"):
-        inner = inner[len("<p>"): -len("</p>")]
+        inner = inner[len("<p>") : -len("</p>")]
     return "\n".join(html_unescape(part) for part in inner.split("<br>") if part.strip())
 
 
@@ -191,12 +191,14 @@ class GwRefResolver:
             return None
         rel = PurePosixPath(path).relative_to(self.report_dir)
         row = self.evidence_rows.get(eid, {})
-        return LocalRef(path=str(rel), caption=row.get("caption", ""),
-                        description=row.get("description", ""))
+        return LocalRef(
+            path=str(rel), caption=row.get("caption", ""), description=row.get("description", "")
+        )
 
 
-_EMPTY_RESOLVER = GwRefResolver(report_dir=PurePosixPath(), index=Index(root=Path()),
-                                evidence_rows={})
+_EMPTY_RESOLVER = GwRefResolver(
+    report_dir=PurePosixPath(), index=Index(root=Path()), evidence_rows={}
+)
 
 
 # --- shared plain-field <-> GW mapping ----------------------------------------------
@@ -225,16 +227,12 @@ def _remote_plain_canonical(data: dict[str, Any], tags: list[str]) -> dict[str, 
     }
 
 
-def _sections_canonical(
-    doc: finding_fmt.FindingDoc, refs: GwRefResolver | None
-) -> dict[str, Any]:
+def _sections_canonical(doc: finding_fmt.FindingDoc, refs: GwRefResolver | None) -> dict[str, Any]:
     resolver = refs if refs is not None else _EMPTY_RESOLVER
     return {f: canonical_prose(getattr(doc, f), resolver) for f in _SECTIONS}
 
 
-def _remote_sections_canonical(
-    data: dict[str, Any], refs: GwRefResolver | None
-) -> dict[str, Any]:
+def _remote_sections_canonical(data: dict[str, Any], refs: GwRefResolver | None) -> dict[str, Any]:
     """D1 ("replacing an image's bytes must re-push every finding referencing
     it, automatically, in the same run"): unlike :func:`_sections_canonical`
     (the LOCAL side, which resolves each embed's id through the live index via
@@ -255,12 +253,17 @@ def _remote_sections_canonical(
     # grison.markdown.converter's module docstring) — must match render_local's/
     # _gw_fields' own headings=True or this canonical form and the local file's
     # would disagree on any finding whose stored HTML has a heading.
-    return {f: canonical_remote_prose(data.get(f) or "", headings=True, name_to_id=name_to_id)
-            for f in _SECTIONS}
+    return {
+        f: canonical_remote_prose(data.get(f) or "", headings=True, name_to_id=name_to_id)
+        for f in _SECTIONS
+    }
 
 
 def _gw_fields(  # noqa: PLR0913
-    doc: finding_fmt.FindingDoc, refs: RefResolver | None, *, instance: bool,
+    doc: finding_fmt.FindingDoc,
+    refs: RefResolver | None,
+    *,
+    instance: bool,
     report_id: int | None = None,
 ) -> dict[str, Any]:
     fields: dict[str, Any] = {
@@ -345,8 +348,10 @@ class GwLibraryFindingAdapter:
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
         tags = data.get("_tags", [])
-        return {**_remote_plain_canonical(data, tags),
-                "sections": _remote_sections_canonical(data, None)}
+        return {
+            **_remote_plain_canonical(data, tags),
+            "sections": _remote_sections_canonical(data, None),
+        }
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         del path
@@ -356,9 +361,12 @@ class GwLibraryFindingAdapter:
         doc = finding_fmt.FindingDoc(
             severity=Severity.from_gw_id(data["severityId"]),
             finding_type=FindingType.from_gw_id(data["findingTypeId"]),
-            cvss=finding_fmt.FindingCvss(vector=data["cvssVector"]) if data.get("cvssVector")
+            cvss=finding_fmt.FindingCvss(vector=data["cvssVector"])
+            if data.get("cvssVector")
             else None,
-            cwe=cwe, tags=plain, title=data.get("title") or "Untitled",
+            cwe=cwe,
+            tags=plain,
+            title=data.get("title") or "Untitled",
             # headings=True: see _remote_sections_canonical's comment above.
             **{f: html_to_md(data.get(f) or "", headings=True) for f in _SECTIONS},
         )
@@ -416,8 +424,11 @@ class GwLibraryFindingAdapter:
     def remote_label(self, data: Any) -> str:
         title = data.get("title") if isinstance(data, dict) else None
         rid = data.get("id") if isinstance(data, dict) else None
-        return f'"{title or "(untitled)"}" (finding {rid})' if rid is not None else \
-            f'"{title or "(untitled)"}"'
+        return (
+            f'"{title or "(untitled)"}" (finding {rid})'
+            if rid is not None
+            else f'"{title or "(untitled)"}"'
+        )
 
 
 # --- reported findings (gw.reportedFinding) -----------------------------------------
@@ -487,28 +498,33 @@ class GwReportedFindingAdapter:
         if doc is None:
             return {"_invalid": True}
         resolver = self._resolver(None, doc.report_dir)
-        return {**_plain_canonical(doc.doc), "affected_entities": doc.doc.affected_entities or "",
-                "sections": _sections_canonical(doc.doc, resolver),
-                "report": str(doc.report_dir)}
+        return {
+            **_plain_canonical(doc.doc),
+            "affected_entities": doc.doc.affected_entities or "",
+            "sections": _sections_canonical(doc.doc, resolver),
+            "report": str(doc.report_dir),
+        }
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
         report_dir = self.index.path_of(IndexKind.GW_REPORT, data["reportId"])
-        resolver = self._resolver(data["reportId"], PurePosixPath(report_dir) if report_dir
-                                  else PurePosixPath())
+        resolver = self._resolver(
+            data["reportId"], PurePosixPath(report_dir) if report_dir else PurePosixPath()
+        )
         tags = data.get("_tags", [])
-        return {**_remote_plain_canonical(data, tags),
-                "affected_entities": _affected_entities_from_html(data.get("affectedEntities")
-                                                                   or ""),
-                "sections": _remote_sections_canonical(data, resolver),
-                # Report membership must be part of the hash, exactly like
-                # BsPageAdapter includes book/chapter (grison/adapters/bs_pages.py):
-                # without it, a cross-report MOVE with byte-identical content makes
-                # `_apply_move`'s `needs_write` compare equal and the finding keeps
-                # its OLD reportId on Ghostwriter forever, silently — the bug this
-                # field closes. `report_dir` is None only for a reportId the index
-                # no longer knows (orphaned data); falling back to "" still makes a
-                # real reparent (known dir -> unknown) compare unequal.
-                "report": report_dir or ""}
+        return {
+            **_remote_plain_canonical(data, tags),
+            "affected_entities": _affected_entities_from_html(data.get("affectedEntities") or ""),
+            "sections": _remote_sections_canonical(data, resolver),
+            # Report membership must be part of the hash, exactly like
+            # BsPageAdapter includes book/chapter (grison/adapters/bs_pages.py):
+            # without it, a cross-report MOVE with byte-identical content makes
+            # `_apply_move`'s `needs_write` compare equal and the finding keeps
+            # its OLD reportId on Ghostwriter forever, silently — the bug this
+            # field closes. `report_dir` is None only for a reportId the index
+            # no longer knows (orphaned data); falling back to "" still makes a
+            # real reparent (known dir -> unknown) compare unequal.
+            "report": report_dir or "",
+        }
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         from grison.markdown.converter import html_to_md
@@ -519,9 +535,12 @@ class GwReportedFindingAdapter:
         doc = finding_fmt.FindingDoc(
             severity=Severity.from_gw_id(data["severityId"]),
             finding_type=FindingType.from_gw_id(data["findingTypeId"]),
-            cvss=finding_fmt.FindingCvss(vector=data["cvssVector"]) if data.get("cvssVector")
+            cvss=finding_fmt.FindingCvss(vector=data["cvssVector"])
+            if data.get("cvssVector")
             else None,
-            cwe=cwe, tags=plain, title=data.get("title") or "Untitled",
+            cwe=cwe,
+            tags=plain,
+            title=data.get("title") or "Untitled",
             affected_entities=_affected_entities_from_html(data.get("affectedEntities") or "")
             or None,
             # headings=True: see _remote_sections_canonical's comment above.
@@ -544,7 +563,8 @@ class GwReportedFindingAdapter:
 
     def _end_of_band_position(self, ctx: GWContext, report_id: int, severity_id: int) -> int:
         siblings = [
-            r for r in ctx.client.fetch_reported_findings()
+            r
+            for r in ctx.client.fetch_reported_findings()
             if r.get("reportId") == report_id and r.get("severityId") == severity_id
         ]
         if not siblings:
@@ -605,5 +625,8 @@ class GwReportedFindingAdapter:
     def remote_label(self, data: Any) -> str:
         title = data.get("title") if isinstance(data, dict) else None
         rid = data.get("id") if isinstance(data, dict) else None
-        return f'"{title or "(untitled)"}" (finding {rid})' if rid is not None else \
-            f'"{title or "(untitled)"}"'
+        return (
+            f'"{title or "(untitled)"}" (finding {rid})'
+            if rid is not None
+            else f'"{title or "(untitled)"}"'
+        )

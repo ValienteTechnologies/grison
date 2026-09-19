@@ -372,9 +372,7 @@ class FakeBookStack:
     def operation_log(self) -> list[LoggedOperation]:
         return self.store.operation_log
 
-    def on_request(
-        self, method: str, path: str, callback: Any, *, call_number: int = 1
-    ) -> None:
+    def on_request(self, method: str, path: str, callback: Any, *, call_number: int = 1) -> None:
         """Run ``callback()`` immediately before the ``call_number``-th request whose
         method equals ``method`` and whose path fullmatches the ``path`` regex is
         routed — for simulating a concurrent BookStack edit (a page flipping to
@@ -415,7 +413,10 @@ class FakeBookStack:
         for _ in range(times):
             self._pending.append(
                 _Injected(
-                    "http_status", method=method, path=path, status=status,
+                    "http_status",
+                    method=method,
+                    path=path,
+                    status=status,
                     retry_after=retry_after,
                 )
             )
@@ -597,9 +598,7 @@ class FakeBookStack:
 
         return httpx.Response(
             404,
-            json={
-                "error": {"message": f"{method} {path} not implemented in fake_bs", "code": 404}
-            },
+            json={"error": {"message": f"{method} {path} not implemented in fake_bs", "code": 404}},
         )
 
     # --- pagination ------------------------------------------------------------
@@ -620,8 +619,14 @@ class FakeBookStack:
             key=lambda c: c["priority"],
         ):
             pages = [
-                {"id": p["id"], "name": p["name"], "slug": p["slug"], "book_id": p["book_id"],
-                 "chapter_id": p["chapter_id"], "priority": p["priority"]}
+                {
+                    "id": p["id"],
+                    "name": p["name"],
+                    "slug": p["slug"],
+                    "book_id": p["book_id"],
+                    "chapter_id": p["chapter_id"],
+                    "priority": p["priority"],
+                }
                 for p in sorted(
                     (p for p in store.pages if p["chapter_id"] == c["id"]),
                     key=lambda p: p["priority"],
@@ -635,10 +640,15 @@ class FakeBookStack:
             contents.append({**_page_list_row(store, p), "type": "page"})
         shelves = [
             {"id": s["id"], "name": s["name"], "slug": s["slug"]}
-            for s in store.shelves if book["id"] in s.get("book_ids", [])
+            for s in store.shelves
+            if book["id"] in s.get("book_ids", [])
         ]
-        return {**_book_list_row(book), "contents": contents, "tags": book["tags"],
-                "shelves": shelves}
+        return {
+            **_book_list_row(book),
+            "contents": contents,
+            "tags": book["tags"],
+            "shelves": shelves,
+        }
 
     def _chapter_detail(self, chapter: dict) -> dict:
         store = self.store
@@ -666,8 +676,12 @@ class FakeBookStack:
         store.books.remove(book)
         store.recycle_bin.append(
             {
-                "id": store._next_id("deletion"), "deleted_by": 1, "created_at": _now(),
-                "updated_at": _now(), "deletable_type": "book", "deletable_id": book_id,
+                "id": store._next_id("deletion"),
+                "deleted_by": 1,
+                "created_at": _now(),
+                "updated_at": _now(),
+                "deletable_type": "book",
+                "deletable_id": book_id,
                 "deletable": dict(book),
             }
         )
@@ -679,7 +693,9 @@ class FakeBookStack:
             raise BookStackFakeError(f"book {book_id} not found")
         siblings = [c for c in self.store.chapters if c["book_id"] == book_id]
         chapter = self.store.seed_chapter(
-            book_id=book_id, name=body["name"], description=body.get("description", ""),
+            book_id=book_id,
+            name=body["name"],
+            description=body.get("description", ""),
             priority=len(siblings) + 1,
         )
         self.store._log("create_chapter", body)
@@ -693,8 +709,12 @@ class FakeBookStack:
         store.chapters.remove(chapter)
         store.recycle_bin.append(
             {
-                "id": store._next_id("deletion"), "deleted_by": 1, "created_at": _now(),
-                "updated_at": _now(), "deletable_type": "chapter", "deletable_id": chapter_id,
+                "id": store._next_id("deletion"),
+                "deleted_by": 1,
+                "created_at": _now(),
+                "updated_at": _now(),
+                "deletable_type": "chapter",
+                "deletable_id": chapter_id,
                 "deletable": dict(chapter),
             }
         )
@@ -714,7 +734,8 @@ class FakeBookStack:
         elif book_id is None or store.book(book_id) is None:
             raise BookStackFakeError(f"book {book_id} not found")
         siblings = [
-            p for p in store.pages
+            p
+            for p in store.pages
             if p["book_id"] == book_id and (p["chapter_id"] or 0) == (chapter_id or 0)
         ]
         slug = self._unique_page_slug(book_id, _slugify(body["name"]))
@@ -725,7 +746,8 @@ class FakeBookStack:
             slug=slug,
             markdown=body.get("markdown", ""),
             tags=body.get("tags") or [],
-            priority=body.get("priority") if body.get("priority") is not None
+            priority=body.get("priority")
+            if body.get("priority") is not None
             else len(siblings) + 1,
         )
         store._log("create_page", body)

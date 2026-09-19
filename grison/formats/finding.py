@@ -130,8 +130,7 @@ class FindingDoc(_Base):
     def _tier_constraints(self, info: ValidationInfo) -> FindingDoc:
         tier = (info.context or {}).get("tier")
         if tier == "library" and self.affected_entities:
-            raise ValueError("affected_entities is instance-only; not allowed on a library "
-                             "finding")
+            raise ValueError("affected_entities is instance-only; not allowed on a library finding")
         return self
 
 

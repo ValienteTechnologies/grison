@@ -99,9 +99,7 @@ def pair(missing: list[Missing], unindexed: list[Unindexed]) -> PairingResult:
             continue
         used_m.add(mp)
         used_u.add(up)
-        decisions.append(
-            PairDecision(old_path=mp, new_path=up, id=by_path_m[mp].id, edited=edited)
-        )
+        decisions.append(PairDecision(old_path=mp, new_path=up, id=by_path_m[mp].id, edited=edited))
 
     unpaired_missing = [m for m in missing if m.path not in used_m]
     unpaired_unindexed = [u for u in unindexed if u.path not in used_u]

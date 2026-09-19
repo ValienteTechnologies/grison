@@ -465,8 +465,15 @@ def test_fetch_reports_query_includes_project_context_fields() -> None:
         client.fetch_reports()
     query = json.loads(captured[0].content)["query"]
     for marker in (
-        "codename", "collab_note", "scopes {", "objectives {", "targets {",
-        "whitecards {", "comments {", "objectiveStatus {", "objectivePriority {",
+        "codename",
+        "collab_note",
+        "scopes {",
+        "objectives {",
+        "targets {",
+        "whitecards {",
+        "comments {",
+        "objectiveStatus {",
+        "objectivePriority {",
     ):
         assert marker in query
 

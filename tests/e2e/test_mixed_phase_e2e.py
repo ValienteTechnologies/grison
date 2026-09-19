@@ -104,7 +104,8 @@ def test_second_mixed_sync_reports_and_methodology_are_clean(run_grison, gw_serv
 
 
 def test_evidence_syncs_before_narrative_sections_and_findings_in_one_run(
-    run_grison, gw_server,
+    run_grison,
+    gw_server,
 ):
     """The real phase order, proven directly (not just described): a report's
     evidence, its narrative section, and a reported finding all reference the
@@ -113,11 +114,18 @@ def test_evidence_syncs_before_narrative_sections_and_findings_in_one_run(
     unresolved-reference placeholder instead of the real image line."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_evidence(
-        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        id=90,
+        reportId=7,
+        document="evidence/7/shot.png",
+        friendlyName="shot",
         caption="Login screen",
     )
     gw_server.store.seed_reported_finding(
-        id=50, reportId=7, title="SQLi", severityId=5, findingTypeId=4,
+        id=50,
+        reportId=7,
+        title="SQLi",
+        severityId=5,
+        findingTypeId=4,
         description='<div class="richtext-evidence" data-evidence-id="90"></div>',
     )
     report["extraFields"] = {
@@ -130,8 +138,9 @@ def test_evidence_syncs_before_narrative_sections_and_findings_in_one_run(
     assert "reports (gw.evidence[findings/reports/report-a]): pull_new 1" in result.output
     assert result.exit_code == 0, result.output
 
-    narrative = Path.cwd() / "findings" / "reports" / "report-a" / "narrative" / \
-        "executive_summary.md"
+    narrative = (
+        Path.cwd() / "findings" / "reports" / "report-a" / "narrative" / "executive_summary.md"
+    )
     finding = Path.cwd() / "findings" / "reports" / "report-a" / "sqli.md"
     assert "![Login screen](evidence/shot.png)" in narrative.read_text(encoding="utf-8")
     assert "![Login screen](evidence/shot.png)" in finding.read_text(encoding="utf-8")
@@ -142,7 +151,10 @@ def test_evidence_syncs_before_narrative_sections_and_findings_in_one_run(
 
 
 def test_a_later_phase_crashing_still_leaves_an_undoable_snapshot_of_the_earlier_write(
-    run_grison, gw_server, bs_server, monkeypatch,
+    run_grison,
+    gw_server,
+    bs_server,
+    monkeypatch,
 ):
     """Crash-durability (coordinator correction): the run's ONE undo snapshot is
     checkpointed (persisted in place, ``grison.cli.sync``'s ``_checkpoint_snapshot``)

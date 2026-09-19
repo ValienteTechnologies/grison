@@ -19,8 +19,7 @@ def test_rep001_narrative_body_not_convertible(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
     edit(
         root / _NARRATIVE,
-        "One critical and one high finding were identified, both related to input "
-        "validation.",
+        "One critical and one high finding were identified, both related to input validation.",
         "| a | b |\n| --- | --- |\n| 1 | 2 |",
     )
     assert "REP-001" in rule_ids(validate_workspace(root))

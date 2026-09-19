@@ -84,7 +84,7 @@ class BurpScanner(Scanner):
             "<ul>"
             + "".join(
                 f'<li><a href="{html.escape(u, quote=True)}">'
-                f'{html.escape(text.strip() or u)}</a></li>'
+                f"{html.escape(text.strip() or u)}</a></li>"
                 for u, text in ref_links
             )
             + "</ul>"

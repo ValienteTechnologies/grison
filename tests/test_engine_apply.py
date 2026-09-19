@@ -51,8 +51,10 @@ class FakeAdapter:
             yield LocalDoc(path=PurePosixPath("recs", p.name), doc=text, raw_text=text)
 
     def fetch_remote(self, ctx: Any) -> dict[int, RemoteRecord]:
-        return {rid: RemoteRecord(id=rid, data={"text": text}, witness={})
-               for rid, text in self.store.records.items()}
+        return {
+            rid: RemoteRecord(id=rid, data={"text": text}, witness={})
+            for rid, text in self.store.records.items()
+        }
 
     def refetch(self, ctx: Any, id: int) -> RemoteRecord | None:
         text = self.store.records.get(id)
@@ -99,8 +101,16 @@ def _run_once(root: Path, adapter: FakeAdapter) -> None:
     state = StateStore(root)
     snapshot = Snapshot()
     failures: list[Failure] = []
-    run(root, ctx=None, adapter=adapter, index=index, state=state, snapshot=snapshot,
-        failures=failures, options=RunOptions())
+    run(
+        root,
+        ctx=None,
+        adapter=adapter,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        failures=failures,
+        options=RunOptions(),
+    )
     index.save()
 
 
@@ -116,8 +126,14 @@ def test_crash_right_after_create_never_duplicates_on_next_sync(tmp_path: Path) 
     state = StateStore(root)
     snapshot = Snapshot()
     plans, events, summary = run(
-        root, ctx=None, adapter=crashing_adapter, index=index, state=state, snapshot=snapshot,
-        failures=[], options=RunOptions(),
+        root,
+        ctx=None,
+        adapter=crashing_adapter,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        failures=[],
+        options=RunOptions(),
     )
     index.save()
 
@@ -164,8 +180,14 @@ def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
     state = StateStore(root)
     snapshot = Snapshot()
     plans, _events, _summary = run(
-        root, ctx=None, adapter=adapter, index=index, state=state, snapshot=snapshot,
-        failures=[], options=RunOptions(),
+        root,
+        ctx=None,
+        adapter=adapter,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        failures=[],
+        options=RunOptions(),
     )
     index.save()
     assert plans[0].outcome is Outcome.COLLISION
@@ -179,8 +201,14 @@ def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
     state2 = StateStore(root)
     snapshot2 = Snapshot()
     plans2, _events2, _summary2 = run(
-        root, ctx=None, adapter=adapter, index=index2, state=state2, snapshot=snapshot2,
-        failures=[], options=RunOptions(dry_run=True),
+        root,
+        ctx=None,
+        adapter=adapter,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
+        failures=[],
+        options=RunOptions(dry_run=True),
     )
 
     assert all(p.outcome is not Outcome.COLLISION for p in plans2)
