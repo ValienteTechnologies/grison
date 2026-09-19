@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from markdown_it.tree import SyntaxTreeNode
 
 from grison import manifest as manifest_mod
+from grison.engine.sidecar import is_sidecar_name
 from grison.formats import finding as finding_fmt
 from grison.formats import mirrors as mirrors_fmt
 from grison.formats import narrative as narrative_fmt
@@ -321,7 +322,15 @@ def _validate_report_dir(
             out.extend(_validate_note_file(root, rel, index, cterms, evidence_dir))
 
     if evidence_dir.is_dir():
-        filenames = sorted(p.name for p in evidence_dir.iterdir() if p.is_file())
+        # A live collision sidecar (`<name>.remote.<ext>`) is never a document/file
+        # the engine manages (ENGINE.md §8) — excluded here the same way
+        # `grison.engine.filesets`'s own local scan and `grison status`'s evidence
+        # counts already are, or a sidecar could spuriously enter REF-003's stem
+        # comparison or get treated as an unindexed evidence file (item 5).
+        filenames = sorted(
+            p.name for p in evidence_dir.iterdir()
+            if p.is_file() and not is_sidecar_name(p.name)
+        )
         for stem, group in stems(filenames).items():
             if len(group) > 1:
                 for name in group:
@@ -331,7 +340,7 @@ def _validate_report_dir(
                             f"{[g for g in group if g != name]}")
                     )
         for p in sorted(evidence_dir.iterdir()):
-            if p.is_file():
+            if p.is_file() and not is_sidecar_name(p.name):
                 out.extend(_check_names(PurePosixPath(_rel(root, p))))
                 if index is not None:
                     out.extend(_check_index_kind(root, p, index, IndexKind.GW_EVIDENCE))
@@ -597,7 +606,12 @@ def _validate_book_dir(
             embed_hits.append(_EmbedHit(ref.path, ref.path, ref.caption, rel, ref.line))
 
     if images_dir.is_dir():
-        filenames = sorted(p.name for p in images_dir.iterdir() if p.is_file())
+        # Same sidecar exclusion as the evidence scan above (item 5) — a
+        # `<name>.remote.<ext>` collision sidecar is never a gallery image.
+        filenames = sorted(
+            p.name for p in images_dir.iterdir()
+            if p.is_file() and not is_sidecar_name(p.name)
+        )
         for stem, group in stems(filenames).items():
             if len(group) > 1:
                 for name in group:
@@ -606,7 +620,7 @@ def _validate_book_dir(
                             f"shares stem {stem!r} with {[g for g in group if g != name]}")
                     )
         for p in sorted(images_dir.iterdir()):
-            if p.is_file():
+            if p.is_file() and not is_sidecar_name(p.name):
                 out.extend(_check_names(PurePosixPath(_rel(root, p))))
                 if index is not None:
                     out.extend(_check_index_kind(root, p, index, IndexKind.BS_IMAGE))

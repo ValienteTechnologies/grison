@@ -106,6 +106,7 @@ from grison.engine.model import (
     RemoteRecord,
     VetoSeverity,
 )
+from grison.engine.sidecar import is_sidecar_name
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
 from grison.fsio import atomic_write_bytes
@@ -452,25 +453,6 @@ def _cached_body_hash(state: StateStore, kind: str, id: int) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _is_sidecar_name(name: str) -> bool:
-    """True for a name :func:`grison.engine.apply.sidecar_path` would produce from
-    some OTHER name in this same folder (``shot.png`` -> ``shot.remote.png``, an
-    extension-less ``README`` -> ``README.remote``). The old check here
-    (``name.endswith(".remote")``) only ever matched the extension-less case — a
-    real ``<name>.remote.<ext>`` collision sidecar (the only kind an evidence/image
-    folder ever actually has, since every file in one has an extension) always ends
-    in the ORIGINAL extension, never in ``.remote`` itself, so it silently passed
-    straight through as an ordinary local file (ENGINE.md §8: sidecars are never
-    documents/files the engine scans — ``grison.engine.apply``'s own document-side
-    scanners get this right for free because a document sidecar is always literally
-    ``.remote.md``, a single fixed extension; a file-set sidecar's extension varies
-    with the file it shadows, so this module needs the general shape check)."""
-    p = PurePosixPath(name)
-    if p.suffix == ".remote":
-        return True
-    return PurePosixPath(p.stem).suffix == ".remote"
-
-
 def _local_files(root: Path, folder: PurePosixPath) -> dict[str, bytes]:
     d = root / folder
     if not d.is_dir():
@@ -478,7 +460,7 @@ def _local_files(root: Path, folder: PurePosixPath) -> dict[str, bytes]:
     return {
         p.name: p.read_bytes()
         for p in sorted(d.iterdir())
-        if p.is_file() and not p.name.startswith(".") and not _is_sidecar_name(p.name)
+        if p.is_file() and not p.name.startswith(".") and not is_sidecar_name(p.name)
     }
 
 
@@ -488,6 +470,21 @@ def _canonical(
     if not supports_caption:
         return {"hash": body_hash}
     return {"hash": body_hash, "caption": caption, "description": description}
+
+
+def caption_only_canonical(data: Mapping[str, Any]) -> dict[str, Any]:
+    """The metadata-only canonical payload for a file-set record's caption/
+    description alone, with no body hash at all — what
+    :class:`grison.engine.adapter.PushUndoAdapter`'s ``canonical_remote`` binding
+    for a caption-capable file-set adapter (today only
+    :class:`grison.adapters.gw_evidence.GwEvidenceAdapter`) uses to detect drift
+    when :mod:`grison.engine.undo` replays a "push" op: a caption/description PUSH
+    is the ONLY outcome a file-set adapter ever records as "push" (bytes changing
+    is always a re-upload — CREATE + DELETE_REMOTE, see ``_apply_reupload``), and
+    D1 guarantees bytes are immutable for the life of an id, so the body hash can
+    never be what drifted — comparing it here would only force an unnecessary
+    re-download at undo time for a dimension that could never have changed."""
+    return {"caption": data.get("caption") or "", "description": data.get("description") or ""}
 
 
 def _event(
@@ -593,7 +590,8 @@ def sync_fileset(  # noqa: PLR0913
             )
             summary.problem_paths.append(label)
 
-    _clear_stale_sidecars(root, plans)
+    if not options.dry_run:
+        _clear_stale_sidecars(root, plans)
 
     resolved: dict[str, tuple[str, str]] = {}
     if adapter.supports_caption:
@@ -711,8 +709,9 @@ def _classify_one(  # noqa: PLR0913
         remote_body_hash = cached if isinstance(cached, str) else None
         if remote_body_hash is None:
             remote_body_hash = _hash_bytes(adapter.fetch_body(ctx, rid))
-            state.put(kind, rid, base=base_hash,
-                     witness={**(st.witness if st else {}), "body_hash": remote_body_hash})
+            if not options.dry_run:
+                state.put(kind, rid, base=base_hash,
+                         witness={**(st.witness if st else {}), "body_hash": remote_body_hash})
         remote_canon_hash = digest(_canonical(
             body_hash=remote_body_hash, caption=row.data.get("caption", ""),
             description=row.data.get("description", ""),
@@ -754,8 +753,21 @@ def _classify_missing(
     base_hash = st.base if st else None
     remote_hash = None
     if row is not None:
+        # Warm the body-hash cache exactly like `_classify_one` does on a miss
+        # (same D1 reasoning: immutable-per-id bytes never need re-verifying once
+        # cached) — a record only ever reached via THIS path (local file already
+        # missing) used to leave the cache cold forever, which is what made the
+        # pre-write re-fetch guard's own cache-miss fallback (`_refetch_guard`)
+        # matter: without either half fixed, a cold-cache DELETE_REMOTE always
+        # false-COLLIDED.
         cached = st.witness.get("body_hash") if st else None
-        body_hash = cached if isinstance(cached, str) else _hash_bytes(adapter.fetch_body(ctx, rid))
+        if isinstance(cached, str):
+            body_hash = cached
+        else:
+            body_hash = _hash_bytes(adapter.fetch_body(ctx, rid))
+            if not options.dry_run:
+                state.put(kind, rid, base=base_hash,
+                         witness={**(st.witness if st else {}), "body_hash": body_hash})
         remote_hash = digest(_canonical(
             body_hash=body_hash,
             caption=row.data.get("caption", ""), description=row.data.get("description", ""),
@@ -804,11 +816,16 @@ def _refetch_guard(
     ``_apply_reupload``), so the fresh comparison only needs the row's current
     caption/description; the body-hash half of the canonical digest is the one
     already cached from classification (:func:`_cached_body_hash`), reused as-is
-    rather than re-downloaded."""
+    rather than re-downloaded — EXCEPT on a genuine cache miss (state lost, or a
+    dry-run classify that deliberately never warmed it — see `_classify_one`/
+    `_classify_missing`), where defaulting to ``""`` would never equal the real
+    canonical hash `Plan.remote.cached_hash` carries and would false-COLLIDE
+    every single time; a real download is the only correct fallback there."""
     if p.id is None:
         return None, False
     rid = p.id
-    body_hash = _cached_body_hash(state, adapter.kind, rid) or ""
+    cached = _cached_body_hash(state, adapter.kind, rid)
+    body_hash = cached if cached is not None else _hash_bytes(adapter.fetch_body(ctx, rid))
     forced = p.path is not None and p.path in options.force_local
     return refetch_guard(
         refetch=lambda: adapter.refetch(ctx, rid),
@@ -932,9 +949,9 @@ def _write_collision_sidecar(
     ``*.remote.*`` entry already covers it (unlike the document engine, a
     file-set sidecar's extension is whatever the shadowed file's is, not a fixed
     ``.md``, so a literal ``.remote.md`` pattern would have missed it — see
-    :func:`_is_sidecar_name`). A no-op when there's no local path to sidecar next
-    to, or no remote record to read bytes from (e.g. "edited locally, deleted
-    remotely" — there is nothing on the server left to show)."""
+    :func:`~grison.engine.sidecar.is_sidecar_name`). A no-op when there's no local
+    path to sidecar next to, or no remote record to read bytes from (e.g. "edited
+    locally, deleted remotely" — there is nothing on the server left to show)."""
     if path is None or remote is None:
         return
     body = adapter.fetch_body(ctx, remote.id)
@@ -1101,11 +1118,16 @@ def _apply_caption_push(  # noqa: PLR0913
         "produced PUSH for this record"
     )
     local_caption, local_description = opinion.caption, opinion.description
-    snapshot.record(UndoOp(kind=adapter.kind, outcome="push", path=str(p.path), id=p.id,
-                           remote_preimage=_preimage(adapter, ctx, fresh)))
+    op = UndoOp(kind=adapter.kind, outcome="push", path=str(p.path), id=p.id,
+               remote_preimage=_preimage(adapter, ctx, fresh))
+    snapshot.record(op)
     updated = adapter.update_caption(
         ctx, p.id, caption=local_caption, description=local_description
     )
+    # ENGINE.md §6's canonicalisation-after-push, extended to undo (item 4): the
+    # post-write canonical hash a "push" undo re-fetch guard compares against —
+    # see `caption_only_canonical`'s docstring for why bytes never enter it.
+    op.post_write_hash = digest(caption_only_canonical(updated.data))
     # A caption/description push never touches bytes (D1) — reuse the cached
     # digest instead of re-downloading; fall back to a download only if this
     # id somehow has no cached digest yet.

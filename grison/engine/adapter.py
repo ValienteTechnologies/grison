@@ -139,3 +139,25 @@ class RestorableUndoAdapter(CreateUndoAdapter, Protocol):
     PUSH/MOVE_EDIT/DELETE_REMOTE op (anything with a captured remote pre-image)."""
 
     def restore(self, ctx: Any, preimage: Any) -> RemoteRecord: ...
+
+
+@runtime_checkable
+class PushUndoAdapter(RestorableUndoAdapter, Protocol):
+    """:class:`RestorableUndoAdapter` plus ``canonical_remote`` — required to undo
+    a PUSH/MOVE_EDIT op specifically: unlike CREATE (existence-only: "is it still
+    there?") and DELETE_REMOTE (existence-only: "has something already taken this
+    identity?"), undoing a push must detect a record that was edited again, in
+    place, after the write being undone — a content check, not an existence
+    check — before overwriting it with the older pre-image
+    (:mod:`grison.engine.undo`'s module docstring; ENGINE.md §3's guard, extended
+    to undo). Every adapter that ever records a push/move_edit
+    :class:`~grison.engine.undo.UndoOp` already has ``canonical_remote`` (it is
+    part of the full :class:`Adapter` protocol every document adapter
+    implements; a caption-capable file-set adapter — today only
+    :class:`grison.adapters.gw_evidence.GwEvidenceAdapter` — adds its own undo-
+    only binding, see :func:`grison.engine.filesets.caption_only_canonical`). An
+    adapter that never records that outcome (BookStack's image gallery, whose
+    ``update_caption`` is unreachable — D9: no caption column at all) need not
+    implement this beyond satisfying :class:`RestorableUndoAdapter`."""
+
+    def canonical_remote(self, data: Any) -> Canonical: ...

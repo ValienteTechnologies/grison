@@ -1045,6 +1045,34 @@ def test_undo_reverts_a_push(run_grison, bs_server):
     assert bs_server.store.page(page["id"])["markdown"] == "# Original"
 
 
+def test_undo_of_a_push_refuses_to_clobber_a_record_edited_again_since(run_grison, bs_server):
+    """Item 4 (fix-d): before this fix, ``grison undo``'s push/move_edit replay
+    branch called ``adapter.restore`` straight over ``remote_preimage`` with no
+    re-fetch guard at all — unlike the create/delete_remote branches, contradicting
+    the ``grison.engine.undo`` module docstring's own claim that every replayed op
+    is "guarded by the same re-fetch check the forward apply loop uses". A record
+    edited again (on the server, by someone else) after the push this undo would
+    reverse must be reported, not silently overwritten with the older content."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# Edited")
+    run_grison("sync")
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited"
+
+    # someone else edits the SAME record on the server after grison's push, before
+    # anyone runs `grison undo`.
+    bs_server.store.edit_page(page["id"], markdown="# Edited further, by someone else")
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 1, result.output
+    assert "methodology/library/playbook/notes.md" in result.output
+    # never clobbered — the concurrent edit survives exactly as it was
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited further, by someone else"
+
+
 def test_undo_list_shows_snapshots_newest_first(run_grison, bs_server):
     book = bs_server.store.seed_book(name="Playbook")
     bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")

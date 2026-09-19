@@ -540,6 +540,122 @@ def test_collision_sidecar_file_is_never_treated_as_an_ordinary_local_file(
     assert next(iter(store.rows.values()))["filename"] == "shot.png"
 
 
+def test_cold_witness_cache_delete_remote_is_not_a_false_collision(tmp_path: Path) -> None:
+    """Item 1 (HIGH, fix-d): ``_refetch_guard`` used to default a cache-miss body
+    hash to ``""`` while classification computed the REAL one from a live
+    download — on a cold cache (state's ``witness`` empty, base still intact)
+    every DELETE_REMOTE/reupload/caption push false-COLLIDED with a spurious
+    sidecar written next to a file that no longer even exists locally. Fixed on
+    both halves: ``_classify_missing`` warms the cache like ``_classify_one``,
+    and the guard downloads via ``fetch_body`` on a genuine miss instead of
+    defaulting to ``""``."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot)
+    index.save()
+    rid = next(iter(store.rows))
+    base = state.get(adapter.kind, rid).base
+    assert base is not None
+
+    # Simulate a cold witness cache: the base survives, the cached body_hash
+    # doesn't (state lost partially, or a prior classify-only pass — see the
+    # module docstring's "state lost" cold-cache cause).
+    state.put(adapter.kind, rid, base=base, witness={})
+
+    (tmp_path / FOLDER / "shot.png").unlink()
+    index2, state2, snapshot2 = _env(tmp_path)
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
+                          snapshot=snapshot2)
+
+    assert [p.outcome for p in result.plans] == [Outcome.DELETE_REMOTE]
+    assert store.delete_calls == 1
+    assert store.rows == {}
+    sidecar = tmp_path / FOLDER / "shot.remote.png"
+    assert not sidecar.exists()
+
+
+def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
+    """Item 2 (HIGH, fix-d): ``sync_fileset``'s own ``_clear_stale_sidecars`` call
+    used to run unconditionally, even under ``--dry-run`` — ENGINE.md §9 says
+    dry-run performs NO writes of any kind, but a sidecar left by a genuine
+    collision that has since converged got deleted for real by a dry-run pass
+    alone."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    doc_path = PurePosixPath("findings/reports/r1/f.md")
+
+    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot,
+                doc_bodies={doc_path: "# F\n\n![Local caption](evidence/shot.png)\n"})
+    index.save()
+    rid = next(iter(store.rows))
+
+    # someone edits the caption directly on the server -> a genuine classify-time
+    # collision (same setup as the resolved-sidecar test below).
+    store.rows[rid]["caption"] = "Remote caption"
+    index2, state2, snapshot2 = _env(tmp_path)
+    result = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index2, state=state2, snapshot=snapshot2,
+        doc_bodies={doc_path: "# F\n\n![A different local caption](evidence/shot.png)\n"},
+    )
+    index2.save()
+    assert [p.outcome for p in result.plans] == [Outcome.COLLISION]
+    sidecar = tmp_path / FOLDER / "shot.remote.png"
+    assert sidecar.exists()
+
+    # the conflict resolves (local now agrees with remote) -> a DRY-RUN pass
+    # reclassifies away from COLLISION...
+    index3, state3, snapshot3 = _env(tmp_path)
+    result2 = sync_fileset(
+        tmp_path, store, adapter, FOLDER, index=index3, state=state3, snapshot=snapshot3,
+        doc_bodies={doc_path: "# F\n\n![Remote caption](evidence/shot.png)\n"},
+        options=RunOptions(dry_run=True),
+    )
+
+    assert all(p.outcome is not Outcome.COLLISION for p in result2.plans)
+    assert sidecar.exists()  # ...but --dry-run must NEVER delete it for real (ENGINE.md §9)
+
+
+def test_dry_run_on_a_cold_cache_never_writes_state(tmp_path: Path) -> None:
+    """Item 3 (MEDIUM, fix-d): ``_classify_one``/``_classify_missing`` used to
+    call ``state.put`` (warming the body-hash cache) even under ``--dry-run``,
+    contradicting ENGINE.md §9 ("no writes of any kind"). A dry-run sync must
+    leave ``.grison/state/`` completely untouched — cold cache or not, since a
+    cold cache is exactly when this warming call fires."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state, snapshot=snapshot)
+    index.save()
+
+    # Cold cache: state gone entirely (nothing under this test writes it again
+    # except the dry run below, which must not).
+    state_dir = tmp_path / ".grison" / "state"
+    assert state_dir.is_dir()
+    for f in state_dir.rglob("*"):
+        if f.is_file():
+            f.unlink()
+    for d in sorted(state_dir.rglob("*"), key=lambda p: -len(p.parts)):
+        if d.is_dir():
+            d.rmdir()
+    state_dir.rmdir()
+    assert not state_dir.exists()
+
+    index2, state2, snapshot2 = _env(tmp_path)
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index2, state=state2,
+                          snapshot=snapshot2, options=RunOptions(dry_run=True))
+
+    assert [p.outcome for p in result.plans] == [Outcome.CLEAN]  # L == R even with no base
+    assert not state_dir.exists(), "a dry-run classify must never warm/write private state"
+
+
 def test_collision_writes_a_remote_bytes_sidecar_cleared_once_resolved(tmp_path: Path) -> None:
     """ENGINE.md §8: a file-set COLLISION must write ``<name>.remote.<ext>`` next
     to the file with the REMOTE version's bytes — before this fix, the classify-

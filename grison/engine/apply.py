@@ -28,6 +28,7 @@ from grison.engine.model import (
     Plan,
     RemoteRecord,
 )
+from grison.engine.sidecar import sidecar_path
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
 from grison.fsio import atomic_write_text
@@ -58,15 +59,6 @@ def _remote_hash(adapter: Adapter, remote: RemoteRecord | None) -> str | None:
     if remote.cached_hash is not None:
         return remote.cached_hash
     return digest(adapter.canonical_remote(remote.data))
-
-
-def sidecar_path(path: PurePosixPath) -> PurePosixPath:
-    """The collision-sidecar path for ``path`` (``page.md`` -> ``page.remote.md``).
-    Public (not ``_``-prefixed) because :mod:`grison.engine.offline_status` needs the
-    exact same convention to detect a live sidecar without a real sync."""
-    if path.suffix:
-        return path.with_suffix(f".remote{path.suffix}")
-    return path.with_name(path.name + ".remote")
 
 
 @dataclass
@@ -163,7 +155,8 @@ def run(  # noqa: PLR0913
             )
             summary.problem_paths.append(label)
 
-    _clear_stale_sidecars(root, plans)
+    if not options.dry_run:
+        _clear_stale_sidecars(root, plans)
     return plans, events, summary
 
 
@@ -494,17 +487,22 @@ def _apply_update(  # noqa: PLR0913
         events.append(Event(verb="push", path=str(p.path), detail="re-created remotely"))
         return
     preimage = fresh.data
-    snapshot.record(UndoOp(kind=adapter.kind, outcome=p.outcome.value, path=str(p.path),
-                           id=p.id, remote_preimage=preimage, move_from=str(p.move_from)
-                           if p.move_from else None))
+    op = UndoOp(kind=adapter.kind, outcome=p.outcome.value, path=str(p.path),
+               id=p.id, remote_preimage=preimage, move_from=str(p.move_from)
+               if p.move_from else None)
+    snapshot.record(op)
     resp = adapter.update(ctx, p.id, p.local.doc)
     if p.move_from is not None:
         index.move(str(p.move_from), str(p.path))
     text = adapter.render_local(resp.data, path=p.path)
     if text != p.local.raw_text:
         atomic_write_text(root / p.path, text)
-    state.put(adapter.kind, p.id, base=digest(adapter.canonical_remote(resp.data)),
-              witness=resp.witness)
+    # ENGINE.md §6's canonicalisation-after-push hash IS the post-write canonical
+    # hash a "push"/"move_edit" undo's re-fetch guard compares against (item 4) —
+    # one computation, two uses, so the two can never quietly disagree.
+    resp_hash = digest(adapter.canonical_remote(resp.data))
+    op.post_write_hash = resp_hash
+    state.put(adapter.kind, p.id, base=resp_hash, witness=resp.witness)
     emit_losses(events, str(p.path), resp.losses)
     verb = "move" if p.outcome is Outcome.MOVE_EDIT else "push"
     detail = f"from {p.move_from}" if p.move_from else ""

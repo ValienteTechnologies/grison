@@ -41,6 +41,7 @@ from grison.engine.filesets import rewrite_captions
 from grison.engine.filesets import sync_fileset as engine_sync_fileset
 from grison.engine.model import Event, KindSummary, Outcome, Plan, RemoteRecord
 from grison.engine.offline_status import OfflineStatus, StatusEntry, compute_offline_status
+from grison.engine.sidecar import is_sidecar_name
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
 from grison.engine.undo import describe_snapshot as engine_describe_snapshot
@@ -242,13 +243,13 @@ def status(
         state,
         findings_failures,
     )
-    evidence_file_counts = {
-        d: len(list((root / d / "evidence").glob("*")))
+    evidence_counts = {
+        d: _fileset_status_counts(root / d / "evidence")
         for d in _report_dirs_for_status(index)
         if (root / d / "evidence").is_dir()
     }
-    image_file_counts = {
-        d: len(list((root / d / "images").glob("*")))
+    image_counts = {
+        d: _fileset_status_counts(root / d / "images")
         for d in _book_dirs(index)
         if (root / d / "images").is_dir()
     }
@@ -329,7 +330,6 @@ def status(
                 "reports": {
                     "counts": rf_offline.counts,
                     "non_clean": [_entry_json(e) for e in rf_offline.non_clean],
-                    "evidence_files": {str(d): n for d, n in evidence_file_counts.items()},
                 },
             },
             "report": {
@@ -337,13 +337,14 @@ def status(
                 "counts": reports_offline.counts,
                 "non_clean": [_entry_json(e) for e in reports_offline.non_clean],
                 "collision_sidecars": [str(p) for p in reports_offline.collision_sidecars],
+                "evidence": {str(d): _fileset_json(c) for d, c in evidence_counts.items()},
             },
             "methodology": {
                 "managed": True,
                 "counts": offline.counts,
                 "non_clean": [_entry_json(e) for e in offline.non_clean],
                 "collision_sidecars": [str(p) for p in offline.collision_sidecars],
-                "images_files": {str(d): n for d, n in image_file_counts.items()},
+                "images": {str(d): _fileset_json(c) for d, c in image_counts.items()},
             },
             "remote": (
                 {"counts": remote_summary.counts, "problem_paths": remote_summary.problem_paths}
@@ -365,17 +366,15 @@ def status(
     rf_line = ", ".join(f"{b} {n}" for b, n in rf_offline.counts.items() if n)
     typer.echo(f"findings (library): {lib_line or 'clean'}")
     typer.echo(f"findings (reports): {rf_line or 'clean'}")
-    if evidence_file_counts:
-        ev_summary = ", ".join(f"{d} {n}" for d, n in sorted(evidence_file_counts.items()))
-        typer.echo(f"evidence: {ev_summary}")
-    if image_file_counts:
-        img_summary = ", ".join(f"{d} {n}" for d, n in sorted(image_file_counts.items()))
-        typer.echo(f"images: {img_summary}")
     reports_counts_line = ", ".join(f"{b} {n}" for b, n in reports_offline.counts.items() if n)
     typer.echo(f"report: {reports_counts_line or 'clean'}")
+    if evidence_counts:
+        typer.echo(f"evidence: {_fileset_status_line(evidence_counts)}")
     _print_offline_non_clean(reports_offline, area="report")
     counts_line = ", ".join(f"{b} {n}" for b, n in offline.counts.items() if n)
     typer.echo(f"methodology: {counts_line or 'clean'}")
+    if image_counts:
+        typer.echo(f"images: {_fileset_status_line(image_counts)}")
     _print_offline_non_clean(offline, area="methodology")
     if remote_summary is not None:
         counts = ", ".join(f"{k} {v}" for k, v in sorted(remote_summary.counts.items()))
@@ -403,6 +402,44 @@ def _entry_json(e: StatusEntry) -> dict[str, Any]:
         "reasons": list(e.reasons),
         "moved_from": str(e.moved_from) if e.moved_from is not None else None,
     }
+
+
+@dataclass(frozen=True)
+class _FilesetCounts:
+    """One file-set folder's offline-visible shape (evidence/images, item 5): a
+    live collision sidecar (``grison.engine.sidecar.is_sidecar_name``) is listed
+    as a collision, never counted as a file — mirrors the same sidecar-aware
+    treatment ``grison sync``/``last-sync.json`` already give it, so ``grison
+    status`` never shows an extra "file" a real sync wouldn't otherwise write."""
+
+    files: int
+    collisions: int
+
+
+def _fileset_status_counts(dir_path: Path) -> _FilesetCounts:
+    files = collisions = 0
+    for p in sorted(dir_path.iterdir()):
+        if not p.is_file() or p.name.startswith("."):
+            continue
+        if is_sidecar_name(p.name):
+            collisions += 1
+        else:
+            files += 1
+    return _FilesetCounts(files=files, collisions=collisions)
+
+
+def _fileset_json(c: _FilesetCounts) -> dict[str, int]:
+    return {"files": c.files, "collisions": c.collisions}
+
+
+def _fileset_status_line(counts: dict[PurePosixPath, _FilesetCounts]) -> str:
+    parts = []
+    for d, c in sorted(counts.items()):
+        part = f"{d} {c.files}"
+        if c.collisions:
+            part += f" ({c.collisions} collision-sidecar(s) pending)"
+        parts.append(part)
+    return ", ".join(parts)
 
 
 def _merge_offline(statuses: list[OfflineStatus]) -> OfflineStatus:
@@ -1515,7 +1552,9 @@ class _BoundAdapter:
     both. :func:`grison.engine.undo.replay` calls ``refetch``/``delete``/``restore``
     on every undo-time adapter, plus ``render_local`` (no ``ctx`` needed — it is a
     pure formatter) when a DELETE_REMOTE undo must also restore the local mirror
-    file — never ``create``/``update``/``fetch_remote``/etc."""
+    file, and ``canonical_remote`` (also no ``ctx``) for a push/move_edit undo's
+    drift check (item 4 — :class:`~grison.engine.adapter.PushUndoAdapter`) —
+    never ``create``/``update``/``fetch_remote``/etc."""
 
     inner: Any
     bound_ctx: Any
@@ -1535,6 +1574,9 @@ class _BoundAdapter:
     def restore(self, ctx: Any, preimage: Any) -> RemoteRecord:
         del ctx
         return self.inner.restore(self.bound_ctx, preimage)
+
+    def canonical_remote(self, data: Any) -> Any:
+        return self.inner.canonical_remote(data)
 
     def render_local(self, data: Any, *, path: PurePosixPath) -> str:
         render = self.inner.render_local

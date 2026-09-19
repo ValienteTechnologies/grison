@@ -17,6 +17,16 @@ from pathlib import Path
 
 import yaml
 
+_REPORT_SCOPES = [
+    {
+        "name": "Internal range",
+        "scope": "10.0.0.0/24",
+        "description": "",
+        "disallowed": False,
+        "requiresCaution": False,
+    }
+]
+
 
 def _write_page_file(path: Path, *, title: str, body: str) -> None:
     fm = {"title": title}
@@ -201,9 +211,10 @@ def test_status_json_stable_shape(run_grison, bs_server):
     # tests changed on purpose (task step 3 + reports task C): findings AND report
     # (narrative sections/notes) are both engine-managed now, each with the same
     # per-kind counts/non_clean shape methodology already had (findings splits into
-    # a library bucket and a reports bucket — the latter also carrying an
-    # `evidence_files` breakdown, D1's file-set mirror — while report/narrative
-    # sections+notes get their own top-level area, same shape as methodology's).
+    # a library bucket and a reports bucket; report/narrative sections+notes get
+    # their own top-level area, same shape as methodology's, PLUS a sidecar-aware
+    # `evidence` breakdown, D1's file-set mirror — moved here from `findings`
+    # since evidence syncs on the report phase now, see fix item 5).
     assert payload["findings"]["managed"] is True
     zero_counts = {
         "clean": 0,
@@ -235,3 +246,39 @@ def test_status_json_stable_shape(run_grison, bs_server):
     assert payload["last_sync"]["wiki"]["ok"] is True
     assert payload["last_sync"]["findings"]["ok"] is True
     assert payload["last_sync"]["report"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Item 5 (fix-d): evidence lives under `report`, sidecar-aware, not under
+# `findings` (a leftover from before evidence moved onto the report phase).
+# ---------------------------------------------------------------------------
+
+
+def test_status_shows_evidence_under_report_with_sidecar_aware_counts(run_grison, gw_server):
+    """A live collision sidecar (``<name>.remote.<ext>``, ENGINE.md §8) is listed
+    as a collision, never counted as a file — and the whole breakdown lives under
+    ``report``, matching where evidence actually syncs now (D1: the report phase,
+    not findings — see ``grison.adapters.gw_evidence``)."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": _REPORT_SCOPES})
+    gw_server.store.seed_evidence(id=90, reportId=7, document="evidence/7/shot.png")
+    run_grison("sync")
+
+    evidence_dir = Path.cwd() / "findings" / "reports" / "report-a" / "evidence"
+    assert (evidence_dir / "shot.png").is_file()
+    # a stale collision sidecar left behind by some earlier, unresolved sync —
+    # never a real evidence file (ENGINE.md §8).
+    (evidence_dir / "shot.remote.png").write_bytes(b"stale collision sidecar")
+
+    result = run_grison("status")
+
+    assert result.exit_code == 0, result.output
+    ev_line = next(ln for ln in result.output.splitlines() if ln.startswith("evidence:"))
+    assert "findings/reports/report-a 1" in ev_line  # one real file, not two
+    assert "1 collision-sidecar(s) pending" in ev_line
+
+    json_result = run_grison("status", "--json")
+    payload = json.loads(json_result.output)
+    assert "evidence_files" not in payload["findings"]["reports"]  # moved out (item 5)
+    assert payload["report"]["evidence"] == {
+        "findings/reports/report-a": {"files": 1, "collisions": 1},
+    }
