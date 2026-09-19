@@ -128,3 +128,45 @@ def test_claude_md_off_setting_still_scaffolds_everything_else(
     assert not (tmp_path / "CLAUDE.md").exists()
     assert (tmp_path / ".claude" / "settings.json").exists()
     assert (tmp_path / ".grison" / "SPEC.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# mirrors.json: ONE writer (grison.engine.state.StateStore), ONE serialization —
+# grison.validator.mirrors.record_digest used to always rewrite the file (a
+# different, inconsistent serialization from the engine's own StateStore.
+# save_mirrors), even when nothing changed, so a second bootstrap/sync/scaffold
+# with nothing new to record still touched .grison/state/mirrors.json on disk
+# every single time. Fixed: record_digest is now a StateStore.save_mirrors call
+# that no-ops when the digest to record already matches what's there.
+# ---------------------------------------------------------------------------
+
+
+def test_mirrors_json_untouched_by_a_second_bootstrap_with_nothing_changed(
+    tmp_path: Path,
+) -> None:
+    bootstrap_workspace(tmp_path)
+    mirrors_path = tmp_path / ".grison" / "state" / "mirrors.json"
+    before = mirrors_path.read_bytes()
+
+    bootstrap_workspace(tmp_path)  # second run: every digest it would record already matches
+
+    assert mirrors_path.read_bytes() == before
+
+
+def test_mirrors_json_updates_only_the_spec_entry_when_spec_text_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from grison.scaffold import orchestrate as orchestrate_mod
+
+    bootstrap_workspace(tmp_path)
+    mirrors_path = tmp_path / ".grison" / "state" / "mirrors.json"
+    before = json.loads(mirrors_path.read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(orchestrate_mod.spec_mod, "spec_text", lambda: "a different SPEC.md\n")
+    orchestrate_mod.scaffold_workspace(tmp_path)
+
+    after = json.loads(mirrors_path.read_text(encoding="utf-8"))
+    changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+    assert changed == {".grison/SPEC.md"}

@@ -126,6 +126,21 @@ WS_MIRROR_MALFORMED = _r(
     "a read-only mirror file is not valid for its type",
     "do not hand-author this file; let the next sync regenerate it",
 )
+WS_SCAFFOLD_MISSING = _r(
+    "WS-011",
+    "a grison-scaffolded workspace file (.grison/SPEC.md, a .grison/templates/ file, "
+    "CLAUDE.md, or .claude/settings.json) that grison previously generated is now "
+    "missing",
+    "run `grison scaffold` to regenerate it",
+)
+WS_SCAFFOLD_EDITED = _r(
+    "WS-012",
+    "a grison-scaffolded workspace file's grison-owned content no longer matches "
+    "what grison last generated or merged into it",
+    "run `grison scaffold` (CLAUDE.md/.claude/settings.json: `grison scaffold "
+    "--force` if the plain merge doesn't restore it) — never hand-edit a "
+    "grison-generated file",
+)
 
 # --- FND: finding documents (library + report instances) --------------------------
 

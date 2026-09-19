@@ -208,6 +208,35 @@ against). Independently, each of these files (except `project.md`, which is opaq
 prose — see §3.3) has its own schema (§3.4, §4.4); a file that doesn't parse into it
 is `WS-010`.
 
+### 1.10 Scaffolded/merged workspace files (`WS-011`, `WS-012`)
+
+`.grison/SPEC.md`, each `.grison/templates/*.md`, `CLAUDE.md`, and
+`.claude/settings.json` are generated (SPEC.md, CLAUDE.md, templates) or merged
+(`.claude/settings.json`) by `grison scaffold` (run automatically by every `grison
+sync`/`grison parse`, and on demand). Each one's digest is recorded the same way a
+read-only mirror's is (`.grison/state/mirrors.json`); before the first scaffold ever
+runs, nothing is recorded and neither rule fires (same "nothing to compare against
+yet" rule as §1.9). Once a digest IS recorded:
+
+- missing entirely -> `WS-011` ("run `grison scaffold` to regenerate it").
+- present but no longer matching -> `WS-012` — what "matching" means is chosen per
+  file so an operator's own legitimate use of the file is never flagged:
+  - `.grison/SPEC.md`: exact content match (no authored content ever belongs here,
+    like a §1.9 mirror).
+  - a template: existence only (`WS-011` above) — never content. A template is a
+    copy-and-edit starting point; grison never touches an existing one again, even
+    with `--force`, so editing it is the intended use, not corruption.
+  - `CLAUDE.md`: flagged only when its OWN marker line (first line) no longer
+    matches what this grison version would generate now, AND its content also no
+    longer matches what was last recorded — a current-marker CLAUDE.md is never
+    flagged regardless of what's below the marker, so an operator's own added
+    section is never mistaken for a hand-edit; only a stale copy whose content also
+    drifted is invalid.
+  - `.claude/settings.json`: only grison's own canonical deny rules and post-edit
+    hook entry are compared (whether each is present) — a user's own additional
+    deny/allow rules or other top-level keys never affect this and are never
+    flagged. Removing one of grison's own guardrail entries IS flagged.
+
 ---
 
 ## 2. Finding documents (`FND-…`)
@@ -947,16 +976,9 @@ is ever agent-writable, tracked files included). The two lists are the same tupl
 (`grison.manifest.TRACKED_ENTRIES`/`PRIVATE_ENTRIES`), so "readable" and "tracked"
 can never drift apart.
 
-`.grison/SPEC.md`'s own integrity (a hand-edited or missing copy) is not currently a
-`WS-…` validator rule — unlike every other read-only mirror (§1.9's `WS-009`), the
-copy has no dedicated rule id yet; this is a known, intentionally deferred gap. The
-read side is already in place: `grison.scaffold.orchestrate.scaffold_workspace`
-records a digest in `.grison/state/mirrors.json` for `.grison/SPEC.md` (every run),
-each `.grison/templates/*.md` (the run that first writes it), and `CLAUDE.md` (every
-run that (re)writes it) via `grison.validator.mirrors.record_digest` — the same
-mechanism `WS-009` already reads. Only the rule itself (comparing current content
-against the recorded digest, the `WS-009` pattern exactly) is missing, since it needs
-`grison/validator/core.py`.
+`.grison/SPEC.md`, each `.grison/templates/*.md`, `CLAUDE.md`, and
+`.claude/settings.json`'s integrity (missing, or hand-edited since generated/merged)
+IS a validator rule — see §1.10 (`WS-011`/`WS-012`).
 
 ---
 
@@ -974,6 +996,8 @@ against the recorded digest, the `WS-009` pattern exactly) is missing, since it 
 | WS-008 | a private .grison/ path is tracked, or a tracked one is git-ignored |
 | WS-009 | a read-only mirror file's content differs from what grison last generated |
 | WS-010 | a read-only mirror file is not valid for its type |
+| WS-011 | a grison-scaffolded workspace file that grison previously generated is now missing |
+| WS-012 | a grison-scaffolded workspace file's grison-owned content no longer matches what grison last generated or merged into it |
 | FND-001 | an unrecognized frontmatter field is present on a finding |
 | FND-002 | a required frontmatter field is missing on a finding |
 | FND-003 | severity is not one of informational/low/medium/high/critical |

@@ -57,11 +57,11 @@ class ScaffoldResult:
 def _scaffold_spec(root: Path) -> bool:
     """``.grison/SPEC.md`` — grison-owned, always kept current (it carries no
     authored content an agent could have edited on purpose; unlike ``CLAUDE.md`` there
-    is no "hand-edited, leave it alone" case for it). Its digest is recorded on every
-    run (not just when it changes) so a future WS-009-shaped validator rule always has
-    an up-to-date baseline to compare a hand-edit against — see
-    :mod:`grison.validator.mirrors`; that rule itself isn't added here (see this
-    task's report: it needs :mod:`grison.validator.core`, owned elsewhere right now)."""
+    is no "hand-edited, leave it alone" case for it). Its digest is checked on every
+    run so a validator rule always has an up-to-date baseline to compare a hand-edit
+    against — see :mod:`grison.validator.mirrors` — but ``record_digest`` only
+    actually rewrites ``mirrors.json`` when the digest changed, so a run that changes
+    nothing here touches nothing on disk."""
     path = root / spec_mod.SPEC_RELATIVE_PATH
     text = spec_mod.spec_text()
     written = not (path.exists() and path.read_text(encoding="utf-8") == text)
@@ -157,6 +157,18 @@ def scaffold_workspace(
     if merged != existing_settings:
         settings_json_mod.write_settings(root, merged)
         result.settings_updated = True
+    # Baseline for WS-011/WS-012 (grison.validator.core): the merged settings ALWAYS
+    # carry the full canonical deny set + hook entry (build_settings self-heals them
+    # in, whether or not this run actually rewrote the file) — see
+    # grison.scaffold.settings_json.fragment_digest's own docstring for exactly what
+    # this baseline covers (never the user's own additions).
+    merged_deny = merged.get("permissions", {}).get("deny", [])
+    merged_hooks = merged.get("hooks", {}).get("PostToolUse", [])
+    mirrors_mod.record_digest(
+        root,
+        settings_json_mod.SETTINGS_RELATIVE_PATH,
+        settings_json_mod.fragment_digest(merged_deny, merged_hooks),
+    )
 
     result.claude_md_status = _scaffold_claude_md(
         root, force=force, enabled=settings.claude_md_enabled

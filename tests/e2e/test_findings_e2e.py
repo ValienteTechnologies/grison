@@ -432,6 +432,100 @@ def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
     assert "collision" not in clean.output, clean.output
 
 
+def test_undo_with_a_preexisting_cross_reference_is_fully_clean_afterward(
+    run_grison, gw_server, workspace,
+):
+    """Item 3 (fix-undo-repair) root cause: ``grison undo``'s own
+    ``GwReportedFindingAdapter`` (``grison.cli.undo``) used to be built with
+    ``evidence_by_report={}`` — every REAL sync (``_run_reports_phase``/
+    ``_run_findings_phase``) builds this dict for real and passes it to the same
+    adapter class; ``undo`` was the one caller that hard-coded it empty.
+    ``canonical_remote()`` needs it to resolve a plain CROSS-REFERENCE (``[caption]
+    (evidence/x.png)`` — resolved by NAME on the wire, unlike an embed's native
+    ``data-evidence-id="N"`` which resolves by id via the index alone and was
+    never affected) through :class:`~grison.engine.filesets._LiteralEmbedResolver`;
+    an empty dict resolves that name to a placeholder instead of the real id, so
+    undo's own restamp (and its pre-write re-fetch drift guard, which ALSO calls
+    ``canonical_remote()``) can never agree with what the next real sync computes.
+    BEFORE the fix this surfaced as ``grison undo`` itself refusing to restore
+    ("changed since the sync that wrote it — not restoring") for the finding
+    holding the cross-reference, exit code 1 — the lab's own run (a real
+    Ghostwriter) hit the milder sibling of the same bug, a one-off benign
+    ``repair`` on the very next sync instead of an outright refusal, depending on
+    which of undo's two ``canonical_remote()`` call sites tripped first. Fixed:
+    ``grison.cli.undo`` now builds the real ``evidence_by_report`` the same way
+    the forward phases do."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    report_dir = _rdir(workspace)
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report["id"], title="Default Credentials", severityId=3, findingTypeId=4,
+    )
+    gw_server.store.seed_reported_finding(
+        id=51, reportId=report["id"], title="Unencrypted Telnet", severityId=4, findingTypeId=4,
+    )
+    run_grison("sync")
+
+    default_creds_path = report_dir / "default-credentials.md"
+    telnet_path = report_dir / "unencrypted-telnet.md"
+
+    # A PRE-EXISTING cross-reference (plain link, never an embed) to an evidence
+    # file established in an EARLIER, separate sync — not part of the snapshot
+    # under test below.
+    default_creds_path.write_text(
+        default_creds_path.read_text(encoding="utf-8").replace(
+            "## Description\n\n",
+            "## Description\n\nSee [existing](evidence/existing.png) for context.\n\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    (report_dir / "evidence" / "existing.png").write_bytes(b"\x89PNG-existing")
+    run_grison("sync")
+
+    default_creds_baseline = default_creds_path.read_text(encoding="utf-8")
+    telnet_baseline = telnet_path.read_text(encoding="utf-8")
+
+    # THIS is the snapshot under test: two unrelated text edits (neither touches
+    # the cross-reference itself) plus a brand-new, unrelated evidence create —
+    # matching the task's exact scenario ("one evidence create + two finding
+    # pushes").
+    default_creds_path.write_text(
+        default_creds_path.read_text(encoding="utf-8").replace(
+            "## Description\n\n", "## Description\n\nEdited by the undo-scenario test.\n\n", 1,
+        ),
+        encoding="utf-8",
+    )
+    telnet_path.write_text(
+        telnet_path.read_text(encoding="utf-8").replace(
+            "## Description\n\n", "## Description\n\nAlso edited.\n\n", 1,
+        ),
+        encoding="utf-8",
+    )
+    (report_dir / "evidence" / "new.png").write_bytes(b"\x89PNG-new")
+
+    pushed = run_grison("sync")
+    assert "findings (gw.reportedFinding): push 2" in pushed.output, pushed.output
+    assert len(gw_server.store.evidence) == 2
+
+    undone = run_grison("undo")
+    assert undone.exit_code == 0, undone.output  # BEFORE the fix: "not restoring", exit 1
+    assert "failed" not in undone.output, undone.output
+    assert default_creds_path.read_text(encoding="utf-8") == default_creds_baseline
+    assert telnet_path.read_text(encoding="utf-8") == telnet_baseline
+    # the evidence create's own undo must also clear its file-set state entry —
+    # only "existing.png"'s (untouched by this snapshot) should remain.
+    evidence_state_dir = workspace / ".grison" / "state" / "gw.evidence"
+    remaining_state_ids = {p.stem for p in evidence_state_dir.iterdir()}
+    assert remaining_state_ids == {str(gw_server.store.evidence[0]["id"])}
+    assert len(gw_server.store.evidence) == 1
+
+    clean = run_grison("sync")
+    assert clean.exit_code == 0, clean.output
+    assert "repair" not in clean.output, clean.output  # BEFORE the fix: a one-off repair here
+    assert "findings (gw.reportedFinding): clean 2" in clean.output, clean.output
+
+
 def test_n_new_evidence_uploads_fetch_the_org_wide_evidence_list_only_once(
     run_grison, gw_server, workspace,
 ):

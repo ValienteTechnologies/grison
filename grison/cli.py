@@ -194,15 +194,17 @@ def status(
     """Whole-workspace overview: per-area counts, only non-clean paths listed.
 
     Offline by default — the index, private state, and ``grison validate``'s own
-    checks, no credentials, no network: ``methodology/`` and ``findings/reports/``
-    (both on the sync engine) get a real per-record breakdown
+    checks, no credentials, no network: ``methodology/``, ``findings/reports/`` and
+    ``findings/library`` (all on the sync engine) get a real per-record breakdown
     (clean/edited/new/deleted/moved/invalid/unknown, plus any live collision sidecar)
     computed from the index and state alone, the same way ``grison sync`` would
-    classify locally. ``findings/library`` is not yet engine-managed (a later step)
-    and says so, same as before. ``--remote`` additionally contacts BookStack and
-    runs the engine's classify step in dry-run mode for the wiki, so the report also
-    shows what the next ``grison sync`` would actually do there (will-pull,
-    collision, remote-deleted, …).
+    classify locally. ``--remote`` additionally contacts Ghostwriter and BookStack
+    and runs the SAME dry-run phase functions ``grison sync`` itself uses — report
+    (report dirs/mirrors + evidence file sets), narrative sections + project notes,
+    findings (library + reported), then wiki (structure + images + pages) — writing
+    nothing (no remote write, no file, no index, no state, no snapshot, no
+    sidecars), so the report shows what the next ``grison sync`` would actually do
+    everywhere (will-push, will-pull, collision, remote-deleted, …), per record kind.
 
     "last sync" is read per PHASE from ``.grison/state/last-sync.json`` (each phase —
     findings/report/wiki — records its own outcome there, including a failure), so
@@ -262,37 +264,69 @@ def status(
         ]
     )
 
-    remote_summary: KindSummary | None = None
-    remote_error: str | None = None
+    # `--remote`: reuse the SAME phase functions `grison sync` calls, all forced to
+    # `dry_run=True` — never a second classification implementation (each phase
+    # function already loads its own scratch `Index` copy and never calls
+    # `index.save()`/persists a snapshot/writes state under dry_run, exactly what
+    # `grison sync --dry-run` itself relies on and is tested for). Ghostwriter
+    # (report -> findings) and BookStack (wiki) are independent legs: either can be
+    # unconfigured/fail without blocking the other.
+    remote_summaries: dict[str, dict[str, KindSummary]] = {}
+    remote_gw_error: str | None = None
+    remote_bs_error: str | None = None
     if remote:
+        # The phase functions below scope `validate_workspace` to `findings/reports`/
+        # `methodology` (an explicit path that doesn't exist raises, not "nothing to
+        # validate") — `grison sync` never hits this because `bootstrap_workspace`
+        # always runs first; `status` never otherwise writes anything, so it can't
+        # call that (CLAUDE.md/.claude/settings.json/etc). `bootstrap_tree` is the
+        # narrow part of it: the five plain, empty workspace directories only — no
+        # file is created, so this never shows up in a before/after byte comparison.
+        bootstrap_tree(root)
         creds = load_creds(root)
+        if creds.gw_url and creds.gw_token:
+            try:
+                with _make_gw_client(creds) as gw_client:
+                    reports_result, evidence_by_report = _run_reports_phase(
+                        root,
+                        gw_client,
+                        dry_run=True,
+                        force_local=set(),
+                        force_remote=set(),
+                        snapshot=Snapshot(),
+                    )
+                    remote_summaries["report"] = reports_result.summaries
+                    findings_result = _run_findings_phase(
+                        root,
+                        gw_client,
+                        dry_run=True,
+                        force_local=set(),
+                        force_remote=set(),
+                        evidence_by_report=evidence_by_report,
+                        snapshot=Snapshot(),
+                    )
+                    remote_summaries["findings"] = findings_result.summaries
+            except GrisonError as e:
+                remote_gw_error = str(e)
+        else:
+            remote_gw_error = "Ghostwriter credentials not configured"
+
         if creds.bs_url and creds.bs_token_id and creds.bs_token_secret:
             try:
-                with _make_bs_client(creds) as client:
-                    ctx = build_context(client, state)
-                    dry_index = Index.load(root)  # a scratch copy — dry-run never persists it
-                    bs_structure.sync_structure(
+                with _make_bs_client(creds) as bs_client:
+                    wiki_result = _run_wiki_phase(
                         root,
-                        ctx,
-                        dry_index,
-                        state,
-                        Snapshot(),
+                        bs_client,
                         dry_run=True,
-                    )
-                    _plans, _events, remote_summary = engine_run(
-                        root,
-                        ctx,
-                        BsPageAdapter(),
-                        index=dry_index,
-                        state=state,
+                        force_local=set(),
+                        force_remote=set(),
                         snapshot=Snapshot(),
-                        failures=wiki_failures,
-                        options=RunOptions(dry_run=True),
                     )
+                    remote_summaries["wiki"] = wiki_result.summaries
             except GrisonError as e:
-                remote_error = str(e)
+                remote_bs_error = str(e)
         else:
-            remote_error = "BookStack credentials not configured"
+            remote_bs_error = "BookStack credentials not configured"
 
     offline_problems = bool(
         offline.counts["invalid"]
@@ -308,16 +342,7 @@ def status(
         or reports_offline.counts["unknown"]
         or reports_offline.collision_sidecars
     )
-    problems = (
-        offline_problems
-        or reports_problems
-        or (
-            remote_summary is not None
-            and any(
-                k in remote_summary.counts for k in ("collision", "invalid", "failed", "withheld")
-            )
-        )
-    )
+    problems = offline_problems or reports_problems or _remote_has_problems(remote_summaries)
 
     if json_output:
         payload = {
@@ -347,9 +372,13 @@ def status(
                 "images": {str(d): _fileset_json(c) for d, c in image_counts.items()},
             },
             "remote": (
-                {"counts": remote_summary.counts, "problem_paths": remote_summary.problem_paths}
-                if remote_summary is not None
-                else remote_error
+                {
+                    "report": _remote_phase_json(remote_summaries, "report", remote_gw_error),
+                    "findings": _remote_phase_json(remote_summaries, "findings", remote_gw_error),
+                    "wiki": _remote_phase_json(remote_summaries, "wiki", remote_bs_error),
+                }
+                if remote
+                else None
             ),
             "last_sync": {
                 "findings": phases.get("findings"),
@@ -376,13 +405,23 @@ def status(
     if image_counts:
         typer.echo(f"images: {_fileset_status_line(image_counts)}")
     _print_offline_non_clean(offline, area="methodology")
-    if remote_summary is not None:
-        counts = ", ".join(f"{k} {v}" for k, v in sorted(remote_summary.counts.items()))
-        typer.echo(f"remote (--remote, dry-run): {counts}")
-        for problem_path in remote_summary.problem_paths:
-            typer.secho(f"  ! {problem_path}", fg=typer.colors.RED)
-    elif remote_error is not None:
-        typer.secho(f"remote: {remote_error}", fg=typer.colors.YELLOW)
+    if remote:
+        any_kind_line = False
+        for phase in ("report", "findings", "wiki"):
+            for kind, summary in sorted(remote_summaries.get(phase, {}).items()):
+                counts = ", ".join(f"{k} {v}" for k, v in sorted(summary.counts.items()) if v)
+                if not counts:
+                    continue
+                any_kind_line = True
+                typer.echo(f"remote {phase} ({kind}): {counts}")
+                for problem_path in summary.problem_paths:
+                    typer.secho(f"  ! {problem_path}", fg=typer.colors.RED)
+        if remote_gw_error is not None:
+            typer.secho(f"remote (ghostwriter): {remote_gw_error}", fg=typer.colors.YELLOW)
+        if remote_bs_error is not None:
+            typer.secho(f"remote (bookstack): {remote_bs_error}", fg=typer.colors.YELLOW)
+        if not any_kind_line and remote_gw_error is None and remote_bs_error is None:
+            typer.echo("remote (--remote, dry-run): clean")
     for phase in ("findings", "report", "wiki"):
         info = phases.get(phase)
         if info is None:
@@ -393,6 +432,37 @@ def status(
 
     if problems:
         raise typer.Exit(code=1)
+
+
+def _remote_has_problems(remote_summaries: dict[str, dict[str, KindSummary]]) -> bool:
+    """``--remote``'s exit-code contribution: any kind, in any phase, that reached a
+    problem outcome (matches ``grison sync``'s own result/exit-code policy,
+    ENGINE.md §10) — a credentials-not-configured/transport error is reported but
+    never itself flips the exit code (same as the offline-only ``remote_error``
+    behaviour this replaces)."""
+    return any(
+        k in summary.counts
+        for phase_summaries in remote_summaries.values()
+        for summary in phase_summaries.values()
+        for k in ("collision", "invalid", "failed", "withheld")
+    )
+
+
+def _remote_phase_json(
+    remote_summaries: dict[str, dict[str, KindSummary]], phase: str, error: str | None
+) -> dict[str, Any] | str:
+    """One ``--remote`` phase's ``--json`` payload: the per-kind counts/problem
+    paths this phase's dry run actually reached, or — when that leg's credentials
+    were missing/it failed before reaching this phase — the error message (``str``,
+    same shape offline ``status``'s ``remote_error`` used before this phase split)."""
+    if phase not in remote_summaries:
+        return error if error is not None else "not attempted"
+    return {
+        "kinds": {
+            kind: {"counts": s.counts, "problem_paths": s.problem_paths}
+            for kind, s in remote_summaries[phase].items()
+        }
+    }
 
 
 def _entry_json(e: StatusEntry) -> dict[str, Any]:
@@ -1675,6 +1745,24 @@ def undo(
             gw_client = stack.enter_context(_make_gw_client(creds))
             if kinds & findings_gw_kinds:
                 gw_ctx = GWContext.build(gw_client, index)
+                # item 3 (fix-undo-repair): the SAME evidence_by_report a real sync's
+                # findings phase builds (_run_reports_phase/_run_findings_phase) — a
+                # reported finding's own canonical_remote() resolves a plain
+                # cross-reference (`[caption](evidence/x.png)`, by NAME on the wire —
+                # see grison.engine.filesets._LiteralEmbedResolver.to_local) through
+                # these rows; an EMPTY dict here (the bug) makes undo's own restamp
+                # resolve that name to a placeholder instead of the real evidence id,
+                # so it can never agree with what the next real sync computes — either
+                # a spurious "changed since the sync, not restoring" refusal (this
+                # op's own pre-write re-fetch guard) or a one-off benign `repair` on
+                # the sync right after undo, depending on which of the two
+                # canonical_remote() calls it trips. An embed (native
+                # `data-evidence-id="N"`) resolves by id via the index alone and was
+                # never affected — only cross-references were.
+                evidence_by_report: dict[int, dict[int, dict[str, Any]]] = {}
+                for report_id in gw_ctx.report_dirs.values():
+                    rows = GwEvidenceAdapter(report_id=report_id).list_remote(gw_ctx)
+                    evidence_by_report[report_id] = {i: r.data for i, r in rows.items()}
                 # the library adapter's ctx is the bare client (no report scoping
                 # — see its class docstring), the other two take the GWContext.
                 adapters[GwLibraryFindingAdapter.kind] = _BoundAdapter(
@@ -1682,7 +1770,7 @@ def undo(
                     gw_client,
                 )
                 adapters[GwReportedFindingAdapter.kind] = _BoundAdapter(
-                    GwReportedFindingAdapter(index=index, evidence_by_report={}),
+                    GwReportedFindingAdapter(index=index, evidence_by_report=evidence_by_report),
                     gw_ctx,
                 )
                 adapters[GwEvidenceAdapter.kind] = _BoundAdapter(
@@ -1757,7 +1845,10 @@ def _workspace_lock(root: Path) -> Iterator[None]:
                 "another grison sync is already running in this workspace (.grison/lock held)",
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(code=1) from None
+            # ENGINE.md §10: "could not run" (no fetch has happened yet) is exit 2,
+            # the same class as no-workspace/bad-creds/incompatible-server — never
+            # exit 1 (that's for a run that happened but needs attention).
+            raise typer.Exit(code=2) from None
         yield
     finally:
         fcntl.flock(fh, fcntl.LOCK_UN)
