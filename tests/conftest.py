@@ -78,6 +78,23 @@ def workspace(tmp_path: Path, gw_server: FakeGhostwriter, bs_server: FakeBookSta
     return root
 
 
+def tree_snapshot(root: Path, *, exclude: frozenset[str] = frozenset()) -> dict[str, bytes]:
+    """Every file under ``root`` (workspace tree + ``.grison/`` alike), path ->
+    exact bytes — for asserting a command wrote nothing at all (e.g. ``status
+    --remote``'s dry-run classify, or a sync refused before its first fetch): two
+    snapshots taken before/after must compare equal. ``exclude`` names relative
+    paths to leave out entirely (e.g. ``.grison/state/mirrors.json``, which
+    ``grison.scaffold.orchestrate._scaffold_spec`` unconditionally re-records on
+    EVERY ``sync``/``parse`` call — including one a workspace lock then refuses —
+    a pre-existing, unrelated-to-the-lock quirk, not something the caller is
+    testing)."""
+    return {
+        str(p.relative_to(root)): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file() and str(p.relative_to(root)) not in exclude
+    }
+
+
 @pytest.fixture
 def run_grison(
     workspace: Path,

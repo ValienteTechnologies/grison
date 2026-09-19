@@ -131,14 +131,27 @@ def test_a_lone_skip_does_not_by_itself_change_the_exit_code(run_grison, bs_serv
 
 
 def test_second_concurrent_sync_refuses_while_the_lock_is_held(run_grison, workspace) -> None:
+    """ENGINE.md §10: refusing before the first fetch is "could not run" (exit 2),
+    not "ran but needs attention" (exit 1) — tests changed on purpose: this used to
+    assert exit 1. Nothing is written either (the refusal happens before
+    `sync`'s pre-sync git checkpoint or any phase runs)."""
+    from tests.conftest import tree_snapshot
+
+    run_grison("sync")  # one real (unlocked) sync first, so bootstrap scaffolding
+    # (CLAUDE.md, .claude/settings.json, …) has already happened and isn't mistaken
+    # for something the REFUSED sync below wrote.
+
     lock_dir = workspace / ".grison"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_file = (lock_dir / "lock").open("w", encoding="utf-8")
     fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    exclude = frozenset({".grison/state/mirrors.json"})
     try:
+        before = tree_snapshot(workspace, exclude=exclude)
         result = run_grison("sync")
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "another grison sync is already running" in result.output
+        assert tree_snapshot(workspace, exclude=exclude) == before
     finally:
         fcntl.flock(lock_file, fcntl.LOCK_UN)
         lock_file.close()

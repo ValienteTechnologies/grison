@@ -56,6 +56,7 @@ from typing import Any
 
 from grison.errors import GrisonError
 from grison.fsio import atomic_write_text
+from grison.hashing import digest_text
 from grison.manifest import PRIVATE_ENTRIES
 
 SETTINGS_RELATIVE_PATH = ".claude/settings.json"
@@ -188,3 +189,23 @@ def build_settings(existing: dict[str, Any] | None, *, force: bool = False) -> d
 
 def write_settings(root: Path, settings: dict[str, Any]) -> None:
     atomic_write_text(root / SETTINGS_RELATIVE_PATH, json.dumps(settings, indent=2) + "\n")
+
+
+def fragment_digest(deny: list[Any], post_tool_use: list[Any]) -> str:
+    """The digest recorded for/checked against ``.claude/settings.json`` (item 2 of
+    the grison-owned-file validator rules): covers ONLY grison's own canonical deny
+    rules (:data:`CANONICAL_DENY`) that are present in ``deny``, plus whether its own
+    post-edit hook entry is present in ``post_tool_use`` — never the whole file, so a
+    user's own additional deny/allow rules, other ``hooks`` entries, or any other top-
+    level key are never part of the comparison and so never flagged as a hand-edit.
+    Called with the MERGED settings at scaffold time (records the full-canonical-set
+    baseline) and with the LIVE on-disk settings at validate time (WS-011/WS-012) —
+    same function, so the two can never drift apart on what "matches" means."""
+    canonical_present = sorted(
+        {d for d in deny if isinstance(d, str)} & set(CANONICAL_DENY)
+    )
+    hook_present = isinstance(post_tool_use, list) and any(
+        _is_grison_hook_entry(h) for h in post_tool_use
+    )
+    fragment = {"deny": canonical_present, "hook_present": hook_present}
+    return digest_text(json.dumps(fragment, sort_keys=True))

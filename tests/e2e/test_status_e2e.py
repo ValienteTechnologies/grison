@@ -190,9 +190,110 @@ def test_status_remote_shows_a_dry_run_pull_without_writing_anything(run_grison,
     result = run_grison("status", "--remote")
 
     assert result.exit_code == 0  # a will-pull is not itself a problem
-    assert "remote (--remote, dry-run): pull_new 1" in result.output
-    assert not (Path.cwd() / "methodology").exists()  # dry-run: nothing written
+    # tests changed on purpose (item 1: --remote now dry-run classifies EVERY phase,
+    # not just wiki, so the aggregate single-line "remote (--remote, dry-run): ..."
+    # became one line per (phase, kind) — see grison.cli.status's own docstring).
+    assert "remote wiki (bs.page): pull_new 1" in result.output
+    # tests changed on purpose: --remote now reuses `grison sync`'s own phase
+    # functions, which scope `validate_workspace` to a path that must already exist
+    # (a deliberate validator invariant — "never silently treated as nothing to
+    # check", grison/validator/core.py) — so `status --remote` ensures the same
+    # plain, empty workspace directory tree `sync`'s own bootstrap always guarantees
+    # (`grison.workspace.bootstrap_tree`; no FILE is ever created by it). No page
+    # file was written under it either way — that's the real "nothing written" claim.
+    assert (Path.cwd() / "methodology").is_dir()
+    assert not any((Path.cwd() / "methodology").rglob("*.md"))
     assert bs_server.operation_log == []  # dry-run never mutates BookStack
+
+
+# ---------------------------------------------------------------------------
+# --remote now dry-run classifies Ghostwriter's phases too (item 1), not just
+# the BookStack/wiki side: report -> findings, same phase functions `grison
+# sync` itself uses, in dry-run mode.
+# ---------------------------------------------------------------------------
+
+
+def test_status_remote_reports_a_pending_push_and_a_pending_pull_and_writes_nothing(
+    run_grison, gw_server, bs_server
+):
+    from tests.conftest import tree_snapshot
+
+    gw_server.store.seed_finding(id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4)
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
+    run_grison("sync")  # pulls both, so there's something to edit on each side
+
+    lib_path = Path.cwd() / "findings" / "library" / "weak-tls-ciphers.md"
+    lib_path.write_text(
+        lib_path.read_text(encoding="utf-8").replace("Weak TLS", "Locally-Edited Weak TLS"),
+        encoding="utf-8",
+    )
+    bs_server.store.edit_page(page["id"], markdown="# Hi\n\nEdited on the server.")
+
+    root = Path.cwd()
+    before = tree_snapshot(root)
+    gw_ops_before = len(gw_server.operation_log)
+    bs_ops_before = len(bs_server.operation_log)
+
+    result = run_grison("status", "--remote")
+
+    assert result.exit_code == 0  # a pending push/pull is not itself a problem
+    assert "remote findings (gw.finding): push 1" in result.output, result.output
+    assert "remote wiki (bs.page): pull 1" in result.output, result.output
+    # dry-run: writes NOTHING anywhere — no state, no snapshot, no sidecars, no
+    # index save, no remote mutation (verified byte-for-byte, not just "still valid
+    # JSON") — the exact guarantee item 1 asks for.
+    assert tree_snapshot(root) == before
+    assert len(gw_server.operation_log) == gw_ops_before
+    assert len(bs_server.operation_log) == bs_ops_before
+
+
+def test_status_remote_json_shape(run_grison, gw_server, bs_server):
+    gw_server.store.seed_finding(id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4)
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Getting Started", markdown="# Hi")
+    run_grison("sync")
+
+    lib_path = Path.cwd() / "findings" / "library" / "weak-tls-ciphers.md"
+    lib_path.write_text(
+        lib_path.read_text(encoding="utf-8").replace("Weak TLS", "Edited Weak TLS"),
+        encoding="utf-8",
+    )
+
+    result = run_grison("status", "--remote", "--json")
+    payload = json.loads(result.output)
+
+    remote = payload["remote"]
+    assert set(remote) == {"report", "findings", "wiki"}
+    # report/findings/wiki: each either {"kinds": {<kind>: {"counts": ..., "problem_paths": ...}}}
+    # (that leg's credentials worked and it ran) or a plain error string (credentials
+    # missing / the leg failed before classifying) — never both shapes mixed for one
+    # phase.
+    assert remote["findings"]["kinds"]["gw.finding"]["counts"] == {"push": 1}
+    assert remote["findings"]["kinds"]["gw.finding"]["problem_paths"] == []
+    assert "kinds" in remote["report"]
+    assert "kinds" in remote["wiki"]
+
+
+def test_status_remote_reports_missing_credentials_per_leg(run_grison, workspace):
+    (workspace / ".grison" / "env").write_text(
+        "GRISON_GW_URL=\nGRISON_GW_TOKEN=\nGRISON_BS_URL=\n"
+        "GRISON_BS_TOKEN_ID=\nGRISON_BS_TOKEN_SECRET=\n",
+        encoding="utf-8",
+    )
+
+    json_result = run_grison("status", "--remote", "--json")
+    payload = json.loads(json_result.output)
+
+    assert json_result.exit_code == 0  # missing creds is informational, not a "problem"
+    assert payload["remote"]["report"] == "Ghostwriter credentials not configured"
+    assert payload["remote"]["findings"] == "Ghostwriter credentials not configured"
+    assert payload["remote"]["wiki"] == "BookStack credentials not configured"
+
+    text_result = run_grison("status", "--remote")
+    assert text_result.exit_code == 0
+    assert "remote (ghostwriter): Ghostwriter credentials not configured" in text_result.output
+    assert "remote (bookstack): BookStack credentials not configured" in text_result.output
 
 
 # ---------------------------------------------------------------------------
