@@ -1050,12 +1050,13 @@ def test_non_ascii_evidence_filename_pushes_from_a_reported_finding(
     gw_server,
     workspace,
 ):
-    """grison.markdown.refscan item 3's fix also applies to GwRefResolver
-    (grison/adapters/gw_findings.py) — markdown-it-py percent-encodes non-ASCII
-    bytes in an image destination on the converter's own parse, so
-    GwRefResolver.to_remote/_id_for_path used to fail to resolve
-    evidence/Phishing_Sonuçları.png against the index (keyed by the real,
-    decoded path) and raise ConverterError instead of pushing."""
+    """grison.markdown.refscan item 3's fix also applies to IndexRefResolver
+    (grison/adapters/_gw_common.py, used here via GwReportedFindingAdapter) —
+    markdown-it-py percent-encodes non-ASCII bytes in an image destination on
+    the converter's own parse, so IndexRefResolver.to_remote/_id_for_local_path
+    used to fail to resolve evidence/Phishing_Sonuçları.png against the index
+    (keyed by the real, decoded path) and raise ConverterError instead of
+    pushing."""
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_evidence(
         id=90,

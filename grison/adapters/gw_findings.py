@@ -23,8 +23,9 @@ exactly the "CREATE + DELETE" the brief calls for, with no special-casing here.
 
 Evidence embeds (D1): every prose section goes through
 :func:`grison.engine.filesets.canonical_prose`/:func:`grison.markdown.converter.
-md_to_html` with a :class:`GwRefResolver` built from the index's ``gw.evidence``
-entries for the finding's own report (a library finding gets no resolver at
+md_to_html` with a :class:`~grison.adapters._gw_common.IndexRefResolver` built
+from the index's ``gw.evidence`` entries for the finding's own report (a
+library finding gets no resolver at
 all — BRIEF: "a library finding cannot carry affected_entities/evidence" — an
 embed found in one is a validator failure (REF-005) that the apply loop's
 validation gate turns into INVALID before ``create``/``update`` is ever
@@ -68,7 +69,7 @@ from html import unescape as html_unescape
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from grison.adapters._gw_common import GWContext
+from grison.adapters._gw_common import GWContext, IndexRefResolver
 from grison.engine.adapter import AdapterMode
 from grison.engine.filesets import canonical_prose, canonical_remote_prose
 from grison.engine.model import Canonical, LocalDoc, RemoteRecord, Veto
@@ -76,8 +77,7 @@ from grison.formats import finding as finding_fmt
 from grison.formats.common import FormatError
 from grison.index import Index, IndexKind
 from grison.markdown.converter import md_to_html
-from grison.markdown.refs import LocalRef, RefResolver, RemoteRef
-from grison.markdown.refscan import decode_ref_path
+from grison.markdown.refs import RefResolver
 from grison.model.cvss import parse_cvss
 from grison.model.cwe import is_known_cwe
 from grison.model.enums import FindingType, Severity
@@ -135,73 +135,13 @@ def _split_tags(tag_names: Iterable[str]) -> tuple[list[str], list[str]]:
     return sorted(set(cwe)), plain
 
 
-# --- the evidence RefResolver (D1) --------------------------------------------------
-
-
-@dataclass(frozen=True)
-class GwRefResolver:
-    """Resolves ``evidence/<file>`` against one report's indexed ``gw.evidence``
-    entries — built fresh per report by the adapters below from the index (D3:
-    identity lives in the index, never in the document) plus that report's
-    evidence rows (for the friendly-name a cross-reference embeds — D1: grison
-    never authors a friendlyName, but a cross-reference's native span still
-    needs SOME stable name to key on, so it reuses whatever Ghostwriter already
-    has for that row)."""
-
-    report_dir: PurePosixPath
-    index: Index
-    evidence_rows: dict[int, dict[str, Any]]  # id -> {filename, caption, description, ...}
-
-    def _id_for_path(self, path: str) -> int | None:
-        if not path.startswith("evidence/"):
-            return None
-        # ``path`` reaches here either already-decoded (a scan_refs-sourced call)
-        # or still percent-encoded (a call from grison.markdown.converter's OWN,
-        # separate markdown-it parse, during an actual push — markdown-it-py
-        # percent-encodes non-ASCII bytes in a destination) — decode_ref_path is
-        # a safe no-op on the former, matching grison.adapters._gw_common.
-        # IndexRefResolver's identical fix.
-        rec = self.index.get(str(self.report_dir / decode_ref_path(path)))
-        if rec is None or rec.kind is not IndexKind.GW_EVIDENCE:
-            return None
-        return rec.id
-
-    def to_remote_id(self, path: str) -> int | None:
-        return self._id_for_path(path)
-
-    def to_remote(self, path: str) -> RemoteRef | None:
-        eid = self._id_for_path(path)
-        if eid is None:
-            return None
-        row = self.evidence_rows.get(eid, {})
-        name = row.get("friendly_name") or PurePosixPath(decode_ref_path(path)).stem
-        return RemoteRef("gw-evidence", id=eid, name=name, url=None)
-
-    def to_local(self, remote: RemoteRef) -> LocalRef | None:
-        eid = remote.id
-        if eid is None and remote.name is not None:
-            eid = next(
-                (i for i, r in self.evidence_rows.items() if r.get("friendly_name") == remote.name),
-                None,
-            )
-        if eid is None:
-            return None
-        path = self.index.path_of(IndexKind.GW_EVIDENCE, eid)
-        if path is None:
-            return None
-        rel = PurePosixPath(path).relative_to(self.report_dir)
-        row = self.evidence_rows.get(eid, {})
-        return LocalRef(
-            path=str(rel), caption=row.get("caption", ""), description=row.get("description", "")
-        )
-
-
-_EMPTY_RESOLVER = GwRefResolver(
-    report_dir=PurePosixPath(), index=Index(root=Path()), evidence_rows={}
-)
-
-
 # --- shared plain-field <-> GW mapping ----------------------------------------------
+
+# The RefResolver for a finding's own report — grison.adapters._gw_common.
+# IndexRefResolver, the same one narrative sections/notes use (D1). A library
+# finding has no report, so it gets this empty stand-in instead of ``None``
+# scattered through the canonicalizers below.
+_EMPTY_RESOLVER = IndexRefResolver(index=Index(root=Path()), report_dir="")
 
 
 def _plain_canonical(doc: finding_fmt.FindingDoc) -> dict[str, Any]:
@@ -227,12 +167,16 @@ def _remote_plain_canonical(data: dict[str, Any], tags: list[str]) -> dict[str, 
     }
 
 
-def _sections_canonical(doc: finding_fmt.FindingDoc, refs: GwRefResolver | None) -> dict[str, Any]:
+def _sections_canonical(
+    doc: finding_fmt.FindingDoc, refs: IndexRefResolver | None
+) -> dict[str, Any]:
     resolver = refs if refs is not None else _EMPTY_RESOLVER
     return {f: canonical_prose(getattr(doc, f), resolver) for f in _SECTIONS}
 
 
-def _remote_sections_canonical(data: dict[str, Any], refs: GwRefResolver | None) -> dict[str, Any]:
+def _remote_sections_canonical(
+    data: dict[str, Any], refs: IndexRefResolver | None
+) -> dict[str, Any]:
     """D1 ("replacing an image's bytes must re-push every finding referencing
     it, automatically, in the same run"): unlike :func:`_sections_canonical`
     (the LOCAL side, which resolves each embed's id through the live index via
@@ -246,7 +190,7 @@ def _remote_sections_canonical(data: dict[str, Any], refs: GwRefResolver | None)
     overwrite."""
     name_to_id = {
         row["friendly_name"]: eid
-        for eid, row in (refs.evidence_rows.items() if refs is not None else ())
+        for eid, row in (refs.rows().items() if refs is not None else ())
         if row.get("friendly_name")
     }
     # headings=True: a real TipTap editor emits h1-h6 in finding fields too (see
@@ -303,9 +247,10 @@ class _LibraryDoc:
 
 class GwLibraryFindingAdapter:
     """``findings/library/*.md`` <-> Ghostwriter ``finding`` rows. No evidence, no
-    ``reportId`` — a library finding never has a :class:`GwRefResolver` (see
-    module docstring); ``ctx`` is a :class:`~grison.remote.ghostwriter.
-    GhostwriterClient` directly (no report scoping needed)."""
+    ``reportId`` — a library finding never has a real
+    :class:`~grison.adapters._gw_common.IndexRefResolver` (see module docstring);
+    ``ctx`` is a :class:`~grison.remote.ghostwriter.GhostwriterClient` directly
+    (no report scoping needed)."""
 
     kind = "gw.finding"
     mode: AdapterMode = "read-write"
@@ -450,16 +395,20 @@ class GwReportedFindingAdapter:
     built by the caller from every report's :class:`~grison.adapters.
     gw_evidence.GwEvidenceAdapter` right before this adapter runs, so evidence
     ids/friendly-names/captions used to build each report's
-    :class:`GwRefResolver` are current."""
+    :class:`~grison.adapters._gw_common.IndexRefResolver` are current."""
 
     index: Index
     evidence_by_report: dict[int, dict[int, dict[str, Any]]]
     kind: str = "gw.reportedFinding"
     mode: AdapterMode = "read-write"
 
-    def _resolver(self, report_id: int | None, report_dir: PurePosixPath) -> GwRefResolver:
+    def _resolver(self, report_id: int | None, report_dir: PurePosixPath) -> IndexRefResolver:
         rows = self.evidence_by_report.get(report_id, {}) if report_id is not None else {}
-        return GwRefResolver(report_dir=report_dir, index=self.index, evidence_rows=rows)
+        # IndexRefResolver.report_dir is the bare directory name (workspace-relative
+        # under findings/reports/ — see its own field docstring); `report_dir` here
+        # is the FULL path (e.g. "findings/reports/<dir>"), so only its final
+        # component is what the resolver wants.
+        return IndexRefResolver(report_dir=report_dir.name, index=self.index, evidence_rows=rows)
 
     def scan_local(self, root: Path) -> Iterable[LocalDoc]:
         base = root / "findings" / "reports"

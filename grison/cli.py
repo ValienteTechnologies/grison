@@ -59,7 +59,7 @@ from grison.remote.compat import SchemaCompatibilityError, check_ghostwriter_com
 from grison.remote.creds import Creds, MissingCreds, Settings, load_settings
 from grison.remote.creds import load as load_creds
 from grison.remote.ghostwriter import GhostwriterClient
-from grison.sinks import ParseSummary, run_parse
+from grison.sinks import ParsePathNotFound, ParseSummary, run_parse
 from grison.validator import find_workspace_root, validate_workspace
 from grison.workspace import bootstrap_tree, inbox_dir
 
@@ -148,6 +148,17 @@ def parse(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without writing.")] = False,
 ) -> None:
     """Turn scanner export(s) into markdown findings in findings/inbox/ (offline)."""
+    missing = [p for p in paths if not p.exists()]
+    if missing:
+        # "could not run" (a typo'd/missing path), never "ran and found nothing" —
+        # exit 2, before any scaffolding/parsing/writing, the same class as
+        # no-workspace/bad-creds elsewhere in this file.
+        typer.secho(
+            f"error: no such file or directory: {', '.join(str(p) for p in missing)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
     root = Path.cwd()
     if out is None:
         # The binary scaffolds; no init. A full workspace, not just the bare
@@ -162,14 +173,20 @@ def parse(
         out_dir = inbox_dir(root)
     else:
         out_dir = out
-    summary = run_parse(
-        paths,
-        out_dir,
-        scanner=scanner,
-        finding_type=finding_type,
-        min_severity=min_severity,
-        dry_run=dry_run,
-    )
+    try:
+        summary = run_parse(
+            paths,
+            out_dir,
+            scanner=scanner,
+            finding_type=finding_type,
+            min_severity=min_severity,
+            dry_run=dry_run,
+        )
+    except ParsePathNotFound as e:
+        # "could not run" (a typo'd/missing path), never "ran and found nothing" —
+        # exit 2, the same class as no-workspace/bad-creds elsewhere in this file.
+        typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from None
     _print_parse_summary(summary, out_dir, dry_run=dry_run)
     if not dry_run:
         _git_commit_or_warn(root, load_settings(root), f"grison: parse {_scanner_label(summary)}")
@@ -184,9 +201,9 @@ def status(
         bool,
         typer.Option(
             "--remote",
-            help="Also contact BookStack and classify (dry-run, no writes) "
-            "what a sync would do — offline otherwise (index + private state + the "
-            "validator only).",
+            help="Also contact Ghostwriter and BookStack and classify (dry-run, no "
+            "writes) what a sync would do — offline otherwise (index + private "
+            "state + the validator only).",
         ),
     ] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
@@ -639,9 +656,9 @@ def sync(
         bool,
         typer.Option(
             "--json",
-            help="Emit the wiki phase's events as JSON lines (one object "
-            "per event plus a final summary object). The findings/report phases are "
-            "not yet engine-managed and keep their existing text output either way.",
+            help="Emit each phase that runs (findings/report/wiki) as JSON lines "
+            "instead of its normal text summary (one object per event plus a "
+            "final summary object).",
         ),
     ] = False,
     verbose: Annotated[
@@ -1150,9 +1167,10 @@ def _run_wiki_phase(
     """The wiki phase: BookStack structure (books/chapters/shelves — creates any new
     local book/chapter directory, then regenerates the read-only mirrors), then pages
     through :mod:`grison.engine.apply`. The validation gate is scoped to
-    ``methodology/`` here (task step 1's scope parameter — findings/reports are still
-    format v1 and would fail v2 validation wholesale); pulls are never blocked by it,
-    only pushes/creates/deletes (see ``grison.engine.apply``'s own gate).
+    ``methodology/`` here (task step 1's scope parameter), same pattern as the
+    findings phase's own ``findings/`` scoping (:func:`_run_findings_phase`) — each
+    phase validates only its own subtree; pulls are never blocked by it, only
+    pushes/creates/deletes (see ``grison.engine.apply``'s own gate).
 
     ``snapshot`` is ``grison.cli.sync``'s ONE run-wide :class:`Snapshot`, shared with
     the report and findings phases that already ran — this phase's own writes
@@ -1412,9 +1430,10 @@ def _run_reports_phase(
     established (``evidence_by_report``, returned alongside the result — the
     findings phase's ``GwReportedFindingAdapter`` needs the exact same rows, built
     only ONCE here and shared rather than re-fetched, per the coordinator's
-    instruction). The validation gate is scoped to ``findings/reports``
-    (findings/library and findings/inbox are still format v1 — the findings phase,
-    not this one).
+    instruction). The validation gate is scoped to ``findings/reports`` — this
+    phase only pushes/pulls report-owned records (narrative sections, notes);
+    a reported/library finding document's own gate is the findings phase's
+    ``findings/``-scoped one instead (:func:`_run_findings_phase`).
 
     Evidence's own plans/summaries/events land in THIS phase's result (a deliberate
     choice — the alternative, folding them into ``FindingsPhaseResult`` instead, was

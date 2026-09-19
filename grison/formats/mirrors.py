@@ -174,7 +174,3 @@ def dump_shelf_mirror(doc: ShelfMirrorDoc) -> str:
 def parse_project_context(text: str, *, path: Path) -> ProjectContextDoc:
     del path
     return ProjectContextDoc(body=text)
-
-
-def dump_project_context(doc: ProjectContextDoc) -> str:
-    return doc.body

@@ -483,18 +483,6 @@ mutation($id: bigint!, $set: evidence_set_input!) {
 }
 """
 
-_EVIDENCE_BY_IDS_QUERY = """
-query($ids: [bigint!]) {
-  evidence(where: {id: {_in: $ids}}) {
-    id
-    document
-    caption
-    friendlyName
-    description
-  }
-}
-"""
-
 _DELETE_EVIDENCE_MUTATION = """
 mutation($id: bigint!) {
   delete_evidence_by_pk(id: $id) {
@@ -793,15 +781,6 @@ class GhostwriterClient(BaseHttpClient):
         """
         data = self._post(_UPDATE_EVIDENCE_MUTATION, {"id": evidence_id, "set": fields})
         return data["update_evidence_by_pk"]
-
-    def fetch_evidence_by_ids(self, ids: list[int]) -> list[dict]:
-        """``id/document/caption/friendlyName/description`` rows for a set of evidence
-        ids — used right after an upload batch to adopt Ghostwriter's stored basename
-        (Django's storage appends ``_<rand7>`` on a filename collision, so the sent
-        name isn't guaranteed to be what actually landed)."""
-        if not ids:
-            return []
-        return self._post(_EVIDENCE_BY_IDS_QUERY, {"ids": ids}, idempotent=True)["evidence"]
 
     def delete_evidence(self, evidence_id: int) -> None:
         self._post(_DELETE_EVIDENCE_MUTATION, {"id": evidence_id})

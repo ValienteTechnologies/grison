@@ -381,7 +381,7 @@ validated by §5.
 
 ## 3. Report-owned files (`REP-…`)
 
-### 3.1 Narrative sections
+### 3.1 Narrative sections (`REP-001`, `REP-003`)
 
 `findings/reports/<dir>/narrative/<field>.md` — one file per instance-defined
 `extraFieldSpec` row on the Report model (Ghostwriter's `internalName` column is the
@@ -1017,6 +1017,7 @@ IS a validator rule — see §1.10 (`WS-011`/`WS-012`).
 | FND-017 | the finding document's frontmatter is missing or not valid YAML |
 | REP-001 | a narrative section's or note's markdown does not convert to Ghostwriter HTML |
 | REP-002 | a notes/ file's frontmatter shape does not match whether it is indexed |
+| REP-003 | a narrative/<field>.md file's field is not in this report's extraFieldSpec (per .report.yml's recorded narrative_order) |
 | WIKI-001 | an unrecognized frontmatter field is present on a wiki page |
 | WIKI-002 | a wiki page's title is missing or blank |
 | WIKI-003 | a wiki page's priority is not an integer |

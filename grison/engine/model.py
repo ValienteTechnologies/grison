@@ -119,31 +119,6 @@ class RemoteRecord:
 
 
 @dataclass
-class RecordInput:
-    """Everything :func:`grison.engine.classify.classify` needs for one record slot:
-    what's on disk (or not), what's on the server (or not), and the merge base from
-    state. Never mutated by classify() — apply.py builds one of these per record after
-    identity resolution (:mod:`grison.engine.identity`) has already turned any
-    move/move+edit pair into its own :class:`Plan`, so a ``RecordInput`` only ever
-    describes an ordinary indexed record, a brand-new local file, or a brand-new
-    remote record classify's table calls CREATE / PULL_NEW."""
-
-    kind: str
-    path: PurePosixPath | None
-    id: int | None
-    local: LocalDoc | None
-    remote: RemoteRecord | None
-    local_hash: str | None
-    remote_hash: str | None
-    base_hash: str | None
-    indexed: bool
-    read_only: bool = False
-    append_only: bool = False
-    force_local: bool = False
-    force_remote: bool = False
-
-
-@dataclass
 class Plan:
     """classify()'s (or identity's move-pairing's) verdict for one record, with enough
     context for apply() to act on it and for events/results to describe it."""
@@ -211,26 +186,3 @@ class KindSummary:
 
     def bump(self, outcome: Outcome) -> None:
         self.counts[outcome.value] = self.counts.get(outcome.value, 0) + 1
-
-
-@dataclass
-class SyncResult:
-    """One engine run's full result — every plan actually reached, every event
-    emitted, per-kind summaries, the exit code (ENGINE.md §10), and the snapshot dir
-    (when the run captured undo state)."""
-
-    plans: list[Plan] = field(default_factory=list)
-    events: list[Event] = field(default_factory=list)
-    summaries: dict[str, KindSummary] = field(default_factory=dict)
-    snapshot_dir: str | None = None
-    dry_run: bool = False
-
-    def summary_for(self, kind: str) -> KindSummary:
-        return self.summaries.setdefault(kind, KindSummary(kind=kind))
-
-    @property
-    def exit_code(self) -> int:
-        for p in self.plans:
-            if p.is_problem:
-                return 1
-        return 0

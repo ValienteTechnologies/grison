@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -77,6 +78,48 @@ def test_a_clean_commit_succeeds(tmp_path: Path) -> None:
         ["git", "log", "--pretty=%s"], cwd=tmp_path, capture_output=True, text=True
     ).stdout
     assert "add a clean finding" in log
+
+
+def test_grison_missing_from_path_blocks_the_commit_with_a_clear_message(
+    tmp_path: Path,
+) -> None:
+    """Bug fix: the generated hook used to invoke a bare `grison validate` with no
+    existence check — if `grison` isn't on the PATH a commit runs under (a fresh
+    clone before `uv sync`, a shell that doesn't source the profile a hook runs
+    under), that surfaced as a confusing shell "command not found" rather than a
+    clear, grison-named reason. It must still refuse the commit (never a silent
+    pass) but say plainly that `grison` itself is missing."""
+    bootstrap_workspace(tmp_path)
+    _init_repo(tmp_path)
+    precommit.install_precommit_hook(tmp_path)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial scaffold"], cwd=tmp_path, check=True)
+
+    good = tmp_path / "findings" / "library" / "good.md"
+    good.write_text(
+        "---\nseverity: low\nfinding_type: web\n---\n"
+        "# x\n\n## Description\n\nx\n\n## Impact\n\nx\n\n## Mitigation\n\nx\n\n"
+        "## Replication Steps\n\nx\n\n## References\n\nx\n"
+    )
+    # A minimal PATH with git/sh but deliberately no grison — simulates the real
+    # "not installed yet" case without needing to actually uninstall anything.
+    env = dict(os.environ)
+    env["PATH"] = "/usr/bin:/bin"
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    result = subprocess.run(
+        ["git", "commit", "-m", "add a clean finding"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "grison" in output and "PATH" in output
+    log = subprocess.run(
+        ["git", "log", "--pretty=%s"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert "add a clean finding" not in log
 
 
 def test_an_existing_foreign_hook_is_left_untouched(tmp_path: Path) -> None:

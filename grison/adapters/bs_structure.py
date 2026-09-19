@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from grison.adapters._bs_common import BSContext, slugify
+from grison.adapters._bs_common import BSContext
 from grison.engine.mirrors import MirrorWrite, write_mirror_guarded
 from grison.engine.model import RemoteRecord
 from grison.engine.state import StateStore
@@ -329,9 +329,3 @@ def sync_structure(  # noqa: PLR0912, PLR0913, PLR0915
     if not dry_run:
         state.save_mirrors(mirrors)
     return result
-
-
-def slugify_dirname(name: str) -> str:
-    """Re-exported for callers that need a book/chapter directory's expected slug
-    without importing the private common module directly."""
-    return slugify(name)

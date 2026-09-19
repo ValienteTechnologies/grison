@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from grison.adapters._slug import slugify as _slugify
 from grison.engine.state import StateStore
 from grison.remote.bookstack import BookStackClient
-
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def slugify(name: str) -> str:
@@ -18,8 +16,7 @@ def slugify(name: str) -> str:
     BookStack's own slugification closely enough that a directory named exactly this
     way round-trips (D4: directory names are stable handles, derived once on pull and
     never renamed)."""
-    slug = _SLUG_RE.sub("-", name.strip().lower()).strip("-")
-    return slug or "page"
+    return _slugify(name, fallback="page")
 
 
 @dataclass

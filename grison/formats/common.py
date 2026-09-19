@@ -48,16 +48,6 @@ class FormatError(GrisonError, ValueError):
         super().__init__(msg)
 
 
-def check_name(name: str, *, what: str = "name") -> None:
-    """Raise :class:`FormatError` (``kind="bad_name"``) unless ``name`` (a single path
-    segment, extension included) matches :data:`NAME_RE`."""
-    if not NAME_RE.match(name):
-        raise FormatError(
-            "bad_name",
-            f"{what} {name!r} must match [a-z0-9][a-z0-9._-]* (lowercase, start alphanumeric)",
-        )
-
-
 def validate_tags(raw: list[str]) -> list[str]:
     """Shared ``tags`` field-validator body (finding + wiki page): every tag a
     non-empty string with no leading/trailing whitespace, no case-insensitive
