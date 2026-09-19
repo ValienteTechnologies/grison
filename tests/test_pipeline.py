@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from grison.markdown import markdown_to_finding
+from grison.formats import finding as finding_fmt
 from grison.sinks import run_parse
 
 _FIX = Path(__file__).parent / "fixtures" / "scanners"
@@ -21,9 +21,15 @@ def _input_dir(tmp_path: Path) -> Path:
     return inp
 
 
+def _out_dir(tmp_path: Path) -> Path:
+    # under findings/inbox/ so grison.formats.finding.tier_of() derives "inbox" —
+    # the real shape grison parse always writes to (BRIEF workspace layout).
+    return tmp_path / "findings" / "inbox"
+
+
 def test_parse_dir_autodetects_all_and_skips_unknown(tmp_path: Path) -> None:
     inp = _input_dir(tmp_path)
-    out = tmp_path / "inbox"
+    out = _out_dir(tmp_path)
     summary = run_parse([inp], out)
 
     assert set(summary.files_parsed) == _ALL_SCANNERS  # every fixture auto-detected
@@ -35,16 +41,16 @@ def test_parse_dir_autodetects_all_and_skips_unknown(tmp_path: Path) -> None:
     md_files = sorted(out.glob("*.md"))
     assert len(md_files) == len(summary.findings) >= len(_ALL_SCANNERS)
     assert summary.sink is not None and len(summary.sink.written) == len(md_files)
-    # everything written is a valid, re-parseable finding at instance tier
+    # everything written is a valid, re-parseable inbox finding with no machine field
     for m in md_files:
-        f = markdown_to_finding(m.read_text())
-        assert f.grison.tier == "instance"
-        assert f.grison.gw.id is None
+        text = m.read_text()
+        assert "grison:" not in text
+        finding_fmt.parse(text, path=m)  # raises FormatError if this isn't a clean v2 doc
 
 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:
     inp = _input_dir(tmp_path)
-    out = tmp_path / "inbox"
+    out = _out_dir(tmp_path)
     first = run_parse([inp], out)
     second = run_parse([inp], out)
 
@@ -54,7 +60,7 @@ def test_rerun_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_dry_run_touches_nothing(tmp_path: Path) -> None:
-    out = tmp_path / "inbox"
+    out = _out_dir(tmp_path)
     summary = run_parse([_FIX / "burp_sample.xml"], out, dry_run=True)
 
     assert summary.sink is not None and summary.sink.written  # would-write is reported
@@ -62,7 +68,7 @@ def test_dry_run_touches_nothing(tmp_path: Path) -> None:
 
 
 def test_single_file_and_min_severity(tmp_path: Path) -> None:
-    out = tmp_path / "inbox"
+    out = _out_dir(tmp_path)
     # filter out everything below critical — the synthetic burp finding is lower
     summary = run_parse([_FIX / "burp_sample.xml"], out, min_severity="critical")
     assert summary.files_parsed == {"burp": 1}

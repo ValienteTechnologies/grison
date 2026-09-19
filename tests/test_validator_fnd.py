@@ -130,6 +130,24 @@ def test_fnd014_body_not_convertible(tmp_path: Path) -> None:
     assert "FND-014" in rule_ids(validate_workspace(root))
 
 
+def test_fnd014_heading_in_body_is_not_flagged_not_convertible(tmp_path: Path) -> None:
+    """Regression: a real Ghostwriter 7.2.6 TipTap editor writes ATX-level
+    headings into plain FINDING fields, not just report narrative (see
+    ``grison.markdown.converter``'s module docstring and
+    ``tests/fixtures/lab-samples/gw-findings.json``'s library finding 3). Before
+    the validator's finding-body check passed ``headings=True`` too, this
+    legitimate content — which ``grison sync`` itself pulls and pushes
+    successfully — failed validation with FND-014 (``unsupported markdown: ATX
+    heading``) on a totally clean, unmodified pull."""
+    root = copy_fixture(tmp_path)
+    edit(
+        root / _LIB,
+        "## Description\n\n",
+        "## Description\n\n### Overview\n\n",
+    )
+    assert "FND-014" not in rule_ids(validate_workspace(root))
+
+
 @pytest.mark.rule("FND-015")
 def test_fnd015_severity_cvss_mismatch(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)

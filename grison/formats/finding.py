@@ -15,14 +15,11 @@ not embed images at all (D1: no report exists yet to hold evidence for) — that
 needs the workspace around the document (the evidence folder, other documents sharing a
 caption) so it lives in :mod:`grison.validator`, not here.
 
-**The one exception to "no machine fields"**: an ``inbox`` finding may carry
-``grison: {gw: {table: reportedFinding}}`` — this is scanner-PROVENANCE data
-``grison parse`` writes today (see ``grison/markdown/mapping.py``'s ``ir_to_finding``
-and ``grison/markdown/document.py``'s ``finding_to_markdown``, which is what actually
-produces it), not an identity a document is supposed to be silently trusted by — the
-literal, closed value ``table: reportedFinding`` is the only value it is ever written
-with, and it is forbidden on every other tier. This is a deliberate, narrow allowance
-for what `grison parse` writes TODAY, not a general reopening of "no machine fields".
+**No exceptions**: every tier, including ``inbox``, carries zero machine fields.
+``grison parse`` used to stamp a narrow ``grison: {gw: {table: reportedFinding}}``
+scanner-provenance block on inbox output; that allowance is gone (BRIEF engine step 3
+item E) — ``grison parse`` now writes plain v2 documents like everything else, and an
+inbox document with an unknown ``grison`` key is rejected the same as any other tier.
 
 Two checks this module deliberately does NOT perform, left to :mod:`grison.validator`:
 severity-vs-CVSS-band agreement (needs both fields interpreted together against
@@ -96,23 +93,9 @@ class FindingCvss(_Base):
         return parse_cvss(self.vector).base_score
 
 
-class InboxGwRef(_Base):
-    """Scanner-provenance identity ``grison parse`` writes today — see the module
-    docstring's "one exception" note. ``table`` is the only field: it is always the
-    literal ``"reportedFinding"``, never anything else, on every finding ``grison
-    parse`` has ever produced."""
-
-    table: Literal["reportedFinding"]
-
-
-class InboxGrisonMeta(_Base):
-    gw: InboxGwRef
-
-
 class FindingDoc(_Base):
     """A format-v2 finding: frontmatter fields + the five prose sections."""
 
-    grison: InboxGrisonMeta | None = None  # inbox-only — see module docstring
     severity: Severity
     finding_type: FindingType
     cvss: FindingCvss | None = None
@@ -149,9 +132,6 @@ class FindingDoc(_Base):
         if tier == "library" and self.affected_entities:
             raise ValueError("affected_entities is instance-only; not allowed on a library "
                              "finding")
-        if tier != "inbox" and self.grison is not None:
-            raise ValueError("a grison: block is only allowed on findings/inbox/ findings "
-                             "(scanner provenance grison parse writes) — remove it")
         return self
 
 
@@ -252,7 +232,6 @@ def parse(text: str, *, path: Path) -> FindingDoc:
             text=text,
             root_kind_map={
                 "affected_entities": "affected_entities_on_library",
-                "grison: block": "unknown_field",
             },
         ) from e
 
@@ -262,8 +241,6 @@ def dump(doc: FindingDoc) -> str:
     up to the two things ``parse`` doesn't retain byte-for-byte: whitespace inside a
     section body is stripped, and frontmatter key order is canonicalized."""
     meta: dict[str, object] = {}
-    if doc.grison is not None:
-        meta["grison"] = {"gw": {"table": doc.grison.gw.table}}
     meta["severity"] = doc.severity.value
     meta["finding_type"] = doc.finding_type.value
     if doc.cvss is not None:

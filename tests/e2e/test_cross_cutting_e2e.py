@@ -257,3 +257,69 @@ def test_first_run_bootstrap_creates_env_template_and_exits_with_message(
     assert oct(env_path.stat().st_mode)[-3:] == "600"
     assert "missing Ghostwriter credentials" in result.output
     assert "Fill them into .grison/env" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: a failed server-compatibility check is "could not run" (ENGINE.md
+# §10) — exit code 2 — never a per-phase failure (exit 1). BEFORE the fix, only
+# grison.remote.compat.SchemaCompatibilityError itself mapped to exit 2 in
+# grison.cli's sync(); a plain GhostwriterError raised by
+# check_ghostwriter_compatibility's own probe/introspection calls (introspection
+# denied, a transport failure surviving retries) missed that narrow
+# `except SchemaCompatibilityError` and fell through to `_guarded`'s catch-all,
+# exiting 1 instead. check_ghostwriter_compatibility now wraps any such
+# GrisonError into SchemaCompatibilityError itself, carrying the cause's own
+# message, so the CLI's narrow catch is correct without widening.
+# ---------------------------------------------------------------------------
+
+
+def test_sync_exits_2_when_introspection_is_denied(run_grison, gw_server, workspace) -> None:
+    """The cold path's own ``introspect_schema()`` call (root field ``__schema``)
+    getting a GraphQL authorization error must exit 2 with the cause's message —
+    not 1."""
+    from grison.remote.compat import save_cache
+
+    save_cache(workspace, "sha256:stale-forces-the-cold-path")
+    gw_server.inject_graphql_error("__schema", "not authorized to introspect this schema")
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 2, result.output
+    assert "not authorized to introspect this schema" in result.output
+
+
+def test_sync_exits_2_on_a_transport_failure_during_the_probe(run_grison, gw_server) -> None:
+    """A transport failure surviving retries (four straight HTTP 503s exhausting
+    ``GhostwriterClient``'s default ``max_attempts``) during the cheap
+    ``fingerprint_probe()`` request — the very first thing every sync does,
+    warm-cache or not — must also exit 2, not 1."""
+    gw_server.inject_http_status(503, times=4)
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 2, result.output
+    assert "503" in result.output
+
+
+def test_sync_re_introspects_and_updates_the_cache_after_a_server_upgrade(
+    run_grison, gw_server, workspace,
+) -> None:
+    """A stale cached fingerprint (as if Ghostwriter was upgraded since the last
+    sync) forces the cold path — full introspection + validate-every-operation —
+    and, since grison's own operations are still compatible, the sync succeeds
+    and re-caches the NEW fingerprint so the next sync is warm again. Pins that
+    wrapping probe/introspection errors into SchemaCompatibilityError (above)
+    never swallows the ordinary successful cold-path flow."""
+    from grison.remote.compat import fingerprint_from_schema, load_cache, save_cache
+    from tests.fakes.gw_server import load_schema as load_fake_gw_schema
+
+    save_cache(workspace, "sha256:stale-as-if-the-server-was-just-upgraded")
+    before = len(gw_server.request_log)
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 0, result.output
+    assert any(op.name == "__schema" for op in gw_server.request_log[before:])  # re-introspected
+    cached = load_cache(workspace)
+    assert cached is not None
+    assert cached.fingerprint == fingerprint_from_schema(load_fake_gw_schema())

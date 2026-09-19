@@ -16,11 +16,17 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 
 from grison.markdown.refs import LocalRef, RefResolver, RemoteRef
-from grison.markdown.refscan import FoundRef, scan_refs
+from grison.markdown.refscan import FoundRef, decode_ref_path, scan_refs
 
 
 class OfflineEvidenceResolver:
-    """Resolves ``evidence/<file>`` against one report's ``evidence/`` folder."""
+    """Resolves ``evidence/<file>`` against one report's ``evidence/`` folder.
+
+    ``path`` arrives here from :mod:`grison.markdown.converter`'s OWN markdown-it
+    parse (this resolver is handed to ``md_to_html`` — see the module docstring),
+    a separate parse from :func:`grison.markdown.refscan.scan_refs`'s, so it needs
+    its own :func:`~grison.markdown.refscan.decode_ref_path` call rather than
+    inheriting ``scan_refs``'s already-decoded output."""
 
     def __init__(self, evidence_dir: Path) -> None:
         self._dir = evidence_dir
@@ -28,7 +34,7 @@ class OfflineEvidenceResolver:
     def to_remote(self, path: str) -> RemoteRef | None:
         if not path.startswith("evidence/"):
             return None
-        fname = path[len("evidence/") :]
+        fname = decode_ref_path(path[len("evidence/") :])
         if not (self._dir / fname).is_file():
             return None
         return RemoteRef("gw-evidence", id=1, name=PurePosixPath(fname).stem, url=None)

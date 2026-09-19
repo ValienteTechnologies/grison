@@ -11,6 +11,7 @@ collision sidecars.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -27,6 +28,7 @@ from grison.engine.model import (
     Plan,
     RemoteRecord,
 )
+from grison.engine.sidecar import sidecar_path
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
 from grison.fsio import atomic_write_text
@@ -57,15 +59,6 @@ def _remote_hash(adapter: Adapter, remote: RemoteRecord | None) -> str | None:
     if remote.cached_hash is not None:
         return remote.cached_hash
     return digest(adapter.canonical_remote(remote.data))
-
-
-def sidecar_path(path: PurePosixPath) -> PurePosixPath:
-    """The collision-sidecar path for ``path`` (``page.md`` -> ``page.remote.md``).
-    Public (not ``_``-prefixed) because :mod:`grison.engine.offline_status` needs the
-    exact same convention to detect a live sidecar without a real sync."""
-    if path.suffix:
-        return path.with_suffix(f".remote{path.suffix}")
-    return path.with_name(path.name + ".remote")
 
 
 @dataclass
@@ -162,7 +155,8 @@ def run(  # noqa: PLR0913
             )
             summary.problem_paths.append(label)
 
-    _clear_stale_sidecars(root, plans)
+    if not options.dry_run:
+        _clear_stale_sidecars(root, plans)
     return plans, events, summary
 
 
@@ -392,30 +386,57 @@ def _apply_create(  # noqa: PLR0913
     events.append(Event(verb="create", path=str(p.path)))
 
 
+def refetch_guard(
+    *,
+    refetch: Callable[[], RemoteRecord | None],
+    expected_hash: str | None,
+    canonical_hash: Callable[[RemoteRecord], str],
+    forced: bool,
+) -> tuple[RemoteRecord | None, bool]:
+    """The ONE pre-write re-fetch guard (ENGINE.md §3), record-type-agnostic:
+    re-fetch the one record about to be written and compare a canonical hash of
+    what's there now against what classification saw. Returns ``(fresh,
+    drifted)``; ``drifted`` True means the caller must treat the plan as a
+    COLLISION instead of writing.
+
+    Shared by :func:`grison.engine.apply._refetch_guard` (the document
+    :class:`~grison.engine.adapter.Adapter` shape — ``refetch``/``canonical_remote``
+    take a bare id/dict) and :mod:`grison.engine.filesets` (whose
+    :class:`~grison.engine.filesets.FileSetAdapter` has a different ``refetch``
+    signature and no ``canonical_remote`` at all — a body's bytes can never
+    silently change under an id, so its own canonical hash only needs fresh
+    metadata, not a re-download): each passes in its own way to refetch one
+    record and hash it, and gets back the exact same comparison semantics —
+    including ``expected_hash is None`` (nothing to compare against, e.g. no
+    remote record at classification time) always meaning "not drifted"."""
+    fresh = refetch()
+    if fresh is None:
+        return None, not forced
+    if expected_hash is not None and not forced:
+        if expected_hash != canonical_hash(fresh):
+            return fresh, True
+    return fresh, False
+
+
 def _refetch_guard(
     ctx: Any, adapter: Adapter, p: Plan, options: RunOptions,
 ) -> tuple[RemoteRecord | None, bool]:
-    """Returns ``(fresh, drifted)``. ``drifted`` is True when the remote changed since
-    classification AND this path is not force-overridden — the caller must then treat
-    the plan as a collision instead of writing.
-
-    Compares CANONICAL hashes, not raw dicts: ``p.remote`` may be a skip-detail-fetch
-    placeholder (a small sentinel dict, missing most fields — see the adapter's own
-    ``fetch_remote``), which would never equal a freshly fetched full record even
-    when nothing actually changed. ``_remote_hash`` already knows how to read that
-    placeholder's ``cached_hash`` instead of hashing its sentinel content."""
+    """The document-adapter binding of :func:`refetch_guard`: ``p.remote`` may be a
+    skip-detail-fetch placeholder (a small sentinel dict, missing most fields — see
+    the adapter's own ``fetch_remote``), which would never equal a freshly fetched
+    full record even when nothing actually changed — ``_remote_hash`` already knows
+    to read that placeholder's ``cached_hash`` instead of hashing its sentinel
+    content."""
     if p.id is None:
         return None, False
-    fresh = adapter.refetch(ctx, p.id)
+    rid = p.id
     forced = p.path is not None and p.path in options.force_local
-    if fresh is None:
-        return None, not forced
-    if p.remote is not None and not forced:
-        classify_time_hash = _remote_hash(adapter, p.remote)
-        fresh_hash = digest(adapter.canonical_remote(fresh.data))
-        if classify_time_hash != fresh_hash:
-            return fresh, True
-    return fresh, False
+    return refetch_guard(
+        refetch=lambda: adapter.refetch(ctx, rid),
+        expected_hash=_remote_hash(adapter, p.remote) if p.remote is not None else None,
+        canonical_hash=lambda fresh: digest(adapter.canonical_remote(fresh.data)),
+        forced=forced,
+    )
 
 
 def _apply_update(  # noqa: PLR0913
@@ -466,17 +487,33 @@ def _apply_update(  # noqa: PLR0913
         events.append(Event(verb="push", path=str(p.path), detail="re-created remotely"))
         return
     preimage = fresh.data
-    snapshot.record(UndoOp(kind=adapter.kind, outcome=p.outcome.value, path=str(p.path),
-                           id=p.id, remote_preimage=preimage, move_from=str(p.move_from)
-                           if p.move_from else None))
+    # The LOCAL half of a push undo (item 3, fix-findings): NOT `p.local.raw_text`
+    # (that's the author's ABOUT-TO-BE-PUSHED text — the edit undo is supposed to
+    # revert, not what it should restore) — the file as it would read if it
+    # mirrored the OLD, pre-push remote state, exactly like a genuine pull of
+    # `preimage` would have written it. Computed once, here, rather than lazily
+    # at replay time, so undo never needs to re-derive a rendering decision the
+    # forward loop already made once (and the undo module stays adapter-agnostic
+    # about whether ANY given "push" op even has local content to restore — a
+    # file-set caption push's `local_preimage` stays `None`, on purpose: a
+    # caption/description change never touches the evidence file's own bytes).
+    local_preimage = adapter.render_local(preimage, path=p.path)
+    op = UndoOp(kind=adapter.kind, outcome=p.outcome.value, path=str(p.path),
+               id=p.id, remote_preimage=preimage, move_from=str(p.move_from)
+               if p.move_from else None, local_preimage=local_preimage)
+    snapshot.record(op)
     resp = adapter.update(ctx, p.id, p.local.doc)
     if p.move_from is not None:
         index.move(str(p.move_from), str(p.path))
     text = adapter.render_local(resp.data, path=p.path)
     if text != p.local.raw_text:
         atomic_write_text(root / p.path, text)
-    state.put(adapter.kind, p.id, base=digest(adapter.canonical_remote(resp.data)),
-              witness=resp.witness)
+    # ENGINE.md §6's canonicalisation-after-push hash IS the post-write canonical
+    # hash a "push"/"move_edit" undo's re-fetch guard compares against (item 4) —
+    # one computation, two uses, so the two can never quietly disagree.
+    resp_hash = digest(adapter.canonical_remote(resp.data))
+    op.post_write_hash = resp_hash
+    state.put(adapter.kind, p.id, base=resp_hash, witness=resp.witness)
     emit_losses(events, str(p.path), resp.losses)
     verb = "move" if p.outcome is Outcome.MOVE_EDIT else "push"
     detail = f"from {p.move_from}" if p.move_from else ""

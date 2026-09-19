@@ -62,7 +62,6 @@ packages = ["grison"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["grison/migrate/_v1_converter.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

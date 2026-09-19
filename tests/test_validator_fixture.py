@@ -36,7 +36,7 @@ from tests._ws2_helpers import copy_fixture
     "REP-001", "REP-002",
     "WIKI-001", "WIKI-002", "WIKI-003", "WIKI-004", "WIKI-005", "WIKI-006", "WIKI-007",
     "WIKI-008", "WIKI-009", "WIKI-010", "WIKI-011", "WIKI-012", "WIKI-013", "WIKI-014",
-    "REF-001", "REF-002", "REF-003", "REF-004", "REF-005", "REF-006", "REF-007",
+    "REF-001", "REF-002", "REF-003", "REF-004", "REF-005", "REF-006", "REF-007", "REF-008",
     "TXT-001", "TXT-002",
     "IDX-001", "IDX-002", "IDX-003", "IDX-004",
 )

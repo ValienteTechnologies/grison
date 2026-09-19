@@ -11,9 +11,15 @@ before this support was added, happens not to contain one yet.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from grison.markdown import ConverterError, html_to_md, md_to_html
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "lab-samples"
+_FINDING_SECTIONS = ("description", "impact", "mitigation", "replication_steps", "references")
 
 
 def test_li_unwraps_paragraph() -> None:
@@ -158,3 +164,32 @@ def test_three_level_nesting_with_mixed_ol_ul_degrades_to_one_sub_level() -> Non
         "</li></ol></li></ul>"
     )
     assert html_to_md(html) == "- a\n  1. b\n  - c"
+
+
+# --- real GW 7.2.6 finding fixtures: never raise, always reach a stable fixpoint -
+# ``gw-findings.json`` is a real Ghostwriter 7.2.6 export sample (see
+# ``engine-findings-lab.md``'s "Two defects", #1: this fixture's finding 3
+# description, ``<h3>Overview</h3><p>...</p>``, is the exact payload that used to
+# raise ``ConverterError: unsupported HTML tag: <h3>`` before the finding
+# adapters started passing ``headings=True`` — see
+# ``grison.markdown.converter``'s module docstring). ``headings=True`` matches
+# ``grison.adapters.gw_findings``' own call sites exactly.
+
+
+def _finding_field_htmls() -> list[tuple[str, str]]:
+    data = json.loads((_FIXTURES_DIR / "gw-findings.json").read_text(encoding="utf-8"))
+    out: list[tuple[str, str]] = []
+    for row in data["data"]["finding"]:
+        for field in _FINDING_SECTIONS:
+            html = row.get(field) or ""
+            if html.strip():
+                out.append((f'finding {row["id"]} {field}', html))
+    return out
+
+
+@pytest.mark.parametrize("html", [h for _, h in _finding_field_htmls()],
+                         ids=[label for label, _ in _finding_field_htmls()])
+def test_real_gw_finding_fixture_never_raises_and_reaches_immediate_fixpoint(html: str) -> None:
+    md = html_to_md(html, headings=True)  # must not raise (defect 1's regression, corpus-wide)
+    md2 = html_to_md(md_to_html(md, headings=True), headings=True)
+    assert md2 == md, f"non-fixpoint: html={html!r} md={md!r} md2={md2!r}"

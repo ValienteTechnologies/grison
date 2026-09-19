@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from grison.engine.apply import RunOptions, run
+from grison.engine.apply import RunOptions, run, sidecar_path
 from grison.engine.model import Canonical, LocalDoc, Outcome, RemoteRecord
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
@@ -140,6 +140,51 @@ def test_crash_right_after_create_never_duplicates_on_next_sync(tmp_path: Path) 
     healthy_adapter = FakeAdapter(store, raise_in_render=False)
     _run_once(root, healthy_adapter)
     assert store.create_calls == 1, "a crash right after create() must never duplicate the create"
+
+
+def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
+    """Item 2 (HIGH, fix-d): ``run``'s own ``_clear_stale_sidecars`` call used to
+    fire unconditionally, even under ``--dry-run`` — ENGINE.md §9 says dry-run
+    performs NO writes of any kind, but a sidecar left by a genuine collision
+    that has since converged got deleted for real by a dry-run pass alone.
+    Mirrors ``grison.engine.filesets``'s own version of this fix/test."""
+    root = tmp_path
+    (root / "recs").mkdir()
+    (root / "recs" / "x.txt").write_text("v1", encoding="utf-8")
+    store = FakeStore()
+    adapter = FakeAdapter(store)
+    _run_once(root, adapter)
+    rid = next(iter(store.records))
+    assert store.records[rid] == "v1"
+
+    # local and remote both drift away from base, in different directions -> COLLISION
+    (root / "recs" / "x.txt").write_text("local-edit", encoding="utf-8")
+    store.records[rid] = "remote-edit"
+    index = Index.load(root)
+    state = StateStore(root)
+    snapshot = Snapshot()
+    plans, _events, _summary = run(
+        root, ctx=None, adapter=adapter, index=index, state=state, snapshot=snapshot,
+        failures=[], options=RunOptions(),
+    )
+    index.save()
+    assert plans[0].outcome is Outcome.COLLISION
+    sidecar = root / sidecar_path(PurePosixPath("recs/x.txt"))
+    assert sidecar.exists()
+
+    # the conflict resolves (local now matches remote) -> a DRY-RUN pass
+    # reclassifies away from COLLISION...
+    (root / "recs" / "x.txt").write_text("remote-edit", encoding="utf-8")
+    index2 = Index.load(root)
+    state2 = StateStore(root)
+    snapshot2 = Snapshot()
+    plans2, _events2, _summary2 = run(
+        root, ctx=None, adapter=adapter, index=index2, state=state2, snapshot=snapshot2,
+        failures=[], options=RunOptions(dry_run=True),
+    )
+
+    assert all(p.outcome is not Outcome.COLLISION for p in plans2)
+    assert sidecar.exists()  # ...but --dry-run must NEVER delete it for real (ENGINE.md §9)
 
 
 def test_healthy_create_writes_index_before_local_canonicalisation(tmp_path: Path) -> None:

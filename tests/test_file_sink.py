@@ -6,20 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from grison.model import Finding
+from grison.formats.finding import FindingDoc
 from grison.sinks import file_sink
 from grison.sinks.file_sink import FileSink
 
 
-def _finding(*, title: str = "T", desc: str = "body") -> Finding:
+def _finding(*, title: str = "T", desc: str = "body") -> FindingDoc:
     data = {
-        "grison": {"tier": "instance", "gw": {"table": "reportedFinding"}},
         "severity": "medium",
         "finding_type": "web",
         "title": title,
         "description": desc,
     }
-    return Finding.model_validate(data)
+    return FindingDoc.model_validate(data, context={"tier": "inbox"})
 
 
 def test_same_slug_and_same_key_still_produce_distinct_files(tmp_path: Path) -> None:
@@ -37,6 +36,8 @@ def test_same_slug_and_same_key_still_produce_distinct_files(tmp_path: Path) -> 
     contents = {p.read_text(encoding="utf-8") for p in md_files}
     assert file_sink.finding_to_markdown(a) in contents
     assert file_sink.finding_to_markdown(b) in contents
+    for content in contents:
+        assert "grison:" not in content
 
 
 def test_write_isolates_a_failing_finding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,7 +46,7 @@ def test_write_isolates_a_failing_finding(tmp_path: Path, monkeypatch: pytest.Mo
     good2 = _finding(title="Good Two")
     real = file_sink.finding_to_markdown
 
-    def flaky(f: Finding) -> str:
+    def flaky(f: FindingDoc) -> str:
         if f.title == "Boom":
             raise ValueError("kaboom")
         return real(f)

@@ -1,7 +1,4 @@
 ---
-grison:
-  gw:
-    table: reportedFinding
 severity: medium
 finding_type: network
 cwe:

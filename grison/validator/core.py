@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from markdown_it.tree import SyntaxTreeNode
 
 from grison import manifest as manifest_mod
+from grison.engine.sidecar import is_sidecar_name
 from grison.formats import finding as finding_fmt
 from grison.formats import mirrors as mirrors_fmt
 from grison.formats import narrative as narrative_fmt
@@ -93,16 +94,69 @@ def _is_valid_name(name: str) -> bool:
     return bool(NAME_RE.match(name))
 
 
-def _check_names(rel: PurePosixPath) -> list[Failure]:
+def _check_names(rel: PurePosixPath, *, skip_last: bool = False) -> list[Failure]:
     """WS-001 against every path segment of ``rel`` (dotfiles like ``.report.yml``
-    are exempt — grison itself names its own mirrors with a leading dot)."""
+    are exempt — grison itself names its own mirrors with a leading dot).
+    ``skip_last=True`` (a file directly inside ``evidence/`` or ``images/`` —
+    item 2, fix-findings: WS-001's charset rule does not apply to that one leaf
+    name at all, see :func:`_check_fileset_name`/``REF-008``) checks every
+    segment ABOVE the last one as normal — only the file's own bare name is
+    exempt."""
     out: list[Failure] = []
-    for part in rel.parts:
+    parts = rel.parts
+    last = len(parts) - 1
+    for i, part in enumerate(parts):
+        if skip_last and i == last:
+            continue
         if part.startswith("."):
             continue
         if not _is_valid_name(part):
             out.append(fail(registry.WS_BAD_NAME, rel.as_posix(), f"segment {part!r}"))
     return out
+
+
+_FILESET_NAME_MAX_BYTES = 255
+
+
+def _check_fileset_name(folder: PurePosixPath, name: str) -> list[Failure]:
+    """``REF-008`` — the rule that applies to a file's OWN bare name directly
+    inside ``evidence/`` or ``images/`` (``folder``) INSTEAD of ``WS-001``
+    (item 2, fix-findings: these names are stable handles kept verbatim — D1/D9,
+    real data has names like ``Phishing_Sonuçları.png``). Never duplicates
+    ``REF-003`` (the cross-file stem-collision check, done separately over the whole
+    folder) — this is purely a per-file shape check, and returns at most one
+    failure (the first one that applies) rather than piling on redundant
+    messages for one bad name.
+
+    ``name`` is taken as a RAW STRING, never pre-split into a
+    :class:`~pathlib.PurePosixPath` first: the two real callers (a directory
+    scan) can only ever hand this a single filesystem entry's own name, which
+    can never contain a "/" — but "no path separator" is still checked
+    directly against ``name`` itself (a caller that DID have a compound
+    candidate to check, e.g. a markdown reference's own destination fragment,
+    would otherwise silently lose the separator the moment it got parsed into
+    a path object, since ``PurePosixPath(...).name`` only ever returns the
+    LAST component)."""
+    full = f"{folder.as_posix()}/{name}"
+    if "/" in name or "\\" in name:
+        return [fail(registry.REF_BAD_FILESET_NAME, full,
+                     f"{name!r} contains a path separator")]
+    if name.startswith("."):
+        return [fail(registry.REF_BAD_FILESET_NAME, full,
+                     f"{name!r} starts with a leading dot")]
+    if is_sidecar_name(name):
+        return [fail(registry.REF_BAD_FILESET_NAME, full,
+                     f"{name!r} is shaped like a collision sidecar (<name>.remote.<ext>) — "
+                     "never a real evidence/image file name")]
+    try:
+        encoded = name.encode("utf-8")
+    except UnicodeEncodeError:
+        return [fail(registry.REF_BAD_FILESET_NAME, full, f"{name!r} is not valid UTF-8")]
+    if len(encoded) > _FILESET_NAME_MAX_BYTES:
+        return [fail(registry.REF_BAD_FILESET_NAME, full,
+                     f"{name!r} is {len(encoded)} bytes, over the "
+                     f"{_FILESET_NAME_MAX_BYTES}-byte limit")]
+    return []
 
 
 # --- findings/ -----------------------------------------------------------------------
@@ -180,7 +234,12 @@ def _check_finding_body(
                                 "no report to hold evidence for", line=ref.line))
             return out
         try:
-            md_to_html(text)
+            # headings=True: a real TipTap editor emits h1-h6 in finding fields
+            # too (see grison.markdown.converter's module docstring) — must match
+            # the finding adapters' own headings=True or a freshly-pulled,
+            # unmodified finding whose stored HTML has a heading would fail
+            # validation immediately.
+            md_to_html(text, headings=True)
         except ConverterError as e:
             out.append(fail(registry.FND_BODY_NOT_CONVERTIBLE, rel, f"{field}: {e}"))
         return out
@@ -203,11 +262,12 @@ def _check_finding_body(
             ref_issue = True
     # Only fall through to the real converter when refscan found no reference problem
     # of its own — REF-001/002/006's rule assignment never depends on the converter's
-    # error text (see D3 review); this still catches everything else (tables, ATX
-    # headings, raw HTML, unsupported constructs) in the common case.
+    # error text (see D3 review); this still catches everything else (tables, raw
+    # HTML, unsupported constructs) in the common case. headings=True: see the
+    # library/inbox branch above — same reason.
     if not ref_issue:
         try:
-            md_to_html(text, refs=OfflineEvidenceResolver(evidence_dir))
+            md_to_html(text, headings=True, refs=OfflineEvidenceResolver(evidence_dir))
         except ConverterError as e:
             out.append(fail(registry.FND_BODY_NOT_CONVERTIBLE, rel, f"{field}: {e}"))
     return out
@@ -321,7 +381,19 @@ def _validate_report_dir(
             out.extend(_validate_note_file(root, rel, index, cterms, evidence_dir))
 
     if evidence_dir.is_dir():
-        filenames = sorted(p.name for p in evidence_dir.iterdir() if p.is_file())
+        # A live collision sidecar (`<name>.remote.<ext>`) is never a document/file
+        # the engine manages (ENGINE.md §8) — excluded from REF-003's stem
+        # comparison and from index-kind checking the same way
+        # `grison.engine.filesets`'s own local scan and `grison status`'s evidence
+        # counts already exclude it (item 5), or it could spuriously enter the
+        # stem comparison or get treated as an unindexed evidence file. Its OWN
+        # name is still checked below, by every file (sidecar-shaped or not) —
+        # REF-008 rejects the sidecar shape outright, it is never silently
+        # exempt from having SOME valid name.
+        filenames = sorted(
+            p.name for p in evidence_dir.iterdir()
+            if p.is_file() and not is_sidecar_name(p.name)
+        )
         for stem, group in stems(filenames).items():
             if len(group) > 1:
                 for name in group:
@@ -330,10 +402,12 @@ def _validate_report_dir(
                             _rel(root, evidence_dir / name), f"shares stem {stem!r} with "
                             f"{[g for g in group if g != name]}")
                     )
+        evidence_dir_rel = PurePosixPath(_rel(root, evidence_dir))
         for p in sorted(evidence_dir.iterdir()):
             if p.is_file():
-                out.extend(_check_names(PurePosixPath(_rel(root, p))))
-                if index is not None:
+                out.extend(_check_names(PurePosixPath(_rel(root, p)), skip_last=True))
+                out.extend(_check_fileset_name(evidence_dir_rel, p.name))
+                if not is_sidecar_name(p.name) and index is not None:
                     out.extend(_check_index_kind(root, p, index, IndexKind.GW_EVIDENCE))
 
     # REF-004: disagreeing non-empty captions for the same referenced file
@@ -597,7 +671,14 @@ def _validate_book_dir(
             embed_hits.append(_EmbedHit(ref.path, ref.path, ref.caption, rel, ref.line))
 
     if images_dir.is_dir():
-        filenames = sorted(p.name for p in images_dir.iterdir() if p.is_file())
+        # Same sidecar exclusion as the evidence scan above (item 5) — a
+        # `<name>.remote.<ext>` collision sidecar is never a gallery image, so
+        # it's excluded from REF-003/index-kind checking; its OWN name is still
+        # checked below (REF-008 rejects the sidecar shape outright).
+        filenames = sorted(
+            p.name for p in images_dir.iterdir()
+            if p.is_file() and not is_sidecar_name(p.name)
+        )
         for stem, group in stems(filenames).items():
             if len(group) > 1:
                 for name in group:
@@ -605,10 +686,12 @@ def _validate_book_dir(
                         fail(registry.REF_STEM_COLLISION, _rel(root, images_dir / name),
                             f"shares stem {stem!r} with {[g for g in group if g != name]}")
                     )
+        images_dir_rel = PurePosixPath(_rel(root, images_dir))
         for p in sorted(images_dir.iterdir()):
             if p.is_file():
-                out.extend(_check_names(PurePosixPath(_rel(root, p))))
-                if index is not None:
+                out.extend(_check_names(PurePosixPath(_rel(root, p)), skip_last=True))
+                out.extend(_check_fileset_name(images_dir_rel, p.name))
+                if not is_sidecar_name(p.name) and index is not None:
                     out.extend(_check_index_kind(root, p, index, IndexKind.BS_IMAGE))
 
     by_ref: dict[str, list[_EmbedHit]] = {}

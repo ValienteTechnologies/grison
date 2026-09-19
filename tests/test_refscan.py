@@ -7,7 +7,12 @@ never does), and every real reference reports the right kind/position/line.
 
 from __future__ import annotations
 
-from grison.markdown.refscan import scan_refs
+from urllib.parse import quote
+
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+
+from grison.markdown.refscan import decode_ref_path, scan_refs
 
 
 def test_image_inside_a_fenced_code_block_is_not_a_reference() -> None:
@@ -104,3 +109,68 @@ def test_results_are_sorted_by_line() -> None:
     md = "![b](evidence/b.png)\n\nSee [a](evidence/a.png) and ![c](evidence/c.png) too.\n"
     refs = scan_refs(md)
     assert [r.line for r in refs] == sorted(r.line for r in refs)
+
+
+# --- non-ASCII destinations (markdown-it-py percent-encodes them) ------------------
+
+
+def test_non_ascii_embed_path_decodes_to_the_authored_spelling() -> None:
+    """markdown-it-py's link normalisation percent-encodes non-ASCII bytes in a
+    destination — without decode_ref_path, ``ref.path`` would come back as
+    ``evidence/Phishing_Sonu%C3%A7lar%C4%B1.png`` even though the author wrote
+    (and the file on disk is named) ``evidence/Phishing_Sonuçları.png``."""
+    md = "![Results](evidence/Phishing_Sonuçları.png)\n"
+    (ref,) = scan_refs(md)
+    assert ref.path == "evidence/Phishing_Sonuçları.png"
+
+
+def test_non_ascii_cross_reference_path_decodes_too() -> None:
+    md = "See [the results](evidence/Sonuçları.png) above.\n"
+    (ref,) = scan_refs(md)
+    assert ref.path == "evidence/Sonuçları.png"
+
+
+def test_percent_encoded_and_raw_spellings_of_the_same_path_resolve_identically() -> None:
+    """A destination the author (or some other tool) already wrote pre-encoded
+    resolves to the SAME identity as the raw spelling — decode_ref_path is applied
+    uniformly, not conditionally on whether markdown-it happened to encode it."""
+    raw_path = "evidence/Sonuçları.png"
+    md_raw = f"![x]({raw_path})\n"
+    md_encoded = f"![x]({quote(raw_path, safe='/')})\n"
+    (ref_raw,) = scan_refs(md_raw)
+    (ref_encoded,) = scan_refs(md_encoded)
+    assert ref_raw.path == ref_encoded.path == raw_path
+
+
+def test_decode_ref_path_leaves_invalid_utf8_percent_encoding_undecoded() -> None:
+    """A destination whose percent-encoding names bytes that are not valid UTF-8
+    is left exactly as written — never raised out of here (every caller of
+    scan_refs would have to catch it), and never silently mangled (errors=
+    "replace" would turn it into a lossy, misleadingly "valid-looking" string).
+    Left alone, it simply never resolves to a real file/index entry, so it
+    surfaces as an ordinary, clearly-worded "does not resolve" validation
+    failure with the bogus escaped text visible."""
+    bogus = "evidence/%ff%fe.png"
+    assert decode_ref_path(bogus) == bogus
+
+
+@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    st.text(
+        alphabet=st.characters(
+            blacklist_categories=("Cs", "Cc", "Co", "Zs", "Zl", "Zp"),
+            blacklist_characters="[]()\"`\\<>%",
+        ),
+        min_size=1,
+        max_size=40,
+    ).filter(lambda s: s == s.strip() and s != "")
+)
+def test_decode_ref_path_round_trips_any_unicode_filename(name: str) -> None:
+    """Property: whatever unicode text markdown-it hands back for a destination
+    ``evidence/<name>``, decoding it recovers exactly ``evidence/<name>`` — the
+    round trip an image line embedding an arbitrary unicode filename depends on."""
+    path = f"evidence/{name}"
+    md = f"![x]({path})\n"
+    refs = scan_refs(md)
+    assert len(refs) == 1
+    assert refs[0].path == path

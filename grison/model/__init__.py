@@ -1,7 +1,11 @@
-"""Schema layer: the pydantic ``Finding``, enums, and CVSS/CWE validators.
+"""Schema layer: enums and CVSS/CWE validators.
 
-Everything downstream (markdown serialization, sinks, remote sync) depends on
-this one tier-agnostic schema.
+Everything downstream (markdown serialization, sinks, remote sync) depends on these
+tier-agnostic pieces. The tier-agnostic ``Finding`` pydantic model that used to live in
+``grison.model.finding`` (with its embedded ``grison:``/GW-ref/sync-state block) was
+workspace format v1's document shape — format v2 documents carry no machine fields at
+all (see :mod:`grison.formats.finding`'s ``FindingDoc``), so that model has no callers
+left and was deleted with the v1→v2 migration (D3).
 """
 
 from __future__ import annotations
@@ -15,29 +19,13 @@ from grison.model.enums import (
     check_finding_type_drift,
     check_severity_drift,
 )
-from grison.model.finding import (
-    Cvss,
-    EvidenceGwRef,
-    EvidenceItem,
-    Finding,
-    GrisonMeta,
-    GwRef,
-    SyncState,
-)
 
 __all__ = [
-    "Cvss",
     "CvssError",
     "CvssVector",
     "EnumDriftError",
-    "EvidenceGwRef",
-    "EvidenceItem",
-    "Finding",
     "FindingType",
-    "GrisonMeta",
-    "GwRef",
     "Severity",
-    "SyncState",
     "check_finding_type_drift",
     "check_severity_drift",
     "cwe_name",

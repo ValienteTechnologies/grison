@@ -1,6 +1,7 @@
 """The file sink — write findings as markdown documents, idempotently.
 
-Filenames are cosmetic (sync matches records by id, not name): ``slug(title).md``,
+Filenames are cosmetic (sync matches records by identity in ``.grison/index.json``
+once a finding is triaged out of the inbox, not by name): ``slug(title).md``,
 disambiguated by a dedupe key when two *different* findings share a slug. Re-writing
 identical content is reported as *unchanged*, never duplicated.
 """
@@ -13,9 +14,9 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from grison.formats.finding import FindingDoc
+from grison.formats.finding import dump as finding_to_markdown
 from grison.fsio import atomic_write_text
-from grison.markdown import finding_to_markdown
-from grison.model import Finding
 
 
 def slugify(text: str) -> str:
@@ -33,7 +34,7 @@ class SinkResult:
     errors: list[str] = field(default_factory=list)
 
 
-def _stems(findings: list[Finding], keys: list[str] | None) -> list[str]:
+def _stems(findings: list[FindingDoc], keys: list[str] | None) -> list[str]:
     """Assign a filename stem per finding, disambiguating slug collisions.
 
     Two passes: first break a slug collision with the dedupe key (or a content
@@ -82,7 +83,7 @@ class FileSink:
 
     def write(
         self,
-        findings: list[Finding],
+        findings: list[FindingDoc],
         *,
         keys: list[str] | None = None,
         dry_run: bool = False,

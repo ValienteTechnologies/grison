@@ -7,15 +7,12 @@ Format v2 (BRIEF D3/D4): a page file carries NO machine fields at all — no id,
 ``grison:`` block, no ``book``/``chapter`` frontmatter keys. Identity lives in
 ``.grison/index.json``; a page's book/chapter come from its directory only.
 
-Every ``run_grison("sync")`` here also runs the findings phase, which today fails
-unconditionally (see ``tests/e2e/test_findings_e2e.py`` — ``GhostwriterClient
-.fetch_evidence`` selects a field the real 7.2.6 schema rejects, regardless of
-data). That failure is isolated per phase (``grison.cli._run_phase``) and always
-makes the *overall* process exit 1 and print "findings sync failed: …", even when
-the wiki phase itself is perfectly clean — so these tests assert the wiki phase's
-own success signals (its own summary line, the BookStack operation log, the files on
-disk) rather than the overall exit code. This is today's real, documented
-cross-phase coupling, not a gap in the fakes.
+Every ``run_grison("sync")`` here also runs the findings phase (engine-managed —
+see ``tests/e2e/test_findings_e2e.py``), which is clean by default since these
+tests never seed any library/reported findings. These tests still assert the
+wiki phase's own success signals (its own summary line, the BookStack operation
+log, the files on disk) rather than assuming anything about the overall exit
+code, since a test here is about the wiki phase specifically.
 
 Tests changed on purpose (BRIEF D3/D6/D7, ENGINE.md "Identity"/"classification
 table"/apply loop §8) vs. the module this replaces (``grison/remote/methodology.py``,
@@ -1046,6 +1043,34 @@ def test_undo_reverts_a_push(run_grison, bs_server):
 
     assert result.exit_code == 0, result.output
     assert bs_server.store.page(page["id"])["markdown"] == "# Original"
+
+
+def test_undo_of_a_push_refuses_to_clobber_a_record_edited_again_since(run_grison, bs_server):
+    """Item 4 (fix-d): before this fix, ``grison undo``'s push/move_edit replay
+    branch called ``adapter.restore`` straight over ``remote_preimage`` with no
+    re-fetch guard at all — unlike the create/delete_remote branches, contradicting
+    the ``grison.engine.undo`` module docstring's own claim that every replayed op
+    is "guarded by the same re-fetch check the forward apply loop uses". A record
+    edited again (on the server, by someone else) after the push this undo would
+    reverse must be reported, not silently overwritten with the older content."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# Edited")
+    run_grison("sync")
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited"
+
+    # someone else edits the SAME record on the server after grison's push, before
+    # anyone runs `grison undo`.
+    bs_server.store.edit_page(page["id"], markdown="# Edited further, by someone else")
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 1, result.output
+    assert "methodology/library/playbook/notes.md" in result.output
+    # never clobbered — the concurrent edit survives exactly as it was
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited further, by someone else"
 
 
 def test_undo_list_shows_snapshots_newest_first(run_grison, bs_server):

@@ -25,8 +25,7 @@ directory an author creates may be named anything matching
 `[a-z0-9][a-z0-9._-]*` (lowercase, must start with a letter or digit; files also need
 the correct extension for their location). Once grison creates a file or directory on
 pull, it never renames it again — not when the remote title changes, not after a
-create gets its id. A pre-existing v1 name (with its old `<id>-` numeric prefix) is
-still a valid name under this rule and is left alone by the migration.
+create gets its id.
 
 ---
 
@@ -74,6 +73,14 @@ an author-created name), no leading hyphen.
 - **Fails (`WS-001`):** `findings/library/My Finding.md` (space, uppercase).
 - **Passes:** `findings/library/reflected-xss-search.md`.
 
+**Exception — a file directly inside an `evidence/` or `images/` directory** (D1/D9):
+this charset rule does NOT apply to that one leaf name (everything ABOVE it — the
+report/book directory, `evidence`/`images` itself — still follows `WS-001` as normal).
+An evidence/image file's name is a stable handle kept **verbatim**, exactly as it
+reached grison (real data includes names like `Phishing_Sonuçları.png` — non-ASCII,
+mixed case, both legitimate) — see `REF-008` (§5.3) for the rule that applies there
+instead.
+
 ### 1.2 Unknown paths (`WS-002`, `WS-003`)
 
 Everything under `findings/` and `methodology/` must be one of the shapes this
@@ -119,10 +126,8 @@ to them in full. Agents write here just as much as anywhere else in the workspac
   document, tier `inbox`: every `FND-…` rule applies (§2), with two narrow
   exceptions — no image lines (§2.5/§5.1, same as a library finding, since there is
   no report yet to hold evidence for) and no `FND-015` (severity-vs-CVSS-band; see
-  §2.3's note on why an inbox finding is exempt). An inbox finding may ALSO carry one
-  machine field forbidden everywhere else: a `grison: {gw: {table: reportedFinding}}`
-  block — the scanner-provenance identity `grison parse` writes today (see §2.1's
-  schema table). It is optional; an agent may strip it while triaging.
+  §2.3's note on why an inbox finding is exempt). It carries no machine field of any
+  kind — same as every other tier; `grison parse` writes plain v2 documents.
 - **`methodology/checklists/<engagement>/[<chapter>/]*.md`** — same shape as a real
   book (§4), validated with the full `WIKI-…` rule set including banned text (§8).
   Internal links (`WIKI-007`) and images (§5.2) resolve against the checklist's own
@@ -137,13 +142,14 @@ to them in full. Agents write here just as much as anywhere else in the workspac
 
 ### 1.5 Format version (`WS-005`, `WS-006`)
 
-`.grison/manifest.yml` records `format: 2`. If it's older, `grison validate` fails with
-`WS-005` and says to run the one-time migration; grison never tries to interpret an
-older-format workspace directly. If it's newer than this grison understands, `WS-006`
-says to upgrade grison. A workspace with no `manifest.yml` but with a real
-`.grison/env` reads as format 1 (pre-dates the manifest file) and gets `WS-005`; one
-with neither reads as a fresh, unbootstrapped directory (not validated as a workspace
-at all — that's what `grison sync`'s bootstrap step is for).
+`.grison/manifest.yml` records `format: 2`. A workspace whose format differs from the
+one this grison supports is refused outright, with a plain message — nothing converts
+it, and grison never tries to interpret a workspace at another format directly. If
+it's older, `grison validate` fails with `WS-005`; if it's newer than this grison
+understands, `WS-006` says to upgrade grison. A workspace with no `manifest.yml` but
+with a real `.grison/env` reads as format 1 (pre-dates the manifest file) and gets
+`WS-005`; one with neither reads as a fresh, unbootstrapped directory (not validated
+as a workspace at all — that's what `grison sync`'s bootstrap step is for).
 
 ### 1.6 `.grison/manifest.yml` schema (`WS-007`)
 
@@ -262,21 +268,12 @@ Frontmatter fields, all optional except `severity` and `finding_type`:
 | `cwe` | list of CWE ids (`CWE-79`, or bare `79`) | must exist in the embedded MITRE index |
 | `tags` | list of strings | no duplicates (case-insensitive), no surrounding whitespace |
 | `affected_entities` | free text | **instance/inbox tier only** |
-| `grison.gw.table` | the literal string `reportedFinding` | **inbox tier only** — optional; see below |
 
 No other frontmatter key is allowed (`FND-001`) — in particular there is no `evidence:`
 list (D1: the only authored evidence form is an image line in the body, §5), and no
-`grison:` block on a `library`/`instance` finding.
-
-**The one exception**: an `inbox` finding (only) may carry
-`grison: {gw: {table: reportedFinding}}`. This is not a reopening of "no machine
-fields" — it is the exact, closed, scanner-provenance shape `grison parse` writes
-today (see `grison/markdown/mapping.py`'s `ir_to_finding` and
-`grison/markdown/document.py`'s `finding_to_markdown`); `table` is never any value
-other than the literal `reportedFinding`, and the block is optional — an agent
-triaging the finding may strip it. It is `FND-001` on a `library`/`instance` finding,
-and a malformed `grison:` block (wrong shape, wrong `table` value) is a normal schema
-failure on any tier.
+`grison:` block on ANY tier, including `inbox`: `grison parse` writes plain v2
+documents with no machine fields at all, and a hand-added `grison:` block anywhere is
+`FND-001` like any other unrecognized frontmatter key.
 
 Body: exactly one `# {title}` line, followed by exactly these five `##` sections, in
 exactly this order, every one present exactly once:
@@ -650,6 +647,38 @@ where the page sits**: exactly one spelling is correct per location.
 ![Subdomain enumeration results](../images/subdomain-scan.png)
 ```
 
+### 5.3 File-set names (`REF-008`)
+
+A file directly inside `evidence/` (per report) or `images/` (per book) is exempt
+from `WS-001`'s charset rule (§1.1) — its name is a stable handle kept verbatim, and
+real evidence/image names are routinely non-ASCII and/or mixed case. In its place,
+every such file's own bare name must satisfy ALL of:
+
+- no path separator (`/`) — it names a file directly in the folder, never a nested one
+- no leading dot — not a hidden file
+- not shaped like a collision sidecar (`<name>.remote.<ext>`, or an extension-less
+  `<name>.remote` — ENGINE.md §8; a sidecar is never a real evidence/image file)
+- valid UTF-8
+- at most 255 bytes (UTF-8-encoded)
+
+Two files sharing a stem within the same folder is `REF-003` (§5.1) already — not
+duplicated here.
+
+- `REF-008` — the file's own name fails one of the above.
+
+```
+findings/reports/acme-corp/evidence/Phishing_Sonuçları.png   -- passes (REF-008 and WS-001 both)
+findings/reports/acme-corp/evidence/sub/dir.png              -- fails REF-008 (path separator)
+findings/reports/acme-corp/evidence/.hidden.png               -- fails REF-008 (leading dot)
+findings/reports/acme-corp/evidence/shot.remote.png            -- fails REF-008 (sidecar shape)
+```
+
+A file `grison validate` fails under `REF-008` is never created/re-uploaded by
+`grison sync` (the same "a document with failures is never pushed or created" gate
+every other record kind gets — ENGINE.md 'The apply loop', item 1) — it produces an
+`invalid` event naming
+`REF-008`, and every other file in the same folder still syncs normally.
+
 ---
 
 ## 6. The converter's supported grammar (quoted, not re-described)
@@ -985,6 +1014,7 @@ against the recorded digest, the `WS-009` pattern exactly) is missing, since it 
 | REF-005 | a library or inbox finding contains an image line |
 | REF-006 | a cross-reference link's target is not a resolvable evidence path |
 | REF-007 | a wiki image uses the wrong path spelling for its location |
+| REF-008 | an evidence/ or images/ file's own name is invalid (WS-001 does not apply there) |
 | TXT-001 | a built-in banned phrase appears in a document body |
 | TXT-002 | a per-workspace confidential term appears outside its allowed path |
 | IDX-001 | .grison/index.json is missing required structure or malformed |

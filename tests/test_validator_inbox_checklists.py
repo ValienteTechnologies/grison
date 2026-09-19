@@ -95,7 +95,7 @@ def test_ref005_image_in_inbox_finding_has_its_own_message(tmp_path: Path) -> No
     assert "inbox" in matches[0].message
 
 
-def test_grison_block_forbidden_outside_inbox_tier(tmp_path: Path) -> None:
+def test_grison_block_forbidden_on_library_finding(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
     p = root / "findings" / "library" / "weak-tls-config.md"
     edit(p, "severity: medium", "grison:\n  gw:\n    table: reportedFinding\nseverity: medium")
@@ -103,13 +103,16 @@ def test_grison_block_forbidden_outside_inbox_tier(tmp_path: Path) -> None:
     assert "FND-001" in rule_ids(fails)
 
 
-def test_grison_block_bad_table_value(tmp_path: Path) -> None:
+def test_grison_block_forbidden_on_inbox_finding_too(tmp_path: Path) -> None:
+    """No tier carries a ``grison:`` block any more (engine step 3 item E) — the old
+    scanner-provenance exception for inbox findings is gone; ``grison parse`` itself
+    never writes one, and a hand-added one is a plain unrecognized frontmatter key."""
     root = copy_fixture(tmp_path)
     p = root / "findings" / "inbox" / "sql-injection.md"
-    edit(p, "table: reportedFinding", "table: finding")
+    edit(p, "severity: high", "grison:\n  gw:\n    table: reportedFinding\nseverity: high")
     fails = validate_workspace(root)
-    assert any(f.path == "findings/inbox/sql-injection.md" and f.rule_id.startswith("FND-")
-              for f in fails)
+    assert "FND-001" in rule_ids(fails)
+    assert any(f.path == "findings/inbox/sql-injection.md" for f in fails)
 
 
 @pytest.mark.rule_ok("FND-015")

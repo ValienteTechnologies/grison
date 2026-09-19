@@ -121,6 +121,53 @@ def test_literal_raw_endraw_author_text_not_eaten_by_own_unwrap() -> None:
     assert html_to_md(html) == text
 
 
+# --- item 2 (fix-f, converter._RAW_BLOCK_RE): a real {% raw %}...{% endraw %} pair
+# split across an inline tag, or across two top-level blocks, was invisible to the
+# old per-text-run scan (each half fell through to the ordinary active-expression
+# scan and became its own dangling `gw:` marker). One rule now recognizes an
+# opener/closer wherever they fall: see converter.py module docstring and
+# _RawScanState/_split_raw_regions.
+
+
+def test_raw_block_split_across_an_inline_tag_stays_one_literal_region() -> None:
+    # Before the fix: leaf "a {% raw %}" (no closer in THIS leaf) fell through to
+    # the active-expression scan and became its own `gw:{% raw %}` marker; same
+    # for the "{{ x }}" leaf inside <strong> and the "{% endraw %} b" leaf after
+    # it — three dangling markers instead of one literal region.
+    html = "<p>a {% raw %}<strong>{{ x }}</strong>{% endraw %} b</p>"
+    events: list[str] = []
+    md = html_to_md(html, on_loss=events.append)
+    assert "{% raw %}" not in md
+    assert "{% endraw %}" not in md
+    assert "gw:" not in md  # never an active marker for content inside the region
+    assert "**{{ x }}**" in md  # <strong> kept as real bold formatting
+    assert md == "a **{{ x }}** b"
+    assert any("resolved to its literal text" in e for e in events)
+    # immediate fixpoint: pushing this md back and pulling it again is stable —
+    # {{ x }} is now ordinary literal author text (D10 escapes/restores it, no
+    # raw wrapper involved on either side any more).
+    assert html_to_md(md_to_html(md)) == md
+
+
+def test_raw_block_spanning_two_top_level_blocks_is_literal_in_both_halves() -> None:
+    # Before the fix: block 1's own leaf "before {% raw %} unfinished" (no closer
+    # in THAT block) became its own `gw:{% raw %}` marker, and block 2's leaf
+    # "finished {% endraw %} after" became its own `gw:{% endraw %}` marker —
+    # never recognized as one region at all.
+    html = "<p>before {% raw %} unfinished</p><p>finished {% endraw %} after</p>"
+    events: list[str] = []
+    md = html_to_md(html, on_loss=events.append)
+    assert "{% raw %}" not in md
+    assert "{% endraw %}" not in md
+    assert "gw:" not in md  # never active in either half
+    assert "before" in md and "unfinished" in md
+    assert "finished" in md and "after" in md
+    # reported once for the boundary crossing, once for the eventual resolution —
+    # both halves stayed literal, never active, the whole way through.
+    assert any("still open at the end of a block" in e for e in events)
+    assert any("resolved to its literal text" in e for e in events)
+
+
 def test_literal_wrapper_unwraps_without_on_loss_noise() -> None:
     events: list[str] = []
     html = md_to_html("Say {{ x }} literally.")

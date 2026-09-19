@@ -17,6 +17,16 @@ from pathlib import Path
 
 import yaml
 
+_REPORT_SCOPES = [
+    {
+        "name": "Internal range",
+        "scope": "10.0.0.0/24",
+        "description": "",
+        "disallowed": False,
+        "requiresCaution": False,
+    }
+]
+
 
 def _write_page_file(path: Path, *, title: str, body: str) -> None:
     fm = {"title": title}
@@ -35,12 +45,14 @@ def _write_page_file(path: Path, *, title: str, body: str) -> None:
 def test_status_before_any_sync(run_grison):
     result = run_grison("status")
 
+    # tests changed on purpose (task step 3): findings are engine-managed now
+    # (grison.adapters.gw_findings/gw_evidence) — with nothing seeded, both
+    # findings kinds report clean 0, the same shape methodology already had,
+    # not the old "not yet engine-managed" placeholder line.
     assert result.exit_code == 0
-    # tests changed on purpose (reports task C): findings/reports moved onto the
-    # sync engine — `grison status` now gives it a real per-record breakdown (like
-    # methodology), so the "not yet engine-managed" line is library-only.
-    assert "findings: 0 library file(s) — not yet engine-managed" in result.output
-    assert "reports: clean" in result.output
+    assert "findings (library): clean" in result.output
+    assert "findings (reports): clean" in result.output
+    assert "report: clean" in result.output
     assert "methodology: clean" in result.output
     assert "last findings sync: never" in result.output
     assert "last report sync: never" in result.output
@@ -48,9 +60,10 @@ def test_status_before_any_sync(run_grison):
 
 
 # ---------------------------------------------------------------------------
-# After a clean sync: last-sync-per-phase shim (item 6), including the findings
-# phase's real, unconditional failure in this fake environment (see the module
-# docstring of test_methodology_e2e.py) — status must show it, not hide it.
+# After a clean sync: last-sync-per-phase shim (item 6). Findings are
+# engine-managed now (task step 3 fixed the historical fetch_evidence/
+# findingId break — see tests/e2e/test_findings_e2e.py), so with nothing
+# seeded the findings phase is clean too, same as reports/wiki.
 # ---------------------------------------------------------------------------
 
 
@@ -61,14 +74,12 @@ def test_status_after_a_clean_sync_shows_clean_and_per_phase_last_sync(run_griso
 
     result = run_grison("status")
 
-    assert result.exit_code == 0  # a historical findings-phase failure never poisons status
+    assert result.exit_code == 0
     assert "methodology: clean 1" in result.output
     assert "last wiki sync:" in result.output
-    assert "(ok)" in result.output
     assert "last findings sync:" in result.output
-    assert "FAILED" in result.output  # the fake's real, documented fetch_evidence bug
     assert "last report sync:" in result.output
-    assert "(ok)" in result.output  # the report phase itself is clean in the fakes
+    assert result.output.count("(ok)") == 3  # findings, report, and wiki all clean
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +148,7 @@ def test_status_reports_invalid_with_rule_ids(run_grison, bs_server):
 
     assert result.exit_code == 1  # invalid IS a problem
     assert "methodology: invalid 1" in result.output
-    assert "  invalid  methodology/library/playbook/getting-started.md (WIKI-002)" \
-        in result.output
+    assert "  invalid  methodology/library/playbook/getting-started.md (WIKI-002)" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +171,9 @@ def test_status_reports_a_live_collision_sidecar(run_grison, bs_server):
     assert "1 collision-sidecar(s) pending" in result.output
     # named by the ORIGINAL record's path (what the user recognizes), not the
     # sidecar file's own name — the message spells out that it's a collision
-    assert "! methodology/library/playbook/getting-started.md: unresolved collision" \
-        in result.output
+    assert (
+        "! methodology/library/playbook/getting-started.md: unresolved collision" in result.output
+    )
     # the record underneath is unresolved-edited, not itself invalid/unknown
     assert "methodology: edited 1" in result.output
 
@@ -197,21 +208,77 @@ def test_status_json_stable_shape(run_grison, bs_server):
     result = run_grison("status", "--json")
     payload = json.loads(result.output)
 
-    # tests changed on purpose (reports task C): reports is now its own engine-managed
-    # area with the same shape as methodology's, no longer folded into "findings".
-    assert payload["findings"] == {"managed": False, "library_files": 0}
-    assert payload["reports"]["managed"] is True
-    assert payload["reports"]["counts"] == {
-        "clean": 0, "edited": 0, "new": 0, "deleted": 0, "moved": 0, "invalid": 0, "unknown": 0,
+    # tests changed on purpose (task step 3 + reports task C): findings AND report
+    # (narrative sections/notes) are both engine-managed now, each with the same
+    # per-kind counts/non_clean shape methodology already had (findings splits into
+    # a library bucket and a reports bucket; report/narrative sections+notes get
+    # their own top-level area, same shape as methodology's, PLUS a sidecar-aware
+    # `evidence` breakdown, D1's file-set mirror — moved here from `findings`
+    # since evidence syncs on the report phase now, see fix item 5).
+    assert payload["findings"]["managed"] is True
+    zero_counts = {
+        "clean": 0,
+        "edited": 0,
+        "new": 0,
+        "deleted": 0,
+        "moved": 0,
+        "invalid": 0,
+        "unknown": 0,
     }
+    assert payload["findings"]["library"] == {"counts": zero_counts, "non_clean": []}
+    assert payload["findings"]["reports"]["counts"] == zero_counts
+    assert payload["findings"]["reports"]["non_clean"] == []
+    assert payload["report"]["managed"] is True
+    assert payload["report"]["counts"] == zero_counts
     assert payload["methodology"]["managed"] is True
     assert payload["methodology"]["counts"] == {
-        "clean": 1, "edited": 0, "new": 0, "deleted": 0, "moved": 0, "invalid": 0, "unknown": 0,
+        "clean": 1,
+        "edited": 0,
+        "new": 0,
+        "deleted": 0,
+        "moved": 0,
+        "invalid": 0,
+        "unknown": 0,
     }
     assert payload["methodology"]["non_clean"] == []
     assert payload["methodology"]["collision_sidecars"] == []
     assert payload["remote"] is None
     assert payload["last_sync"]["wiki"]["ok"] is True
-    assert payload["last_sync"]["findings"]["ok"] is False
-    assert "error" in payload["last_sync"]["findings"]
+    assert payload["last_sync"]["findings"]["ok"] is True
     assert payload["last_sync"]["report"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Item 5 (fix-d): evidence lives under `report`, sidecar-aware, not under
+# `findings` (a leftover from before evidence moved onto the report phase).
+# ---------------------------------------------------------------------------
+
+
+def test_status_shows_evidence_under_report_with_sidecar_aware_counts(run_grison, gw_server):
+    """A live collision sidecar (``<name>.remote.<ext>``, ENGINE.md §8) is listed
+    as a collision, never counted as a file — and the whole breakdown lives under
+    ``report``, matching where evidence actually syncs now (D1: the report phase,
+    not findings — see ``grison.adapters.gw_evidence``)."""
+    gw_server.store.seed_report(id=7, title="Report A", project={"scopes": _REPORT_SCOPES})
+    gw_server.store.seed_evidence(id=90, reportId=7, document="evidence/7/shot.png")
+    run_grison("sync")
+
+    evidence_dir = Path.cwd() / "findings" / "reports" / "report-a" / "evidence"
+    assert (evidence_dir / "shot.png").is_file()
+    # a stale collision sidecar left behind by some earlier, unresolved sync —
+    # never a real evidence file (ENGINE.md §8).
+    (evidence_dir / "shot.remote.png").write_bytes(b"stale collision sidecar")
+
+    result = run_grison("status")
+
+    assert result.exit_code == 0, result.output
+    ev_line = next(ln for ln in result.output.splitlines() if ln.startswith("evidence:"))
+    assert "findings/reports/report-a 1" in ev_line  # one real file, not two
+    assert "1 collision-sidecar(s) pending" in ev_line
+
+    json_result = run_grison("status", "--json")
+    payload = json.loads(json_result.output)
+    assert "evidence_files" not in payload["findings"]["reports"]  # moved out (item 5)
+    assert payload["report"]["evidence"] == {
+        "findings/reports/report-a": {"files": 1, "collisions": 1},
+    }

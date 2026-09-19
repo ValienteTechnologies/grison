@@ -4,12 +4,11 @@ identity throughout (D3), mirrors with digest hand-edit detection, narrative sec
 driven by the report's ``extraFieldSpec`` rows (not guessed from ``extraFields``
 keys).
 
-Every ``run_grison("sync")`` also runs the findings phase, which today fails
-unconditionally before touching any record (see ``tests/e2e/test_findings_e2e.py``) —
-that failure is isolated per phase and always makes the *overall* exit code 1 and
-prints "findings sync failed: …", even when the reports phase itself is perfectly
-clean. These tests assert the reports phase's own summary lines, the Ghostwriter
-operation log, and the files on disk rather than the overall exit code.
+Every ``run_grison("sync")`` also runs the findings phase (engine-managed now —
+see ``tests/e2e/test_findings_e2e.py``), which is clean by default whenever a
+scenario here doesn't seed any library/reported findings itself. These tests
+assert the reports phase's own summary line, the Ghostwriter operation log, and
+the files on disk, rather than assuming anything about the overall exit code.
 
 Tests changed on purpose (rewritten wholesale for the engine step; see each
 docstring for the specific reasoning):
@@ -84,8 +83,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-REPORT_SCOPES = [{"name": "Internal range", "scope": "10.0.0.0/24", "description": "",
-                   "disallowed": False, "requiresCaution": False}]
+REPORT_SCOPES = [
+    {
+        "name": "Internal range",
+        "scope": "10.0.0.0/24",
+        "description": "",
+        "disallowed": False,
+        "requiresCaution": False,
+    }
+]
 
 
 def _use_fields(gw_server, *names: str) -> None:
@@ -104,11 +110,22 @@ def _rdir(slug: str) -> Path:
 def test_first_sync_creates_narrative_project_and_notes(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A",
+        id=7,
+        title="Report A",
         extraFields={"executive_summary": "<p>Summary text.</p>"},
-        project={"codename": "OP-A", "scopes": REPORT_SCOPES,
-                 "comments": [{"id": 1, "note": "<p>Kickoff note.</p>", "timestamp": "2026-01-02",
-                               "operatorId": 1, "user": {"name": "Lab Admin", "username": "lab"}}]},
+        project={
+            "codename": "OP-A",
+            "scopes": REPORT_SCOPES,
+            "comments": [
+                {
+                    "id": 1,
+                    "note": "<p>Kickoff note.</p>",
+                    "timestamp": "2026-01-02",
+                    "operatorId": 1,
+                    "user": {"name": "Lab Admin", "username": "lab"},
+                }
+            ],
+        },
     )
 
     result = run_grison("sync")
@@ -117,8 +134,9 @@ def test_first_sync_creates_narrative_project_and_notes(run_grison, gw_server):
     assert "reports (gw.reportSection): pull_new 1" in result.output
     assert "reports (gw.projectNote): pull_new 1" in result.output
     rdir = _rdir("report-a")
-    assert (rdir / "narrative" / "executive_summary.md").read_text(encoding="utf-8").strip() \
-        == "Summary text."
+    assert (rdir / "narrative" / "executive_summary.md").read_text(
+        encoding="utf-8"
+    ).strip() == "Summary text."
     assert (rdir / ".report.yml").exists()
     assert "narrative_order:" in (rdir / ".report.yml").read_text(encoding="utf-8")
     project_md = (rdir / "project.md").read_text(encoding="utf-8")
@@ -134,7 +152,9 @@ def test_first_sync_creates_narrative_project_and_notes(run_grison, gw_server):
 def test_second_sync_is_a_noop(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -151,7 +171,9 @@ def test_second_sync_is_a_noop(run_grison, gw_server):
 def test_local_edit_pushes_one_section(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -170,7 +192,9 @@ def test_local_edit_pushes_one_section(run_grison, gw_server):
 def test_remote_edit_pulls_one_section(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -188,7 +212,8 @@ def test_remote_edit_pulls_one_section(run_grison, gw_server):
 def test_dry_run_writes_nothing_and_reports_both_directions(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary", "methodology")
     gw_server.store.seed_report(
-        id=7, title="Report A",
+        id=7,
+        title="Report A",
         extraFields={"executive_summary": "<p>Summary.</p>", "methodology": "<p>Approach.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
@@ -211,7 +236,9 @@ def test_dry_run_writes_nothing_and_reports_both_directions(run_grison, gw_serve
 def test_collision_surfaced_then_force_flags(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -237,7 +264,9 @@ def test_collision_surfaced_then_force_flags(run_grison, gw_server):
 def test_force_remote_resolves_collision(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -256,7 +285,9 @@ def test_force_remote_resolves_collision(run_grison, gw_server):
 def test_new_local_note_is_pushed(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={},
+        id=7,
+        title="Report A",
+        extraFields={},
         project={"id": 55, "scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -283,7 +314,10 @@ def test_note_push_fails_loudly_when_operator_cannot_be_resolved(run_grison, gw_
     _use_fields(gw_server, "executive_summary")
     gw_server.store.users = []  # whoami's username now resolves to nobody
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"id": 55, "scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"id": 55, "scopes": REPORT_SCOPES},
     )
     notes_dir = _rdir("report-a") / "notes"
 
@@ -300,7 +334,9 @@ def test_note_push_fails_loudly_when_operator_cannot_be_resolved(run_grison, gw_
 def test_missing_scope_is_a_lint_not_a_block(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"codename": "OP-NOSCOPE", "scopes": []},
     )
 
@@ -316,7 +352,9 @@ def test_repair_when_both_sides_independently_converge(run_grison, gw_server):
     reach when both sides drift to an identical value)."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -336,7 +374,8 @@ def test_mass_change_guard_withholds_and_announces_it(run_grison, gw_server):
     keys = [f"section_{i}" for i in range(8)]
     _use_fields(gw_server, *keys)
     gw_server.store.seed_report(
-        id=7, title="Report A",
+        id=7,
+        title="Report A",
         extraFields={k: f"<p>Body {i}.</p>" for i, k in enumerate(keys)},
         project={"scopes": REPORT_SCOPES},
     )
@@ -356,10 +395,15 @@ def test_malformed_local_file_report_isolated_from_other_reports(run_grison, gw_
     _use_fields(gw_server, "executive_summary")
     gw_server.store.users = []
     gw_server.store.seed_report(
-        id=7, title="Broken Report", extraFields={}, project={"id": 55, "scopes": REPORT_SCOPES},
+        id=7,
+        title="Broken Report",
+        extraFields={},
+        project={"id": 55, "scopes": REPORT_SCOPES},
     )
     gw_server.store.seed_report(
-        id=8, title="Good Report", extraFields={"executive_summary": "<p>Fine.</p>"},
+        id=8,
+        title="Good Report",
+        extraFields={"executive_summary": "<p>Fine.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")  # creates both report dirs + narrative
@@ -381,7 +425,9 @@ def test_new_section_appears_remotely_on_second_sync(run_grison, gw_server):
     set is driven by the spec, not by whatever ``extraFields`` happens to contain."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>Summary.</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -402,7 +448,8 @@ def test_extra_fields_value_deleted_still_pulls_as_empty(run_grison, gw_server):
     field still exists, so it simply pulls back as empty content."""
     _use_fields(gw_server, "executive_summary", "methodology")
     gw_server.store.seed_report(
-        id=7, title="Report A",
+        id=7,
+        title="Report A",
         extraFields={"executive_summary": "<p>s</p>", "methodology": "<p>m</p>"},
         project={"scopes": REPORT_SCOPES},
     )
@@ -425,7 +472,9 @@ def test_deleting_an_unedited_local_section_clears_it_remotely(run_grison, gw_se
     content back to empty (``NarrativeSectionAdapter.delete``)."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>s</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>s</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -443,7 +492,8 @@ def test_deleting_an_unedited_local_section_clears_it_remotely(run_grison, gw_se
 def test_heading_levels_round_trip_pull_and_push(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A",
+        id=7,
+        title="Report A",
         extraFields={"executive_summary": "<h2>Overview</h2><h3>Detail</h3><p>Body.</p>"},
         project={"scopes": REPORT_SCOPES},
     )
@@ -466,7 +516,9 @@ def test_heading_levels_round_trip_pull_and_push(run_grison, gw_server):
 def test_project_md_regenerates_when_remote_project_data_changes(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={},
+        id=7,
+        title="Report A",
+        extraFields={},
         project={"codename": "OP-OLD", "scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -488,7 +540,9 @@ def test_project_md_hand_edit_is_never_overwritten_and_fails_validation(run_gris
     detected and left alone, and ``grison validate`` flags it (WS-009)."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={},
+        id=7,
+        title="Report A",
+        extraFields={},
         project={"codename": "OP-A", "scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -512,7 +566,10 @@ def test_report_yml_hand_edit_is_never_overwritten_and_fails_validation(run_gris
     applied to ``.report.yml``."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
     meta = _rdir("report-a") / ".report.yml"
@@ -540,11 +597,21 @@ def test_mirrored_note_edited_remotely_is_pulled(run_grison, gw_server):
     second file)."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={},
+        id=7,
+        title="Report A",
+        extraFields={},
         project={
-            "id": 55, "scopes": REPORT_SCOPES,
-            "comments": [{"id": 10, "note": "<p>Original text</p>", "timestamp": "2026-01-02",
-                          "operatorId": 1, "user": {"name": "Lab Admin", "username": "lab"}}],
+            "id": 55,
+            "scopes": REPORT_SCOPES,
+            "comments": [
+                {
+                    "id": 10,
+                    "note": "<p>Original text</p>",
+                    "timestamp": "2026-01-02",
+                    "operatorId": 1,
+                    "user": {"name": "Lab Admin", "username": "lab"},
+                }
+            ],
         },
     )
     run_grison("sync")
@@ -571,17 +638,28 @@ def test_local_edit_to_a_mirrored_note_is_invalid_never_pushed(run_grison, gw_se
     clamps it to INVALID (defense in depth; same mechanism read-only mirrors use)."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={},
+        id=7,
+        title="Report A",
+        extraFields={},
         project={
-            "id": 55, "scopes": REPORT_SCOPES,
-            "comments": [{"id": 10, "note": "<p>Original text</p>", "timestamp": "2026-01-02",
-                          "operatorId": 1, "user": {"name": "Lab Admin", "username": "lab"}}],
+            "id": 55,
+            "scopes": REPORT_SCOPES,
+            "comments": [
+                {
+                    "id": 10,
+                    "note": "<p>Original text</p>",
+                    "timestamp": "2026-01-02",
+                    "operatorId": 1,
+                    "user": {"name": "Lab Admin", "username": "lab"},
+                }
+            ],
         },
     )
     run_grison("sync")
     note_path = next(iter((_rdir("report-a") / "notes").glob("*.md")))
     note_path.write_text(
-        note_path.read_text(encoding="utf-8") + "\nHand-added by mistake.\n", encoding="utf-8",
+        note_path.read_text(encoding="utf-8") + "\nHand-added by mistake.\n",
+        encoding="utf-8",
     )
 
     result = run_grison("sync")
@@ -598,7 +676,10 @@ def test_undo_of_a_note_create_deletes_it_and_restores_the_authors_text(run_gris
     not the post-create mirrored form, which was never what they wrote)."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"id": 55, "scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"id": 55, "scopes": REPORT_SCOPES},
     )
     run_grison("sync")
     notes_dir = _rdir("report-a") / "notes"
@@ -629,11 +710,15 @@ def test_undo_of_a_note_create_deletes_it_and_restores_the_authors_text(run_gris
 def test_missing_scope_lint_does_not_block_a_sibling_report(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=5, title="No Scope", extraFields={"executive_summary": "<p>a</p>"},
+        id=5,
+        title="No Scope",
+        extraFields={"executive_summary": "<p>a</p>"},
         project={"codename": "OP-NOSCOPE", "scopes": []},
     )
     gw_server.store.seed_report(
-        id=6, title="Has Scope", extraFields={"executive_summary": "<p>b</p>"},
+        id=6,
+        title="Has Scope",
+        extraFields={"executive_summary": "<p>b</p>"},
         project={"scopes": REPORT_SCOPES},
     )
 
@@ -661,7 +746,9 @@ def test_missing_scope_lint_does_not_block_a_sibling_report(run_grison, gw_serve
 def test_stale_push_guard_aborts_push_as_collision_on_concurrent_edit(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>old summary</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>old summary</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -674,7 +761,10 @@ def test_stale_push_guard_aborts_push_as_collision_on_concurrent_edit(run_grison
 
     # The pre-write re-fetch guard's report_by_pk call is what must see the
     # concurrent edit — targeted relative to the baseline already spent by the
-    # first sync above, rather than a hardcoded absolute count.
+    # first sync above, rather than a hardcoded absolute count. Classification's
+    # own fetch is a bulk `fetch_reports()`, not `report_by_pk` (GWReportContext.
+    # refresh) — the guard's refetch is the first `report_by_pk` call this sync
+    # makes, before the adapter's own push-time re-fetch-and-merge.
     baseline = gw_server.call_count("report_by_pk")
     gw_server.on_request("report_by_pk", concurrent_edit, call_number=baseline + 1)
 
@@ -691,7 +781,9 @@ def test_stale_push_guard_aborts_push_as_collision_on_concurrent_edit(run_grison
 def test_stale_push_guard_withholds_push_when_report_vanishes_mid_run(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>old</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>old</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -701,7 +793,7 @@ def test_stale_push_guard_withholds_push_when_report_vanishes_mid_run(run_grison
     def vanish() -> None:
         gw_server.store.reports[:] = [r for r in gw_server.store.reports if r["id"] != 7]
 
-    baseline = gw_server.call_count("report_by_pk")
+    baseline = gw_server.call_count("report_by_pk")  # see call-count note above
     gw_server.on_request("report_by_pk", vanish, call_number=baseline + 1)
 
     result = run_grison("sync")
@@ -726,7 +818,9 @@ def test_unknown_local_narrative_key_is_invalid_not_pushed(run_grison, gw_server
     contact needed at validate time) instead of a sync-time skip note."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>s</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>s</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -748,7 +842,8 @@ def test_pull_surfaces_a_dropped_styling_construct_as_a_loss_event_once(run_gris
     severity) and never repeated on a later, unchanged (CLEAN) sync."""
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A",
+        id=7,
+        title="Report A",
         extraFields={
             "executive_summary": (
                 '<p><span data-color="#ff0000" style="color: #ff0000;">urgent</span></p>'
@@ -758,8 +853,7 @@ def test_pull_surfaces_a_dropped_styling_construct_as_a_loss_event_once(run_gris
     )
     r1 = run_grison("sync", "--verbose")
     assert (
-        "loss findings/reports/report-a/narrative/executive_summary.md — "
-        "styling span dropped"
+        "loss findings/reports/report-a/narrative/executive_summary.md — styling span dropped"
     ) in r1.output
 
     r2 = run_grison("sync", "--verbose")  # nothing changed — must not re-warn every routine sync
@@ -772,13 +866,26 @@ def test_pull_surfaces_a_dropped_styling_construct_as_a_loss_event_once(run_gris
 def test_project_md_renders_excluded_and_caution_scope_flags(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     scopes = [
-        {"name": "Internal", "scope": "10.0.0.0/8", "description": "", "disallowed": False,
-         "requiresCaution": True},
-        {"name": "Excluded hosts", "scope": "10.9.9.9", "description": "", "disallowed": True,
-         "requiresCaution": False},
+        {
+            "name": "Internal",
+            "scope": "10.0.0.0/8",
+            "description": "",
+            "disallowed": False,
+            "requiresCaution": True,
+        },
+        {
+            "name": "Excluded hosts",
+            "scope": "10.9.9.9",
+            "description": "",
+            "disallowed": True,
+            "requiresCaution": False,
+        },
     ]
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"scopes": scopes},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"scopes": scopes},
     )
 
     run_grison("sync")
@@ -791,7 +898,10 @@ def test_project_md_renders_excluded_and_caution_scope_flags(run_grison, gw_serv
 def test_note_push_dry_run_inserts_nothing_and_leaves_the_file_untouched(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={}, project={"id": 55, "scopes": REPORT_SCOPES},
+        id=7,
+        title="Report A",
+        extraFields={},
+        project={"id": 55, "scopes": REPORT_SCOPES},
     )
     run_grison("sync")
     notes_dir = _rdir("report-a") / "notes"
@@ -809,11 +919,15 @@ def test_note_push_dry_run_inserts_nothing_and_leaves_the_file_untouched(run_gri
 def test_bad_narrative_html_is_isolated_other_reports_still_sync(run_grison, gw_server):
     _use_fields(gw_server, "scope_text", "executive_summary")
     gw_server.store.seed_report(
-        id=5, title="Broken", extraFields={"scope_text": "<table><tr><td>x</td></tr></table>"},
+        id=5,
+        title="Broken",
+        extraFields={"scope_text": "<table><tr><td>x</td></tr></table>"},
         project={"scopes": REPORT_SCOPES},
     )
     gw_server.store.seed_report(
-        id=6, title="Good", extraFields={"executive_summary": "<p>fine</p>"},
+        id=6,
+        title="Good",
+        extraFields={"executive_summary": "<p>fine</p>"},
         project={"scopes": REPORT_SCOPES},
     )
 
@@ -835,7 +949,9 @@ def test_bad_narrative_html_is_isolated_other_reports_still_sync(run_grison, gw_
 def test_push_merges_over_a_fresh_fetch_not_the_stale_top_of_run_snapshot(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>old</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>old</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -846,7 +962,7 @@ def test_push_merges_over_a_fresh_fetch_not_the_stale_top_of_run_snapshot(run_gr
         report = next(r for r in gw_server.store.reports if r["id"] == 7)
         report["extraFields"]["out_of_band"] = "<p>added directly, not through grison</p>"
 
-    baseline = gw_server.call_count("report_by_pk")
+    baseline = gw_server.call_count("report_by_pk")  # see call-count note above
     gw_server.on_request("report_by_pk", add_out_of_band_field, call_number=baseline + 1)
 
     result = run_grison("sync")
@@ -862,7 +978,9 @@ def test_push_merges_over_a_fresh_fetch_not_the_stale_top_of_run_snapshot(run_gr
 def test_collision_persists_unresolved_across_a_second_sync(run_grison, gw_server):
     _use_fields(gw_server, "executive_summary")
     gw_server.store.seed_report(
-        id=7, title="Report A", extraFields={"executive_summary": "<p>base</p>"},
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>base</p>"},
         project={"scopes": REPORT_SCOPES},
     )
     run_grison("sync")
@@ -876,5 +994,184 @@ def test_collision_persists_unresolved_across_a_second_sync(run_grison, gw_serve
 
     assert "collision" in result.output
     assert es.read_text(encoding="utf-8") == "LOCAL\n"
-    assert es.with_name("executive_summary.remote.md").read_text(encoding="utf-8").strip() \
-        == "REMOTE"
+    assert (
+        es.with_name("executive_summary.remote.md").read_text(encoding="utf-8").strip() == "REMOTE"
+    )
+
+
+# --- evidence embeds in narrative sections (D1, shared with gw_findings) --------
+#
+# Proof for the fix to NarrativeSectionAdapter.canonical_local/canonical_remote and
+# IndexRefResolver.to_local (grison.adapters.gw_report / _gw_common): sections now
+# go through the SAME grison.engine.filesets.canonical_prose mechanism
+# grison.adapters.gw_findings uses — embed ids folded into the hash, captions
+# excluded from it, IndexRefResolver.to_local carrying an embed's caption/
+# description through from the evidence row instead of dropping them.
+
+
+def test_captioned_evidence_embed_in_narrative_round_trips_clean(run_grison, gw_server):
+    """Before the fix: IndexRefResolver.to_local always returned an empty caption/
+    description, so a narrative section's pulled embed permanently disagreed with
+    itself on caption text (raw-markdown comparison, no strip) and could never
+    settle to CLEAN. Fixed: to_local carries the evidence row's own caption/
+    description, and canonical_prose's caption-stripping makes the caption
+    irrelevant to the hash either way — a captioned embed is CLEAN immediately
+    after the pull that introduced it, and stays CLEAN with the caption intact."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        caption="Login screen", description="A close-up of the login form",
+    )
+    run_grison("sync")  # report dir + empty narrative + evidence/shot.png, all indexed
+
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["extraFields"]["executive_summary"] = (
+        '<div class="richtext-evidence" data-evidence-id="90"></div>'
+    )
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+
+    pull_result = run_grison("sync")
+
+    assert "reports (gw.reportSection): pull 1" in pull_result.output
+    pulled = section.read_text(encoding="utf-8")
+    assert '![Login screen](evidence/shot.png "A close-up of the login form")' in pulled
+
+    clean_result = run_grison("sync")  # round trip: nothing changed, must settle CLEAN
+
+    assert "reports (gw.reportSection): clean 1" in clean_result.output
+    assert section.read_text(encoding="utf-8") == pulled  # caption/description untouched
+    assert gw_server.operation_log == []
+
+
+def test_narrative_section_cross_reference_and_embed_converge_after_one_push(
+    run_grison, gw_server,
+):
+    """Item 1 (engine-findings-lab.md 'Two defects'/#2), narrative sections too:
+    the same permanent push loop a reported finding's plain cross-reference
+    link (``[caption](evidence/file)``, no ``!``) hit applies identically to a
+    narrative section's own ``canonical_prose``/``canonical_remote_prose``
+    pairing — fixed by folding both an embed's and a cross-reference's
+    identity through the same mechanism, so one push settles it for good."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/login_page.png", friendlyName="login_page",
+    )
+    gw_server.store.seed_evidence(
+        id=91, reportId=7, document="evidence/7/db_dump.png", friendlyName="db_dump",
+    )
+    run_grison("sync")  # downloads + indexes both evidence files
+
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+    section.write_text(
+        "![Login screenshot](evidence/login_page.png)\n\n"
+        "See [DB dump](evidence/db_dump.png) for the resulting database extraction.\n",
+        encoding="utf-8",
+    )
+
+    pushed = run_grison("sync")
+    assert "reports (gw.reportSection): push 1" in pushed.output, pushed.output
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    body = report["extraFields"]["executive_summary"]
+    assert 'data-evidence-id="90"' in body  # the embed
+    assert "data-gw-ref-encoded" in body  # the cross-reference
+
+    clean1 = run_grison("sync")
+    assert "reports (gw.reportSection): clean 1" in clean1.output, clean1.output
+    clean2 = run_grison("sync")
+    assert "reports (gw.reportSection): clean 1" in clean2.output, clean2.output
+
+
+def test_evidence_reupload_pushes_the_narrative_section_with_the_new_id(
+    run_grison, gw_server,
+):
+    """D1, verbatim: "replacing an image's bytes must re-push every finding
+    referencing it" — automatically, in the SAME run as the reupload, no
+    ``--force-local`` and no extra sync.
+
+    Before THIS fix (coordinator correction, phase-reordering task): evidence
+    file sets synced in the FINDINGS phase, which runs AFTER the reports phase
+    — so a narrative section's own re-push (triggered by its embedded
+    evidence's reupload) could only ever be classified on the NEXT sync, one
+    run after the reupload actually happened. In between, Ghostwriter's own
+    stored narrative text still referenced a DELETED evidence id — a broken
+    report export for however long the user waited before syncing again.
+
+    Fixed: :func:`grison.cli._run_reports_phase` now syncs each report's
+    ``evidence/`` file set BEFORE its narrative sections/notes — a report's
+    ``evidence/`` folder belongs to the report — so by the time
+    ``NarrativeSectionAdapter`` classifies, the reupload (if any, this same
+    run) has already repointed the index; the classification table's `L !=
+    base, R == base` (the LOCAL side's id-fold changed; the REMOTE side's
+    ``canonical_remote_prose``-derived literal id didn't, since nothing has
+    touched the section's OWN stored HTML yet) reaches PUSH in that SAME
+    engine_run call, right after the fileset sync that repointed the index."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/shot.png", friendlyName="shot",
+        caption="Login screen",
+    )
+    run_grison("sync")
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    report["extraFields"]["executive_summary"] = (
+        '<div class="richtext-evidence" data-evidence-id="90"></div>'
+    )
+    run_grison("sync")  # pulls the embed; establishes CLEAN state referencing id 90
+
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+    original_text = section.read_text(encoding="utf-8")
+    assert "evidence/shot.png" in original_text
+
+    evidence_file = _rdir("report-a") / "evidence" / "shot.png"
+    evidence_file.write_bytes(b"brand new bytes, same filename")
+    push_result = run_grison("sync")  # reupload AND the section's own re-push, same run
+
+    assert "reports (gw.evidence[findings/reports/report-a]): move_edit 1" in push_result.output
+    assert "reports (gw.reportSection): push 1" in push_result.output
+    assert "collision" not in push_result.output
+    assert section.read_text(encoding="utf-8") == original_text  # local text never touched
+    new_id = next(row["id"] for row in gw_server.store.evidence if row["document"].endswith(
+        "shot.png"
+    ))
+    assert new_id != 90
+    assert f'data-evidence-id="{new_id}"' in report["extraFields"]["executive_summary"]
+
+    before = len(gw_server.operation_log)
+    clean_result = run_grison("sync")
+
+    assert "reports (gw.reportSection): clean 1" in clean_result.output
+    assert gw_server.operation_log[before:] == []  # nothing left to push — settled
+
+
+def test_non_ascii_evidence_filename_pushes_from_a_narrative_embed(run_grison, gw_server):
+    """grison/markdown/refscan.py item 3: markdown-it-py percent-encodes non-ASCII
+    bytes in an image destination — grison.markdown.converter's own markdown-it
+    parse hands IndexRefResolver.to_remote a percent-encoded ``src`` on push
+    (``evidence/Sonu%C3%A7lar%C4%B1.png``, not ``evidence/Sonuçları.png``), which
+    used to fail to resolve against the index (keyed by the real, decoded path)
+    and raise ConverterError instead of pushing."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/Sonuçları.png", friendlyName="Sonuçları",
+    )
+    run_grison("sync")  # downloads + indexes evidence/Sonuçları.png
+
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+    section.write_text("![Results](evidence/Sonuçları.png)\n", encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert "reports (gw.reportSection): push 1" in result.output
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    assert 'data-evidence-id="90"' in report["extraFields"]["executive_summary"]

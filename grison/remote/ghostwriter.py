@@ -11,12 +11,31 @@ import base64
 import time
 from collections.abc import Callable
 from datetime import date
+from typing import Any
 
 import httpx
+from graphql import get_introspection_query
 
 from grison.errors import GrisonError
 from grison.remote.creds import Creds
 from grison.remote.http import BaseHttpClient
+
+# Deliberately NOT named `_..._QUERY`/`_..._MUTATION`: grison.remote.compat's
+# `_module_level_operations()` (and tests/test_gw_schema_conformance.py, which
+# shares that exact extraction) treat every module-level constant matching that
+# naming convention as "an operation grison sends" and validate it as part of the
+# real CRUD surface — the fingerprint probe is a compat-check implementation
+# detail, not one of those operations, so it is named to fall outside that scan.
+_FINGERPRINT_PROBE = """
+query {
+  queryRoot: __type(name: "query_root") { fields { name } }
+  mutationRoot: __type(name: "mutation_root") { fields { name args { name } } }
+  evidence: __type(name: "evidence") { fields { name } }
+  finding: __type(name: "finding") { fields { name } }
+  reportedFinding: __type(name: "reportedFinding") { fields { name } }
+  report: __type(name: "report") { fields { name } }
+}
+"""
 
 _FINDING_QUERY = """
 query {
@@ -52,6 +71,7 @@ query {
     references
     replication_steps
     affectedEntities
+    position
   }
 }
 """
@@ -60,12 +80,63 @@ _EVIDENCE_QUERY = """
 query {
   evidence {
     id
-    findingId
     reportId
     document
     caption
     friendlyName
     description
+  }
+}
+"""
+
+_EVIDENCE_BY_PK_QUERY = """
+query($id: bigint!) {
+  evidence_by_pk(id: $id) {
+    id
+    reportId
+    document
+    caption
+    friendlyName
+    description
+  }
+}
+"""
+
+_FINDING_BY_PK_QUERY = """
+query($id: bigint!) {
+  finding_by_pk(id: $id) {
+    id
+    title
+    severityId
+    findingTypeId
+    cvssScore
+    cvssVector
+    description
+    impact
+    mitigation
+    references
+    replication_steps
+  }
+}
+"""
+
+_REPORTED_FINDING_BY_PK_QUERY = """
+query($id: bigint!) {
+  reportedFinding_by_pk(id: $id) {
+    id
+    reportId
+    title
+    severityId
+    findingTypeId
+    cvssScore
+    cvssVector
+    description
+    impact
+    mitigation
+    references
+    replication_steps
+    affectedEntities
+    position
   }
 }
 """
@@ -350,6 +421,7 @@ mutation($obj: reportedFinding_insert_input!) {
     references
     replication_steps
     affectedEntities
+    position
   }
 }
 """
@@ -370,13 +442,17 @@ mutation($id: bigint!, $set: reportedFinding_set_input!) {
     references
     replication_steps
     affectedEntities
+    position
   }
 }
 """
 
+# D1/BRIEF B: evidence belongs to a REPORT (never a finding) — the real >= 7.2
+# schema's ``uploadEvidence`` has a ``report: Int!`` argument and no ``finding``
+# argument at all (confirmed against ``tests/fixtures/gw-schema-7.2.6.graphql``).
 _UPLOAD_EVIDENCE_MUTATION = """
 mutation(
-  $finding: Int!
+  $report: Int!
   $file_base64: String!
   $filename: String!
   $caption: String!
@@ -384,7 +460,7 @@ mutation(
   $description: String
 ) {
   uploadEvidence(
-    finding: $finding
+    report: $report
     file_base64: $file_base64
     filename: $filename
     caption: $caption
@@ -680,17 +756,19 @@ class GhostwriterClient(BaseHttpClient):
     def upload_evidence(
         self,
         *,
-        finding_id: int,
+        report_id: int,
         filename: str,
         caption: str,
         friendly_name: str,
         file_base64: str,
         description: str = "",
     ) -> int:
+        """D1: evidence belongs to a report, never a finding — ``report`` is the
+        only parent argument the real >= 7.2 ``uploadEvidence`` accepts."""
         data = self._post(
             _UPLOAD_EVIDENCE_MUTATION,
             {
-                "finding": finding_id,
+                "report": report_id,
                 "file_base64": file_base64,
                 "filename": filename,
                 "caption": caption,
@@ -733,3 +811,39 @@ class GhostwriterClient(BaseHttpClient):
     def delete_reported_finding(self, reported_finding_id: int) -> None:
         """Delete a report finding (used to roll back an insert)."""
         self._post(_DELETE_REPORTED_FINDING_MUTATION, {"id": reported_finding_id})
+
+    # --- pre-write re-fetch guard (ENGINE.md) -----------------------------------
+
+    def evidence_by_pk(self, evidence_id: int) -> dict | None:
+        return self._post(_EVIDENCE_BY_PK_QUERY, {"id": evidence_id}, idempotent=True)[
+            "evidence_by_pk"
+        ]
+
+    def finding_by_pk(self, finding_id: int) -> dict | None:
+        return self._post(_FINDING_BY_PK_QUERY, {"id": finding_id}, idempotent=True)[
+            "finding_by_pk"
+        ]
+
+    def reported_finding_by_pk(self, reported_finding_id: int) -> dict | None:
+        return self._post(
+            _REPORTED_FINDING_BY_PK_QUERY, {"id": reported_finding_id}, idempotent=True
+        )["reportedFinding_by_pk"]
+
+    # --- server compatibility check (BRIEF task F / ENGINE.md) ------------------
+
+    def introspect_schema(self) -> dict[str, Any]:
+        """The standard GraphQL introspection result (``graphql-core``'s own
+        canonical query, not a hand-rolled one — this must stay exactly what
+        ``graphql.build_client_schema`` expects). See
+        :mod:`grison.remote.compat`, which is the only caller."""
+        return self._post(get_introspection_query(descriptions=False), idempotent=True)
+
+    def fingerprint_probe(self) -> dict[str, Any]:
+        """One cheap request naming just the shapes grison's compatibility check
+        cares about: every ``query_root``/``mutation_root`` field (mutation fields
+        with their argument names too, since an argument rename/removal — the
+        historical ``uploadEvidence``/``findingId`` break — never shows up in a
+        root-field-name-only diff), plus the handful of object types grison writes
+        to. NOT the full introspection query (that is :meth:`introspect_schema`,
+        reserved for the cold path). See :mod:`grison.remote.compat`."""
+        return self._post(_FINGERPRINT_PROBE, idempotent=True)

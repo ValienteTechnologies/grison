@@ -2,11 +2,13 @@
 
 This is NOT ``.grison/.gitignore`` (the private allow-list :func:`grison.manifest.write_gitignore`
 already owns — see that module's docstring) — this is the workspace ROOT's own
-``.gitignore``, which must never blanket-ignore ``.grison/`` (the v1 scaffold did; the
-migration rewrites that line — see ``docs/workspace-format.md`` §1.7/§1.9). The one
-thing grison scaffolds here is ``*.remote.*``, the collision-sidecar pattern
-(ENGINE.md's "Collision sidecars": ``<name>.remote.md``/``.remote.<ext>`` files the
-sync engine writes next to a colliding record — never documents, never committed).
+``.gitignore``, which must never blanket-ignore ``.grison/`` (the v1 scaffold did —
+see ``docs/workspace-format.md`` §1.7/§1.9 — but a v1 workspace is now refused
+outright rather than converted, D13, so this only ever applies to a v2 workspace
+scaffolded from scratch). The one thing grison scaffolds here is ``*.remote.*``,
+the collision-sidecar pattern (ENGINE.md's "Collision sidecars":
+``<name>.remote.md``/``.remote.<ext>`` files the sync engine writes next to a
+colliding record — never documents, never committed).
 """
 
 from __future__ import annotations

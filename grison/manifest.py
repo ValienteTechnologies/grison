@@ -1,9 +1,11 @@
 """``.grison/manifest.yml`` — the workspace's format version (brief D13).
 
-Older grison refuses to sync against a newer-format workspace and says to upgrade;
-grison encountering an older-format workspace raises a distinct error the (later)
-one-time migration step catches and handles, rather than trying to read the old
-shape directly.
+A workspace whose manifest format differs from ``CURRENT_FORMAT`` is refused
+outright, with a plain message — nothing converts it. Older grison encountering a
+newer-format workspace says to upgrade grison; this grison encountering an
+older-format workspace raises a distinct error rather than trying to read the old
+shape directly (there is no migration step — an older-format workspace stays on
+the grison version that wrote it).
 """
 
 from __future__ import annotations
@@ -26,8 +28,13 @@ MANIFEST_RELATIVE_PATH = ".grison/manifest.yml"
 # "what's safe to read" and "what's tracked" can never drift apart: an entry not in
 # this tuple is private by construction (git-ignored, and denied to an agent's Read
 # tool) until someone deliberately adds it here.
-TRACKED_ENTRIES: tuple[str, ...] = (".gitignore", "manifest.yml", "index.json", "SPEC.md",
-                                    "templates/")
+TRACKED_ENTRIES: tuple[str, ...] = (
+    ".gitignore",
+    "manifest.yml",
+    "index.json",
+    "SPEC.md",
+    "templates/",
+)
 
 # Every KNOWN private ``.grison/`` entry — must stay git-ignored (see
 # :func:`check_git_hygiene`) and is what :mod:`grison.scaffold.settings_json` denies
@@ -40,9 +47,7 @@ PRIVATE_ENTRIES: tuple[str, ...] = ("env", "state/", "snapshots/", "lock", "term
 # tracked files above.
 _GITIGNORE_TEXT = (
     "# grison-managed — ignore everything in this directory except the files below.\n"
-    "*\n"
-    + "".join(f"!{entry}\n" for entry in TRACKED_ENTRIES)
-    + "!templates/**\n"
+    "*\n" + "".join(f"!{entry}\n" for entry in TRACKED_ENTRIES) + "!templates/**\n"
 )
 
 
@@ -58,8 +63,9 @@ class WorkspaceTooNew(GrisonError, ValueError):
 
 
 class WorkspaceNeedsMigration(GrisonError, ValueError):
-    """This workspace's format is older than this grison's current format — the
-    one-time migration step (not this module) converts it."""
+    """This workspace's format is older than this grison's current format.
+    Refused outright — there is no migration step that converts it; the workspace
+    must be synced with the grison version that wrote it."""
 
 
 @dataclass(frozen=True)
@@ -107,8 +113,8 @@ def write(root: Path, manifest: Manifest | None = None) -> None:
 def check(root: Path) -> Manifest:
     """Read the manifest and enforce it against ``CURRENT_FORMAT``: raises
     :class:`WorkspaceTooNew` when the workspace is newer than this grison
-    supports, :class:`WorkspaceNeedsMigration` when it's older, and otherwise
-    returns the (matching) manifest."""
+    supports, :class:`WorkspaceNeedsMigration` when it's older (refused outright —
+    D13, no conversion), and otherwise returns the (matching) manifest."""
     manifest = read(root)
     if manifest.format > CURRENT_FORMAT:
         raise WorkspaceTooNew(
@@ -117,7 +123,9 @@ def check(root: Path) -> Manifest:
         )
     if manifest.format < CURRENT_FORMAT:
         raise WorkspaceNeedsMigration(
-            f"workspace format {manifest.format} needs the one-time migration"
+            f"this workspace uses format {manifest.format}; this grison supports only "
+            f"format {CURRENT_FORMAT} — no migration converts it, sync with the grison "
+            f"version that wrote it"
         )
     return manifest
 
@@ -141,7 +149,8 @@ def check_git_hygiene(root: Path) -> list[str]:
         try:
             result = subprocess.run(
                 ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
         except FileNotFoundError:
             return False
@@ -153,7 +162,8 @@ def check_git_hygiene(root: Path) -> list[str]:
     def _ignored(rel: str) -> bool:
         result = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "--quiet", rel],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         return result.returncode == 0
 

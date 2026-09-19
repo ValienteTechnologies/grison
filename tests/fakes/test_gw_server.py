@@ -51,25 +51,36 @@ def test_seed_defaults_match_grisons_own_enum_maps() -> None:
         assert by_id_ft[ft.gw_id].lower() == ft.value
 
 
-def test_evidence_query_rejected_like_the_real_lab_server() -> None:
-    """Confirmed live against Ghostwriter 7.2.6 (SSL_CERT_FILE=lab/lab-ca.pem):
-    ``{"errors":[{"message":"field 'findingId' not found in type: 'evidence'", ...}]}``."""
+def test_evidence_query_no_longer_asks_for_findingId() -> None:
+    """Was ``test_evidence_query_rejected_like_the_real_lab_server`` — confirmed live
+    against Ghostwriter 7.2.6 (SSL_CERT_FILE=lab/lab-ca.pem) that a query asking
+    ``evidence { findingId }`` gets ``field 'findingId' not found in type: 'evidence'``
+    (D1: evidence belongs to a report, never a finding — the real schema has no such
+    field at all). ``fetch_evidence`` no longer asks for it, so this is now a proof
+    the fix stays fixed: fetching evidence succeeds against the schema-typed fake
+    (which validates every query against the real 7.2.6 SDL) instead of raising."""
     gw = FakeGhostwriter()
     c = _client(gw)
-    with pytest.raises(GhostwriterError, match="field 'findingId' not found in type: 'evidence'"):
-        c.fetch_evidence()
+    report = gw.store.seed_report(id=1, title="R")
+    gw.store.seed_evidence(id=1, reportId=report["id"], friendlyName="shot", document="shot.png")
+    rows = c.fetch_evidence()
+    assert [r["id"] for r in rows] == [1]
+    assert "findingId" not in rows[0]
 
 
-def test_upload_evidence_argument_error_matches_the_real_lab_server() -> None:
-    """Confirmed live: ``{"errors":[{"message":"'uploadEvidence' has no argument named
-    'finding'", ...}]}``."""
+def test_upload_evidence_uses_report_argument_not_finding() -> None:
+    """Was ``test_upload_evidence_argument_error_matches_the_real_lab_server`` —
+    confirmed live that ``uploadEvidence(finding: ...)`` gets ``'uploadEvidence' has
+    no argument named 'finding'`` (the real argument is ``report``). Now a proof the
+    fix stays fixed: uploading with ``report_id=`` succeeds."""
     gw = FakeGhostwriter()
     c = _client(gw)
-    with pytest.raises(GhostwriterError, match=r"'uploadEvidence' has no argument named 'finding'"):
-        c.upload_evidence(
-            finding_id=1, filename="x.png", caption="c", friendly_name="f",
-            file_base64=base64.b64encode(b"x").decode(),
-        )
+    report = gw.store.seed_report(id=1, title="R")
+    evidence_id = c.upload_evidence(
+        report_id=report["id"], filename="x.png", caption="c", friendly_name="f",
+        file_base64=base64.b64encode(b"x").decode(),
+    )
+    assert evidence_id > 0
 
 
 def test_unknown_field_error_shape_generalizes() -> None:
