@@ -73,6 +73,14 @@ an author-created name), no leading hyphen.
 - **Fails (`WS-001`):** `findings/library/My Finding.md` (space, uppercase).
 - **Passes:** `findings/library/reflected-xss-search.md`.
 
+**Exception — a file directly inside an `evidence/` or `images/` directory** (D1/D9):
+this charset rule does NOT apply to that one leaf name (everything ABOVE it — the
+report/book directory, `evidence`/`images` itself — still follows `WS-001` as normal).
+An evidence/image file's name is a stable handle kept **verbatim**, exactly as it
+reached grison (real data includes names like `Phishing_Sonuçları.png` — non-ASCII,
+mixed case, both legitimate) — see `REF-008` (§5.3) for the rule that applies there
+instead.
+
 ### 1.2 Unknown paths (`WS-002`, `WS-003`)
 
 Everything under `findings/` and `methodology/` must be one of the shapes this
@@ -639,6 +647,38 @@ where the page sits**: exactly one spelling is correct per location.
 ![Subdomain enumeration results](../images/subdomain-scan.png)
 ```
 
+### 5.3 File-set names (`REF-008`)
+
+A file directly inside `evidence/` (per report) or `images/` (per book) is exempt
+from `WS-001`'s charset rule (§1.1) — its name is a stable handle kept verbatim, and
+real evidence/image names are routinely non-ASCII and/or mixed case. In its place,
+every such file's own bare name must satisfy ALL of:
+
+- no path separator (`/`) — it names a file directly in the folder, never a nested one
+- no leading dot — not a hidden file
+- not shaped like a collision sidecar (`<name>.remote.<ext>`, or an extension-less
+  `<name>.remote` — ENGINE.md §8; a sidecar is never a real evidence/image file)
+- valid UTF-8
+- at most 255 bytes (UTF-8-encoded)
+
+Two files sharing a stem within the same folder is `REF-003` (§5.1) already — not
+duplicated here.
+
+- `REF-008` — the file's own name fails one of the above.
+
+```
+findings/reports/acme-corp/evidence/Phishing_Sonuçları.png   -- passes (REF-008 and WS-001 both)
+findings/reports/acme-corp/evidence/sub/dir.png              -- fails REF-008 (path separator)
+findings/reports/acme-corp/evidence/.hidden.png               -- fails REF-008 (leading dot)
+findings/reports/acme-corp/evidence/shot.remote.png            -- fails REF-008 (sidecar shape)
+```
+
+A file `grison validate` fails under `REF-008` is never created/re-uploaded by
+`grison sync` (the same "a document with failures is never pushed or created" gate
+every other record kind gets — ENGINE.md 'The apply loop', item 1) — it produces an
+`invalid` event naming
+`REF-008`, and every other file in the same folder still syncs normally.
+
 ---
 
 ## 6. The converter's supported grammar (quoted, not re-described)
@@ -974,6 +1014,7 @@ against the recorded digest, the `WS-009` pattern exactly) is missing, since it 
 | REF-005 | a library or inbox finding contains an image line |
 | REF-006 | a cross-reference link's target is not a resolvable evidence path |
 | REF-007 | a wiki image uses the wrong path spelling for its location |
+| REF-008 | an evidence/ or images/ file's own name is invalid (WS-001 does not apply there) |
 | TXT-001 | a built-in banned phrase appears in a document body |
 | TXT-002 | a per-workspace confidential term appears outside its allowed path |
 | IDX-001 | .grison/index.json is missing required structure or malformed |

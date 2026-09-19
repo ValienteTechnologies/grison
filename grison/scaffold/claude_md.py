@@ -101,9 +101,9 @@ methodology/
 ## Naming
 
 A new file or directory you create may be named anything matching
-`[a-z0-9][a-z0-9._-]*` — lowercase, starting with a letter or digit. Once grison names
-a file or directory (on pull), it never renames it again; a name is a stable handle,
-not something derived from the title.
+`[a-z0-9][a-z0-9._-]*` (lowercase, digit/letter start) — except a file directly inside
+`evidence/`/`images/`, kept verbatim (uppercase/non-ASCII fine; no `/`, no leading dot,
+not `<name>.remote.<ext>`). Grison never renames what it already named on pull.
 
 ## `.grison/`
 

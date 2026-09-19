@@ -26,6 +26,7 @@ from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
 from grison.fsio import atomic_write_bytes
 from grison.index import Index
+from grison.validator.registry import Failure
 
 FOLDER = PurePosixPath("findings/reports/r1/evidence")
 
@@ -707,3 +708,60 @@ def test_collision_writes_a_remote_bytes_sidecar_cleared_once_resolved(tmp_path:
     # and the now-cleared sidecar was never itself mistaken for a new local file
     assert not any(p.path is not None and p.path.name == "shot.remote.png"
                    for p in result2.plans)
+
+
+# --- the validation gate, enforced for file-set creates too (item 2) --------
+
+
+def test_invalid_fileset_create_is_withheld_others_proceed(tmp_path: Path) -> None:
+    """Item 2 (engine-findings-lab.md 'Scenario 6'): ``grison validate`` failing
+    a new evidence/image file hard (``REF-008`` — a bad name, e.g. a path
+    separator, a leading dot, a collision-sidecar shape, invalid UTF-8, or over
+    255 bytes; see ``tests/test_validator_ref.py``) used to be silently ignored
+    by ``sync_fileset``'s own apply loop entirely — the file got uploaded
+    anyway, with no gate at all (ENGINE.md 'Apply loop' item 1, "a document
+    with failures is never pushed or created", was never actually enforced for
+    a file-set record). ``sync_fileset`` now takes the SAME ``failures`` list
+    the caller already validated the workspace with, mirroring
+    ``grison.engine.apply.run``'s identical gate: the flagged file never
+    uploads and becomes an ``invalid`` event naming the rule id, while every
+    OTHER file in the same folder still proceeds (per-record isolation,
+    ENGINE.md §5).
+
+    Exercised directly against the engine (rather than a real bad-shaped file
+    on disk) because every REF-008 failure mode that reaches a real local-scan
+    CREATE candidate can't be produced by an ordinary file write: a path
+    separator can't appear in one filesystem entry's own name; a leading-dot
+    or sidecar-shaped name is excluded from local scanning entirely before
+    classification ever runs (``_local_files``, ENGINE.md §8 — never a
+    document the engine manages in the first place); a >255-byte name can't be
+    created on a real filesystem (``NAME_MAX``); and an invalid-UTF-8 name
+    trips an unrelated pre-existing limitation in how a name that can't
+    round-trip through a terminal gets printed. The engine-level mechanism
+    itself is exactly the same regardless of WHY a path is in ``failures`` — so
+    a normal, otherwise-valid-looking path stands in for "the validator
+    flagged this one" here, proving the gate's own wiring."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "bad-name.png").write_bytes(b"bad")
+    (tmp_path / FOLDER / "good-name.png").write_bytes(b"good")
+
+    failures = [Failure(rule_id="REF-008", path=str(FOLDER / "bad-name.png"), line=None,
+                        message="bad name", fix="rename it")]
+    result = sync_fileset(tmp_path, store, adapter, FOLDER, index=index, state=state,
+                          snapshot=snapshot, failures=failures)
+
+    plans_by_path = {p.path: p for p in result.plans}
+    assert plans_by_path[FOLDER / "bad-name.png"].outcome is Outcome.INVALID
+    assert plans_by_path[FOLDER / "bad-name.png"].rule_ids == ("REF-008",)
+    assert plans_by_path[FOLDER / "good-name.png"].outcome is Outcome.CREATE
+
+    invalid_events = [e for e in result.events if e.verb == "invalid"]
+    assert len(invalid_events) == 1
+    assert invalid_events[0].path == str(FOLDER / "bad-name.png")
+    assert "REF-008" in invalid_events[0].detail
+
+    assert store.upload_calls == 1  # only the good file — the bad one never uploaded
+    assert next(iter(store.rows.values()))["filename"] == "good-name.png"

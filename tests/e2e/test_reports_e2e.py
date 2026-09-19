@@ -1046,6 +1046,47 @@ def test_captioned_evidence_embed_in_narrative_round_trips_clean(run_grison, gw_
     assert gw_server.operation_log == []
 
 
+def test_narrative_section_cross_reference_and_embed_converge_after_one_push(
+    run_grison, gw_server,
+):
+    """Item 1 (engine-findings-lab.md 'Two defects'/#2), narrative sections too:
+    the same permanent push loop a reported finding's plain cross-reference
+    link (``[caption](evidence/file)``, no ``!``) hit applies identically to a
+    narrative section's own ``canonical_prose``/``canonical_remote_prose``
+    pairing — fixed by folding both an embed's and a cross-reference's
+    identity through the same mechanism, so one push settles it for good."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7, title="Report A", extraFields={}, project={"scopes": REPORT_SCOPES},
+    )
+    gw_server.store.seed_evidence(
+        id=90, reportId=7, document="evidence/7/login_page.png", friendlyName="login_page",
+    )
+    gw_server.store.seed_evidence(
+        id=91, reportId=7, document="evidence/7/db_dump.png", friendlyName="db_dump",
+    )
+    run_grison("sync")  # downloads + indexes both evidence files
+
+    section = _rdir("report-a") / "narrative" / "executive_summary.md"
+    section.write_text(
+        "![Login screenshot](evidence/login_page.png)\n\n"
+        "See [DB dump](evidence/db_dump.png) for the resulting database extraction.\n",
+        encoding="utf-8",
+    )
+
+    pushed = run_grison("sync")
+    assert "reports (gw.reportSection): push 1" in pushed.output, pushed.output
+    report = next(r for r in gw_server.store.reports if r["id"] == 7)
+    body = report["extraFields"]["executive_summary"]
+    assert 'data-evidence-id="90"' in body  # the embed
+    assert "data-gw-ref-encoded" in body  # the cross-reference
+
+    clean1 = run_grison("sync")
+    assert "reports (gw.reportSection): clean 1" in clean1.output, clean1.output
+    clean2 = run_grison("sync")
+    assert "reports (gw.reportSection): clean 1" in clean2.output, clean2.output
+
+
 def test_evidence_reupload_pushes_the_narrative_section_with_the_new_id(
     run_grison, gw_server,
 ):

@@ -90,12 +90,14 @@ def test_push_undo_refuses_to_clobber_a_record_edited_again_since(tmp_path: Path
     ``adapter.restore`` straight over ``remote_preimage`` with no re-fetch guard
     at all — unlike create/delete_remote. A record edited again (on the server)
     after the push this op would undo must be reported, never clobbered."""
+    (tmp_path / "a.md").write_text("post-push local text", encoding="utf-8")
     adapter = _PushableAdapter()
     snap = Snapshot()
     snap.record(UndoOp(
         kind="bs.page", outcome="push", path="a.md", id=1,
         remote_preimage={"text": "original"},
         post_write_hash=digest({"text": "current"}),  # what replay expects to still see
+        local_preimage="pre-push local text",
     ))
     name = snap.persist(tmp_path).name
 
@@ -107,11 +109,65 @@ def test_push_undo_refuses_to_clobber_a_record_edited_again_since(tmp_path: Path
     assert len(problems) == 1
     assert "a.md" in problems[0]
     assert adapter.store[1] == "edited again"  # never clobbered
+    # local file untouched too — a refused remote restore never half-applies
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "post-push local text"
 
 
 def test_push_undo_restores_when_nothing_drifted(tmp_path: Path) -> None:
-    """The happy path still works: nothing changed since the push, so the
-    pre-image restores normally."""
+    """The happy path still works: nothing changed since the push, so both the
+    remote pre-image AND the local file (item 3, fix-findings — the local half
+    used to be missing entirely) restore normally."""
+    (tmp_path / "a.md").write_text("post-push local text", encoding="utf-8")
+    adapter = _PushableAdapter()
+    snap = Snapshot()
+    snap.record(UndoOp(
+        kind="bs.page", outcome="push", path="a.md", id=1,
+        remote_preimage={"text": "original"},
+        post_write_hash=digest({"text": "current"}),
+        local_preimage="pre-push local text",
+    ))
+    name = snap.persist(tmp_path).name
+
+    problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter})
+
+    assert problems == []
+    assert adapter.store[1] == "original"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "pre-push local text"
+
+
+def test_push_undo_refuses_a_snapshot_with_no_post_write_hash(tmp_path: Path) -> None:
+    """Item 3/4 cleanup (fix-findings): no backward-compat fallback — there are
+    no old snapshots to read (keep-10 pruning), so a push/move_edit op with no
+    ``post_write_hash`` is a corrupt snapshot, refused with a message rather
+    than silently skipping the drift check."""
+    (tmp_path / "a.md").write_text("post-push local text", encoding="utf-8")
+    adapter = _PushableAdapter()
+    snap = Snapshot()
+    snap.record(UndoOp(
+        kind="bs.page", outcome="push", path="a.md", id=1,
+        remote_preimage={"text": "original"}, local_preimage="pre-push local text",
+    ))
+    name = snap.persist(tmp_path).name
+
+    problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter})
+
+    assert len(problems) == 1
+    assert "a.md" in problems[0]
+    assert adapter.store[1] == "current"  # never restored
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "post-push local text"
+
+
+def test_push_undo_with_no_local_preimage_still_restores_remote_skips_local_write(
+    tmp_path: Path,
+) -> None:
+    """``local_preimage`` is legitimately ``None`` for a kind with no local file
+    content of its own to restore (a file-set caption push — see
+    ``UndoOp.local_preimage``'s own docstring) — this is NOT a corrupt snapshot
+    (unlike a missing ``post_write_hash``): the remote side still restores
+    normally, the local file is simply left untouched (there's nothing to
+    write it FROM), and no "restored pre-undo content" message is printed
+    (item 3, fix-findings: that message means the local file too)."""
+    (tmp_path / "a.md").write_text("untouched local content", encoding="utf-8")
     adapter = _PushableAdapter()
     snap = Snapshot()
     snap.record(UndoOp(
@@ -120,30 +176,15 @@ def test_push_undo_restores_when_nothing_drifted(tmp_path: Path) -> None:
         post_write_hash=digest({"text": "current"}),
     ))
     name = snap.persist(tmp_path).name
+    events: list[str] = []
 
-    problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter})
-
-    assert problems == []
-    assert adapter.store[1] == "original"
-
-
-def test_push_undo_with_no_post_write_hash_is_backward_compatible(tmp_path: Path) -> None:
-    """An older snapshot recorded before ``post_write_hash`` existed has ``None``
-    for it — ``refetch_guard`` already treats ``expected_hash=None`` as "not
-    drifted" (nothing to compare against), so an old snapshot's push undo still
-    restores rather than being refused outright."""
-    adapter = _PushableAdapter()
-    snap = Snapshot()
-    snap.record(UndoOp(
-        kind="bs.page", outcome="push", path="a.md", id=1,
-        remote_preimage={"text": "original"},
-    ))
-    name = snap.persist(tmp_path).name
-
-    problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter})
+    problems = replay(tmp_path, name, ctx=None, adapters={"bs.page": adapter},
+                      on_event=events.append)
 
     assert problems == []
-    assert adapter.store[1] == "original"
+    assert adapter.store[1] == "original"  # remote side still restored
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "untouched local content"
+    assert not any("restored pre-undo content" in e for e in events)
 
 
 def test_snapshot_empty_by_default() -> None:

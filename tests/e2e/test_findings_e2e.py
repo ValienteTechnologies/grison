@@ -163,6 +163,94 @@ def test_new_local_evidence_file_uploads_report_scoped(run_grison, gw_server, wo
     assert f'data-evidence-id="{row["id"]}"' in updated_finding["description"]
 
 
+def test_non_ascii_uppercase_evidence_name_validates_and_syncs(run_grison, gw_server, workspace):
+    """Item 2 (engine-findings-lab.md 'Scenario 6'): the exact motivating case —
+    ``WS-001``'s charset rule no longer applies to a file's own name directly
+    inside ``evidence/`` (``REF-008`` — see ``tests/test_validator_ref.py`` for
+    the offline validate-side proof — has no charset opinion at all), so a real
+    non-ASCII, mixed-case evidence name both validates cleanly AND uploads,
+    where it used to fail `grison validate` outright even though `grison sync`
+    uploaded it anyway (the mismatch the "withheld by sync" half of this fix
+    resolves — see ``tests/test_engine_filesets.py``'s
+    ``test_invalid_fileset_create_is_withheld_others_proceed`` for that half,
+    proven at the engine level since a REF-008 failure mode that can still
+    reach a real local-scan CREATE candidate can't be created on a normal
+    filesystem via a shell/test — see that test's own docstring)."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    report_dir = _rdir(workspace)
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+    )
+    run_grison("sync")
+
+    finding_path = report_dir / "finding-one.md"
+    text = finding_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Description\n\n",
+        "## Description\n\n![A screenshot](evidence/Sonuçları_ş.png)\n\n",
+        1,
+    )
+    finding_path.write_text(text, encoding="utf-8")
+    (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    (report_dir / "evidence" / "Sonuçları_ş.png").write_bytes(b"\x89PNG-fake-bytes")
+
+    result = run_grison("sync")
+
+    assert "create" in result.output and "invalid" not in result.output, result.output
+    assert len(gw_server.store.evidence) == 1
+    row = gw_server.store.evidence[0]
+    assert row["friendlyName"] == "Sonuçları_ş"
+    updated_finding = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert updated_finding is not None
+    assert f'data-evidence-id="{row["id"]}"' in updated_finding["description"]
+
+
+def test_reported_finding_cross_reference_and_embed_converge_after_one_push(
+    run_grison, gw_server, workspace,
+):
+    """Item 1 (engine-findings-lab.md 'Two defects'/#2): a plain cross-reference
+    link (``[caption](evidence/file "desc")``, no ``!``) used to never
+    converge — ``canonical_prose`` (LOCAL) left it completely untouched while
+    ``canonical_remote_prose`` (REMOTE, via ``html_to_md`` on the pushed
+    ``<span data-gw-ref-encoded>``) always rendered it as a literal
+    ``[<id>](<id>)`` — a permanent push loop, confirmed in the lab across four
+    consecutive no-op syncs. Both sides now fold the same identity token for
+    both an embed and a cross-reference, so one push settles it for good."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    report_dir = _rdir(workspace)
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report["id"], title="SQL Injection", severityId=5, findingTypeId=4,
+    )
+    first = run_grison("sync")
+    assert "findings (gw.reportedFinding): pull_new 1" in first.output, first.output
+
+    finding_path = report_dir / "sql-injection.md"
+    text = finding_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Description\n\n",
+        "## Description\n\n![Login screenshot](evidence/login_page.png)\n\n"
+        "See [DB dump](evidence/db_dump.png) for the resulting database extraction.\n\n",
+        1,
+    )
+    finding_path.write_text(text, encoding="utf-8")
+    (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    (report_dir / "evidence" / "login_page.png").write_bytes(b"\x89PNG-fake-1")
+    (report_dir / "evidence" / "db_dump.png").write_bytes(b"\x89PNG-fake-2")
+
+    pushed = run_grison("sync")
+    assert "findings (gw.reportedFinding): push 1" in pushed.output, pushed.output
+    assert len(gw_server.store.evidence) == 2
+    updated = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert updated is not None
+    assert "richtext-evidence" in updated["description"]  # the embed
+    assert "data-gw-ref-encoded" in updated["description"]  # the cross-reference
+
+    clean1 = run_grison("sync")
+    assert "findings (gw.reportedFinding): clean 1" in clean1.output, clean1.output
+    clean2 = run_grison("sync")
+    assert "findings (gw.reportedFinding): clean 1" in clean2.output, clean2.output
+
+
 def test_affected_entities_is_always_p_wrapped_on_push(run_grison, gw_server, workspace):
     """BRIEF D: affected_entities is ALWAYS pushed ``<p>``-wrapped — the lab proved
     plain text breaks Ghostwriter's docx export."""
@@ -276,6 +364,72 @@ def test_undo_reverses_a_library_push_and_an_evidence_upload(run_grison, gw_serv
     assert result.exit_code == 0, result.output
     assert "old text" in gw_server.store._by_id(gw_server.store.findings, 1)["description"]
     assert gw_server.store.evidence == []  # the create was reversed too, same undo
+
+
+def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
+    run_grison, gw_server, workspace,
+):
+    """Item 3 (engine-findings-lab.md Scenario 12): one ``grison sync`` that both
+    uploads a new evidence file and pushes two reported findings (one of them
+    referencing the new evidence) used to print "restored pre-undo content" for
+    BOTH pushed findings after ``grison undo``, but only ever rewrote the LOCAL
+    file for ONE of them — the other kept its post-push content (including the
+    now-dangling evidence reference), producing a spurious collision on the
+    very next sync. Fixed: every push/move_edit op's own local pre-image is
+    restored (``grison.engine.apply``'s ``UndoOp.local_preimage``, previously
+    only ever captured for a ``create`` op), and the "restored" message is only
+    printed once that write has actually happened."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    report_dir = _rdir(workspace)
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report["id"], title="Default Credentials", severityId=3,
+        findingTypeId=4,
+    )
+    gw_server.store.seed_reported_finding(
+        id=51, reportId=report["id"], title="Unencrypted Telnet", severityId=4,
+        findingTypeId=4,
+    )
+    run_grison("sync")
+
+    default_creds_path = report_dir / "default-credentials.md"
+    telnet_path = report_dir / "unencrypted-telnet.md"
+    default_creds_baseline = default_creds_path.read_text(encoding="utf-8")
+    telnet_baseline = telnet_path.read_text(encoding="utf-8")
+
+    default_creds_path.write_text(
+        default_creds_path.read_text(encoding="utf-8").replace(
+            "## Description\n\n", "## Description\n\nEdited by the undo-scenario test.\n\n", 1,
+        ),
+        encoding="utf-8",
+    )
+    telnet_path.write_text(
+        telnet_path.read_text(encoding="utf-8").replace(
+            "## Description\n\n",
+            "## Description\n\n![Undo test screenshot](evidence/undo_test.png)\n\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    (report_dir / "evidence" / "undo_test.png").write_bytes(b"\x89PNG-undo-test")
+
+    pushed = run_grison("sync")
+    assert "findings (gw.reportedFinding): push 2" in pushed.output, pushed.output
+    assert len(gw_server.store.evidence) == 1
+    assert default_creds_path.read_text(encoding="utf-8") != default_creds_baseline
+    assert telnet_path.read_text(encoding="utf-8") != telnet_baseline
+
+    undone = run_grison("undo")
+
+    assert undone.exit_code == 0, undone.output
+    assert default_creds_path.read_text(encoding="utf-8") == default_creds_baseline
+    assert telnet_path.read_text(encoding="utf-8") == telnet_baseline  # no dangling embed
+    assert gw_server.store.evidence == []
+    assert not (report_dir / "evidence" / "undo_test.png").exists()
+
+    clean = run_grison("sync")
+    assert "findings (gw.reportedFinding): clean 2" in clean.output, clean.output
+    assert "collision" not in clean.output, clean.output
 
 
 def test_n_new_evidence_uploads_fetch_the_org_wide_evidence_list_only_once(

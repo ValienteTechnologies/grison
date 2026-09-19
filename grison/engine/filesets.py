@@ -79,10 +79,24 @@ free:
     returns ``resolved_captions``, and the caller rewrites the alt text in every
     referencing document to match (:func:`rewrite_captions`). Because a
     referencing document's own canonical payload never includes caption/title
-    text (:func:`_substitute_embed_identity`, used by :func:`canonical_prose`/
-    :func:`canonical_remote_prose`), this rewrite can never make that document
-    look locally edited: its content hash is unaffected by construction, not by
-    remembering to exclude the rewrite from the change guard.
+    text (:func:`_substitute_ref_identity`, used by :func:`canonical_prose`;
+    :func:`canonical_remote_prose` gets the same exclusion for free from
+    ``html_to_md``'s own resolver contract), this rewrite can never make that
+    document look locally edited: its content hash is unaffected by
+    construction, not by remembering to exclude the rewrite from the change
+    guard.
+
+Cross-references (D1, restated): a plain link into ``evidence/<file>`` inline in a
+sentence — ``[caption](evidence/file.png "desc")``, no ``!`` — names the same
+remote identity an embed does but carries no caption/description of its own (the
+link text is synthesised deterministically on the remote side, never preserved —
+see :mod:`grison.markdown.converter`'s module docstring). :func:`_substitute_ref_
+identity` folds BOTH an embed's and a cross-reference's destination into the same
+identity token :func:`canonical_prose`/:func:`canonical_remote_prose` agree on —
+one shape-matching pattern for both forms (they differ only in the leading
+``!``), guarded against a code-span/fence lookalike by
+:mod:`grison.markdown.refscan`'s real tokenizer (:func:`~grison.markdown.
+refscan.code_spans`) rather than a second hand-rolled matching regex.
 """
 
 from __future__ import annotations
@@ -114,7 +128,8 @@ from grison.hashing import digest
 from grison.index import Index, IndexKind
 from grison.markdown.converter import ConverterError, html_to_md
 from grison.markdown.refs import LocalRef, RemoteRef
-from grison.markdown.refscan import scan_refs
+from grison.markdown.refscan import code_spans, decode_ref_path, scan_refs
+from grison.validator.registry import Failure
 
 #: Same values as grison.engine.apply's — one change-guard rule for every record
 #: type (ENGINE.md), file sets included. A separate, literal copy rather than an
@@ -242,8 +257,8 @@ def strip_embed_captions(md: str) -> str:
     would change the document's content hash and make it look locally edited.
     Blanks every embed's alt/title text, keeping the path (identity) intact.
     :func:`canonical_prose`/:func:`canonical_remote_prose` fold this same
-    exclusion into their own single-pass substitution (:func:`_substitute_
-    embed_identity`, which drops alt/title AND replaces the path) rather than
+    exclusion into their own single-pass substitution (:func:`_substitute_ref_
+    identity`, which drops alt/title AND replaces the path) rather than
     calling this directly; kept as its own named, independently useful/
     testable transform (the caption-blanking half in isolation)."""
     return _EMBED_LINE_RE.sub(lambda m: f"{m.group(1)}{m.group(3)}{m.group(4)}{m.group(6)}", md)
@@ -253,24 +268,68 @@ class ResolvesEmbeds(Protocol):
     def to_remote_id(self, path: str) -> int | None: ...
 
 
-def _substitute_embed_identity(md: str, token_for: Callable[[str], str]) -> str:
-    """Replace every embed's ``(path "title")`` with ``(<token_for(path)>)`` —
-    dropping alt/title (same reason :func:`strip_embed_captions` does: they
-    belong to the remote row, not the document) AND the authored path itself,
-    which :func:`canonical_prose`/:func:`canonical_remote_prose` both replace
-    with a stable REMOTE IDENTITY token so the two are directly comparable
-    (see their docstrings)."""
-    return _EMBED_LINE_RE.sub(
-        lambda m: f"{m.group(1)}{m.group(3)}{token_for(m.group(4))}{m.group(6)}", md
-    )
+# Generalised from `_EMBED_LINE_RE` (both forms — the two differ only in the
+# leading `!` — never a second, independent pattern per form) and, unlike that
+# one, NOT anchored to a whole standalone line: a cross-reference is inline by
+# nature (D1: `[text](evidence/file.png)`, no `!`, mid-sentence), so folding its
+# identity needs to find it wherever it sits, not just alone on its own line.
+# Matching by shape alone can mistake code-span/fence TEXT that merely looks
+# like a link for a real one (a plain regex has no concept of "inside a code
+# span"); `_substitute_ref_identity` below guards against exactly that with
+# :func:`~grison.markdown.refscan.code_spans`'s real, tokenizer-grounded
+# answer, never a second hand-rolled matching regex.
+_REF_RE = re.compile(
+    r'(?P<bang>!?)\[(?P<caption>[^\]]*)\]\((?P<dest>[^)\s]+)(?:\s+"(?P<title>[^"]*)")?\)'
+)
+
+
+def _substitute_ref_identity(md: str, token_for: Callable[[str], str]) -> str:
+    """Fold BOTH an embed's and a cross-reference's identity into ``md`` — the
+    single mechanism :func:`canonical_prose` uses for the "replace every
+    reference's destination with its currently-resolved remote id" half of its
+    job (module docstring, "Cross-references (D1, restated)"):
+
+      - embed (``![caption](path "title")``) -> ``![](<token_for(path)>)`` —
+        alt/title dropped (:func:`strip_embed_captions`'s own reason: they
+        belong to the remote row, not the document).
+      - cross-reference (``[caption](path "title")``) -> ``[<token_for(path)>]
+        (<token_for(path)>)`` — the SAME shape :func:`canonical_remote_prose`
+        reaches independently (via ``html_to_md``'s own resolver contract: a
+        cross-reference's native HTML span carries no text of its own, so its
+        display text is always synthesised from the resolved evidence, never
+        preserved — see :mod:`grison.markdown.converter`'s module docstring),
+        so the two sides are directly comparable — never left as the
+        author's own caption/path, which would leave LOCAL's payload
+        permanently disagreeing with REMOTE's (the bug this function fixes).
+
+    A ``_REF_RE`` match is folded UNLESS its own matched text is contained in
+    one of :func:`~grison.markdown.refscan.code_spans`' results — the real
+    parser's own account of what's actually inside a code span/fence, where a
+    lookalike (e.g. a narrative documenting the syntax itself,
+    `` `![x](evidence/y.png)` ``) never becomes a real reference at all.
+    Kind/destination are read straight off the match (a leading ``!`` is
+    unambiguous — the only thing the tokenizer adds here beyond shape is
+    exactly that "is this inside code" exclusion)."""
+    excluded = code_spans(md)
+
+    def _sub(m: re.Match[str]) -> str:
+        matched = m.group(0)
+        if any(matched in region for region in excluded):
+            return matched
+        token = token_for(decode_ref_path(m.group("dest")))
+        if m.group("bang"):
+            return f"![]({token})"
+        return f"[{token}]({token})"
+
+    return _REF_RE.sub(_sub, md)
 
 
 def canonical_prose(md: str, resolver: ResolvesEmbeds) -> dict[str, Any]:
-    """Canonical payload for one LOCAL prose field/section that may embed
-    file-set references: the caption-stripped text, with every embed's
-    AUTHORED PATH replaced by its CURRENTLY-resolved remote id (looked up
-    through the live index/evidence rows ``resolver`` wraps) — never left as
-    the path itself, which stays the stable text ``evidence/x.png`` even
+    """Canonical payload for one LOCAL prose field/section that may embed or
+    cross-reference file-set references: the caption-stripped text, with every
+    reference's AUTHORED PATH replaced by its CURRENTLY-resolved remote id
+    (looked up through the live index/evidence rows ``resolver`` wraps) — never
+    left as the path itself, which stays the stable text ``evidence/x.png`` even
     when the id underneath it changes (D1: bytes changing under an
     unchanged name creates a NEW remote row). This is what makes a reupload
     change THIS document's hash "by construction": :func:`canonical_remote_prose`
@@ -282,7 +341,7 @@ def canonical_prose(md: str, resolver: ResolvesEmbeds) -> dict[str, Any]:
     record classifies PUSH, not a silent CLEAN or an unresolved-reference
     PULL overwrite (D1: "replacing an image's bytes must re-push every
     finding referencing it")."""
-    return {"text": _substitute_embed_identity(
+    return {"text": _substitute_ref_identity(
         md, lambda path: _id_token(resolver.to_remote_id(path))
     )}
 
@@ -506,6 +565,7 @@ def sync_fileset(  # noqa: PLR0913
     snapshot: Snapshot,
     doc_bodies: dict[PurePosixPath, str] | None = None,
     options: RunOptions | None = None,
+    failures: list[Failure] | None = None,
 ) -> FileSetResult:
     """Sync one file set (one report's ``evidence/``, or one book's ``images/``).
 
@@ -513,8 +573,21 @@ def sync_fileset(  # noqa: PLR0913
     document in this file set's scope, already read — used to derive each
     file's local caption opinion (:func:`collect_captions`); omit/empty for an
     adapter with no caption concept at all.
-    """
+
+    ``failures`` (item 2, fix-findings — ENGINE.md 'Apply loop' item 1, "a
+    document with failures is never pushed or created", extended to a file-set
+    record — the validation gate used to only ever run for ordinary documents,
+    never for a file-set create/reupload/push, so a file `grison validate`
+    flagged hard (``REF-008``, an evidence/image file's own bad name) still got
+    synced to the remote server): the SAME failure list the caller already
+    computed for this scope (report/book) via
+    :func:`grison.validator.validate_workspace` — matched here by exact path,
+    mirroring :func:`grison.engine.apply.run`'s identical gate. Omit/empty for
+    a caller that hasn't validated (never silently skips the gate — an empty
+    list just means nothing failed)."""
     options = options or RunOptions()
+    failures = failures or []
+    invalid_paths = {f.path for f in failures}
     kind = adapter.kind
     events: list[Event] = []
     summary = KindSummary(kind=kind)
@@ -577,6 +650,16 @@ def sync_fileset(  # noqa: PLR0913
         path = _dedupe_path(folder / row.data["filename"], claimed_names)
         claimed_names.add(path.name)
         plans.append(Plan(kind=kind, outcome=Outcome.PULL_NEW, id=rid, remote=row, path=path))
+
+    # The validation gate (ENGINE.md 'Apply loop' item 1), mirrored verbatim
+    # from grison.engine.apply.run: only ever turns a remote-write outcome into
+    # INVALID — a pull/delete-local proceeds regardless, exactly like a
+    # document's own gate.
+    for p in plans:
+        if p.outcome in _REMOTE_WRITE_OUTCOMES and p.path is not None:
+            if str(p.path) in invalid_paths:
+                p.rule_ids = tuple(f.rule_id for f in failures if f.path == str(p.path))
+                p.outcome = Outcome.INVALID
 
     _apply_change_guard(plans, options)
 
@@ -864,6 +947,14 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
     dry = options.dry_run
 
     if p.outcome is Outcome.CLEAN:
+        return
+    if p.outcome is Outcome.INVALID:
+        # The validation gate (item 2, fix-findings — ENGINE.md 'Apply loop'
+        # item 1, mirrored from grison.engine.apply._dispatch): a file
+        # `sync_fileset`'s own caller already found `grison validate` failures
+        # for is never uploaded — surfaced naming the rule id(s), never
+        # silently dropped.
+        events.append(_event("invalid", path=p.path, detail=", ".join(p.rule_ids)))
         return
     if p.outcome is Outcome.FAILED:
         # a pre-built failure (today: a caption conflict `collect_captions`

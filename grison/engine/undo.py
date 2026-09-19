@@ -61,12 +61,36 @@ class UndoOp:
     move_from: str | None = None  # old path, for move_edit
     remote_preimage: Any = None  # adapter's raw record shape before this op's write, or None
     local_preimage: str | None = None
-    """For a ``create`` op only: the author's own exact local bytes BEFORE the
-    create's post-write mirror rewrite (``LocalDoc.raw_text`` at the moment
-    ``adapter.create`` was called). Undoing a create restores these bytes at the
-    same path (rather than deleting the file, which would lose the author's
-    original words, or leaving it in its post-create rendered form, which was
-    never what the author wrote) — see ``_replay_one``'s "create" branch."""
+    """The exact local text to restore at ``path`` when undoing this op — two
+    different meanings depending on ``outcome``, both computed at snapshot
+    time, never re-derived at replay time:
+
+      - ``create``: the author's own exact bytes BEFORE the create's post-
+        write mirror rewrite (``LocalDoc.raw_text`` at the moment
+        ``adapter.create`` was called). Undoing restores these bytes rather
+        than deleting the file (which would lose the author's original words)
+        or leaving it in its post-create rendered form (never what the author
+        wrote).
+      - ``push``/``move_edit``: ``adapter.render_local(remote_preimage, ...)``
+        — the file as it would read if it mirrored the OLD, pre-push remote
+        state (exactly like a genuine pull of it would have written it), NOT
+        the author's about-to-be-pushed text (that's the very edit undo is
+        supposed to revert). Item 3 (fix-findings): this half used to be
+        missing entirely — the remote side reverted correctly, but the local
+        file kept its post-push content, including a reference to a file a
+        SIBLING op in the same snapshot might undo the existence of,
+        producing a spurious collision on the next sync — see
+        ``_replay_one``'s "push"/"move_edit" branch. A file-set adapter's
+        caption-only push (never touches the evidence file's own bytes) has
+        no local content to restore at all, so its own writer
+        (``grison.engine.filesets._apply_caption_push``) leaves this ``None``
+        on purpose — ``_replay_one`` skips the local write entirely rather
+        than guessing at a rendering no ``render_local`` method exists for.
+
+    ``None`` for a ``delete_remote`` op too — there is no local file to
+    preimage (it was already missing, that's what made it DELETE_REMOTE); the
+    local mirror it restores instead comes fresh from the restored remote
+    record, see ``_restore_local_mirror``."""
     post_write_hash: str | None = None
     """For a ``push``/``move_edit`` op only: the canonical hash of what the
     record looked like immediately AFTER this op's write (the same hash the
@@ -263,6 +287,15 @@ def _replay_one(  # noqa: PLR0912
             problems.append(f"{op.path}: adapter for kind {op.kind!r} cannot verify it is "
                             "still safe to restore — not restoring")
             return
+        # No backward-compat fallback: every push/move_edit op recorded by the
+        # current forward apply loop always carries a post_write_hash (item 4)
+        # — there are no old snapshots to read (keep-10 pruning), so a missing
+        # one is a corrupt snapshot, refused outright rather than guessed at
+        # (never a silent, unguarded restore).
+        if op.post_write_hash is None:
+            problems.append(f"{op.path}: snapshot has no post-write hash recorded for this "
+                            "push — corrupt snapshot, not restoring")
+            return
         # The same pre-write re-fetch guard the forward apply loop runs before
         # ANY remote write (ENGINE.md §3), turned around for undo: a record
         # edited again since the write this op undoes must be reported, not
@@ -284,8 +317,33 @@ def _replay_one(  # noqa: PLR0912
                             "not restoring (resolve by hand)")
             _emit(on_event, f"failed {op.path}: changed since the sync, not restoring")
             return
-        adapter.restore(ctx, op.remote_preimage)
-        _emit(on_event, f"push {op.path} — restored pre-undo content")
+        restored = adapter.restore(ctx, op.remote_preimage)
+        # The LOCAL half of this undo (item 3, fix-findings): the forward push
+        # rewrote the file to the server's rendering (ENGINE.md §6) — undoing
+        # the remote write without ALSO putting the file back to how it read
+        # BEFORE that push would leave it on its post-push content forever (a
+        # dangling reference to something a SIBLING op in the same snapshot
+        # might undo the existence of — e.g. a re-created evidence file this
+        # push referenced — produces exactly the spurious collision the next
+        # sync then hits). `local_preimage` is `None` only for a kind with no
+        # local file content to restore at all (a file-set caption push —
+        # see the field's own docstring), never a document push/move_edit —
+        # the "restored" message is only ever printed once this write has
+        # actually happened, not merely because the remote side succeeded.
+        if op.path is not None and op.local_preimage is not None:
+            atomic_write_text(root / op.path, op.local_preimage)
+            _emit(on_event, f"push {op.path} — restored pre-undo content")
+        else:
+            _emit(on_event, f"push {op.path or op.id} — remote reverted")
+        # Restamp state's base to the (reverted) record's OWN canonical hash —
+        # ENGINE.md §6's canonicalisation-after-push, run in reverse — so the
+        # very next ordinary sync classifies this record CLEAN outright, not a
+        # one-off REPAIR (harmless, but not what "undo" promises: the record
+        # should look exactly as if the undone push never happened). `adapter`
+        # already satisfies `PushUndoAdapter` (checked above), which is exactly
+        # `RestorableUndoAdapter` plus this same `canonical_remote`.
+        state.put(op.kind, op.id, base=digest(adapter.canonical_remote(restored.data)),
+                 witness=restored.witness)
         return
 
     if op.outcome == "delete_remote":

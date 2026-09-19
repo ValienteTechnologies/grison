@@ -487,9 +487,20 @@ def _apply_update(  # noqa: PLR0913
         events.append(Event(verb="push", path=str(p.path), detail="re-created remotely"))
         return
     preimage = fresh.data
+    # The LOCAL half of a push undo (item 3, fix-findings): NOT `p.local.raw_text`
+    # (that's the author's ABOUT-TO-BE-PUSHED text — the edit undo is supposed to
+    # revert, not what it should restore) — the file as it would read if it
+    # mirrored the OLD, pre-push remote state, exactly like a genuine pull of
+    # `preimage` would have written it. Computed once, here, rather than lazily
+    # at replay time, so undo never needs to re-derive a rendering decision the
+    # forward loop already made once (and the undo module stays adapter-agnostic
+    # about whether ANY given "push" op even has local content to restore — a
+    # file-set caption push's `local_preimage` stays `None`, on purpose: a
+    # caption/description change never touches the evidence file's own bytes).
+    local_preimage = adapter.render_local(preimage, path=p.path)
     op = UndoOp(kind=adapter.kind, outcome=p.outcome.value, path=str(p.path),
                id=p.id, remote_preimage=preimage, move_from=str(p.move_from)
-               if p.move_from else None)
+               if p.move_from else None, local_preimage=local_preimage)
     snapshot.record(op)
     resp = adapter.update(ctx, p.id, p.local.doc)
     if p.move_from is not None:

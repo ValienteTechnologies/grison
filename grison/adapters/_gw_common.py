@@ -195,11 +195,18 @@ class IndexRefResolver:
     rendered ``![caption](path "description")`` line whenever ``evidence_rows`` is
     given, mirroring :class:`grison.adapters.gw_findings.GwRefResolver` exactly (a
     pulled narrative section/note used to always lose a captioned embed's
-    caption/description here — the bug this field exists to fix). An unresolved
-    reference is never fatal by itself (see the converter's own "unresolved
-    references" handling), so this is a safe, honest floor to build on rather than a
-    stub: PUSH of an unknown reference is a clear ``ConverterError`` (surfaced by the
-    validator as ``REP-001``, per the rework's brief D1/D+ENGINE.md), and PULL of one
+    caption/description here — the bug this field exists to fix), AND resolves a
+    cross-reference span by NAME when ``remote.id`` is ``None`` (a cross-
+    reference's native HTML carries only its ``ref`` name, never an id — see
+    :mod:`grison.markdown.converter`'s module docstring), again mirroring
+    :class:`~grison.adapters.gw_findings.GwRefResolver`'s identical fallback — a
+    pulled narrative section/note cross-reference used to always round-trip as
+    the unresolved ``gw:evidence-ref:name=...`` placeholder here, even for an
+    evidence row synced down long ago. An unresolved reference is never fatal
+    by itself (see the converter's own "unresolved references" handling), so
+    this is a safe, honest floor to build on rather than a stub: PUSH of an
+    unknown reference is a clear ``ConverterError`` (surfaced by the validator
+    as ``REP-001``, per the rework's brief D1/D+ENGINE.md), and PULL of one
     round-trips as a visible placeholder instead of failing.
     """
 
@@ -254,13 +261,30 @@ class IndexRefResolver:
         return self._id_for_local_path(path)
 
     def to_local(self, remote: RemoteRef) -> LocalRef | None:
-        if remote.kind != "gw-evidence" or remote.id is None:
+        if remote.kind != "gw-evidence":
             return None
-        full = self.index.path_of(IndexKind.GW_EVIDENCE, remote.id)
+        eid = remote.id
+        if eid is None and remote.name is not None:
+            # A cross-reference span (D1) carries no id at all — only its
+            # ``ref`` name (see grison.markdown.converter's module docstring) —
+            # so ``remote.id`` is ALWAYS ``None`` for one; without this fallback
+            # this resolver could never resolve a cross-reference at all (every
+            # narrative section/note cross-reference round-tripped as the
+            # unresolved `` `gw:evidence-ref:name=...` `` placeholder, even for
+            # an evidence row synced down long ago), unlike
+            # :class:`grison.adapters.gw_findings.GwRefResolver`'s identical
+            # by-name fallback for the exact same case.
+            eid = next(
+                (i for i, r in self._rows().items() if r.get("friendly_name") == remote.name),
+                None,
+            )
+        if eid is None:
+            return None
+        full = self.index.path_of(IndexKind.GW_EVIDENCE, eid)
         prefix = f"findings/reports/{self.report_dir}/"
         if full is None or not full.startswith(prefix):
             return None
-        row = self._rows().get(remote.id, {})
+        row = self._rows().get(eid, {})
         return LocalRef(path=full[len(prefix) :], caption=row.get("caption", ""),
                         description=row.get("description", ""))
 

@@ -358,6 +358,13 @@ REF_BAD_WIKI_IMAGE_PATH = _r(
     "a wiki image uses the wrong path spelling for its location",
     "use images/<file> at the book root, or ../images/<file> inside a chapter",
 )
+REF_BAD_FILESET_NAME = _r(
+    "REF-008",
+    "an evidence/ or images/ file's own name is invalid (WS-001's charset rule "
+    "does not apply here — these names are stable handles kept verbatim)",
+    "rename it: no path separator, no leading dot, not a <name>.remote.<ext> "
+    "collision-sidecar shape, valid UTF-8, at most 255 bytes",
+)
 
 # --- TXT: banned text ----------------------------------------------------------------
 

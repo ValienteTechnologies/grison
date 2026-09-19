@@ -78,6 +78,29 @@ def decode_ref_path(raw: str) -> str:
         return raw
 
 
+def code_spans(md: str) -> list[str]:
+    """Every inline code span's/fenced-or-indented code block's own raw text
+    content, via the SAME real parse :func:`scan_refs` uses. A destination that
+    merely LOOKS like an embed/cross-reference (e.g. a report narrative
+    documenting the markdown syntax itself inside backticks — `` `![x]
+    (evidence/y.png)` ``) never becomes an ``image``/``link`` node in the first
+    place (markdown-it never re-parses code content for inline syntax at all —
+    see the module docstring), so it never appears in :func:`scan_refs`'s
+    result; this is the other half a caller needs to tell such a lookalike
+    apart from a real reference when it does its OWN, broader textual matching
+    over the same markdown (:mod:`grison.engine.filesets`'s identity-folding,
+    which must recognise both an embed and a cross-reference by shape alone,
+    since the two forms differ only in a leading ``!``) — checking a match's
+    own text for containment in one of these strings is a reliable, tokenizer-
+    grounded "was this actually inside code" test, without a second hand-rolled
+    matching regex of its own."""
+    if not md.strip():
+        return []
+    normalized = md.replace("\r\n", "\n")
+    tree = SyntaxTreeNode(_MD.parse(normalized))
+    return [n.content for n in tree.walk() if n.type in ("code_inline", "code_block", "fence")]
+
+
 def scan_refs(md: str) -> list[FoundRef]:
     """Every embed/cross-reference in ``md``, in document order."""
     if not md.strip():

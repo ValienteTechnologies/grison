@@ -1145,6 +1145,7 @@ def _run_wiki_phase(
             state=state,
             snapshot=snapshot,
             options=fs_options,
+            failures=wiki_failures,
         )
         events.extend(result.events)
         summaries[f"bs.image[{book_dir}]"] = result.summary
@@ -1403,6 +1404,7 @@ def _run_reports_phase(
                 snapshot=snapshot,
                 doc_bodies=doc_bodies,
                 options=fs_options,
+                failures=report_failures,
             )
         except Exception as e:  # noqa: BLE001 — per-record isolation (ENGINE.md §5):
             # one report's evidence file set blowing up must not abort every other

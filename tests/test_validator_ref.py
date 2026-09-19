@@ -114,7 +114,12 @@ def test_non_ascii_evidence_filename_validates(tmp_path: Path) -> None:
     (``evidence/Phishing_Sonu%C3%A7lar%C4%B1.png`` for the author's own
     ``evidence/Phishing_Sonuçları.png``) — without decoding it back before
     resolving against the filesystem, this failed REF-002 even though the file
-    exists at exactly that path."""
+    exists at exactly that path. Also proves item 2 (engine-findings-lab.md
+    Scenario 6): this exact name — non-ASCII AND uppercase — used to ALSO fail
+    ``WS-001`` (its charset rule doesn't allow either), even though grison
+    itself keeps evidence names verbatim and never renames one; ``WS-001`` no
+    longer applies inside ``evidence/`` at all (``REF-008`` — see
+    ``test_ref008_*`` — replaces it there)."""
     root = copy_fixture(tmp_path)
     evidence_dir = root / "findings" / "reports" / "14-acme-corp" / "evidence"
     (evidence_dir / "Phishing_Sonuçları.png").write_bytes(b"\x89PNG-fake-bytes")
@@ -130,3 +135,56 @@ def test_non_ascii_evidence_filename_validates(tmp_path: Path) -> None:
     fails = rule_ids(validate_workspace(root))
     assert "REF-002" not in fails
     assert "REF-006" not in fails
+    assert "WS-001" not in fails
+    assert "REF-008" not in fails
+
+
+@pytest.mark.rule("REF-008")
+def test_ref008_bad_fileset_names(tmp_path: Path) -> None:
+    """Item 2 (engine-findings-lab.md 'Scenario 6'): ``WS-001``'s charset rule
+    does not apply inside ``evidence/`` or ``images/`` (D1/D9: names are stable
+    handles kept verbatim) — ``REF-008`` replaces it there, rejecting a leading
+    dot and a collision-sidecar shape (never a real file) regardless of the
+    name otherwise being fine on every other axis (both names below are valid
+    non-ASCII/mixed-case names apart from the one thing that's wrong)."""
+    root = copy_fixture(tmp_path)
+    ev = root / "findings" / "reports" / "14-acme-corp" / "evidence"
+    (ev / ".Şifre.png").write_bytes(b"\x89PNG")
+    (ev / "Şifre.remote.png").write_bytes(b"\x89PNG")
+    img = root / "methodology" / "library" / "network-testing" / "images"
+    (img / ".Hidden.png").write_bytes(b"\x89PNG")
+
+    fails = validate_workspace(root)
+    ref008_paths = {f.path for f in fails if f.rule_id == "REF-008"}
+    assert "findings/reports/14-acme-corp/evidence/.Şifre.png" in ref008_paths
+    assert "findings/reports/14-acme-corp/evidence/Şifre.remote.png" in ref008_paths
+    assert "methodology/library/network-testing/images/.Hidden.png" in ref008_paths
+
+    # a path separator can never appear inside one real filesystem entry's own
+    # name (the two real callers only ever hand this a directory-scan result),
+    # so it's checked directly against the unit-level rule instead.
+    from pathlib import PurePosixPath
+
+    from grison.validator.core import _check_fileset_name
+
+    sep_fails = _check_fileset_name(
+        PurePosixPath("findings/reports/r/evidence"), "sub/dir.png"
+    )
+    assert len(sep_fails) == 1 and sep_fails[0].rule_id == "REF-008"
+
+
+@pytest.mark.rule_ok("REF-008")
+def test_ref008_non_ascii_and_uppercase_names_are_fine(tmp_path: Path) -> None:
+    """The exact motivating case (Scenario 6, D1's own real-data example): a
+    non-ASCII, mixed-case evidence/image name is a stable handle kept
+    verbatim — ``REF-008`` has no charset opinion at all, only ``WS-001`` did,
+    and ``WS-001`` no longer applies inside ``evidence/``/``images/``."""
+    root = copy_fixture(tmp_path)
+    ev = root / "findings" / "reports" / "14-acme-corp" / "evidence"
+    (ev / "Sonuçları_ş.png").write_bytes(b"\x89PNG")
+    img = root / "methodology" / "library" / "network-testing" / "images"
+    (img / "Screenshot ÜPPER.PNG").write_bytes(b"\x89PNG")
+
+    fails = validate_workspace(root)
+    assert "WS-001" not in rule_ids(fails)
+    assert "REF-008" not in rule_ids(fails)
