@@ -922,6 +922,44 @@ def test_library_finding_with_a_real_editor_heading_pulls_and_stays_clean(
     assert "push" not in second.output, second.output
 
 
+def test_library_finding_with_external_link_stays_clean_across_syncs(
+    run_grison, gw_server, workspace,
+):
+    """fix-f item 1 (+ coordinator addendum): ``_substitute_ref_identity`` used
+    to fold ANY ``[text](dest)`` it found — including a plain external
+    citation link with no ``evidence/`` prefix at all — into
+    ``[unresolved](unresolved)`` on the LOCAL canonical side, while the REMOTE
+    side (the real converter's ordinary ``<a>`` rendering) never touches an
+    external link at all. The two canonical forms then permanently disagreed,
+    classifying the record PUSH forever with nothing genuinely changed. Only a
+    reference ``_is_grison_reference`` recognises (a destination starting with
+    ``evidence/``) is folded now; an external link is left byte-identical on
+    both sides, so a second and third sync (nothing edited in between) both
+    come back CLEAN."""
+    gw_server.store.seed_finding(
+        id=1,
+        title="SQL Injection",
+        severityId=3,
+        findingTypeId=4,
+        description=(
+            '<p>See <a href="https://owasp.org/www-community/attacks/SQL_Injection" '
+            'target="_blank" rel="noopener">OWASP: SQL Injection</a> for background.</p>'
+        ),
+    )
+
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+    assert "findings (gw.finding): pull_new 1" in first.output, first.output
+
+    second = run_grison("sync")
+    assert "findings (gw.finding): clean" in second.output, second.output
+    assert "push" not in second.output, second.output
+
+    third = run_grison("sync")
+    assert "findings (gw.finding): clean" in third.output, third.output
+    assert "push" not in third.output, third.output
+
+
 def test_reported_finding_heading_edit_pushes_back_as_html(run_grison, gw_server, workspace):
     """The push direction of defect 1: an author editing a section that already
     has (or gains) a markdown heading must push back as real ``<hN>`` HTML, not

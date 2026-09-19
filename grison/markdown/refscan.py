@@ -210,3 +210,228 @@ def _in_list_item(node: SyntaxTreeNode) -> bool:
             return True
         n = n.parent
     return False
+
+
+# --- ref_spans: exact source character spans, matched 1:1 with scan_refs() ---
+#
+# A caller that needs to fold a reference's markdown syntax IN PLACE (e.g.
+# grison.engine.filesets, computing a canonical hash with each reference's
+# destination replaced by its resolved remote identity) must splice at the
+# reference's REAL position, never re-derive "what a reference looks like"
+# with a second, hand-rolled matching regex over the whole document text: two
+# lookalike occurrences of the same text (a real reference, and an unrelated
+# copy of that same text sitting inside a code span/fence elsewhere) are
+# otherwise indistinguishable to a regex that only sees TEXT, never POSITION.
+#
+# markdown-it-py's inline tokens carry no character offsets of their own (only
+# a BLOCK's `.map` gives a line range), so this module computes offsets itself:
+# every "paragraph"/heading node's `.map` gives its own exact source-line range
+# (correct even nested inside a list item — confirmed against markdown-it-py's
+# own tree), which slices out that block's raw text; within that slice, a
+# small bracket-depth-and-escape-aware scanner (never a second copy of
+# CommonMark's own link grammar — destination/title matching stays exactly as
+# permissive as this module's own callers already relied on) finds every
+# top-level `![...](...)`/`[...](...)` span, skipping anything inside an
+# INLINE code span (a fenced/indented code block is a separate sibling node at
+# the tree level, never inline-parsed at all, so it can never even reach this
+# scan — the same reason a fenced copy of a real reference is already invisible
+# to :func:`scan_refs` itself). Walking blocks in the same `tree.walk()` order
+# :func:`scan_refs` sorts its own results by (block start line, then
+# left-to-right within it) reproduces that exact same order, so the two lists
+# pair up by plain ordinal index — never a second copy of "which kind is this."
+#
+# A count MISMATCH between the two (this scanner found a different number of
+# spans than :func:`scan_refs` found real references) is the caller's signal
+# that this scanner's simpler grammar disagreed with the real parser on some
+# construct — today, that is exactly one shape: an image nested inside a
+# link's text (``[![alt](inner)](outer)``), where :func:`scan_refs` reports
+# TWO references (the nested embed and the outer cross-reference) for the ONE
+# span this scanner finds (correctly, since CommonMark closes the link's own
+# ``]`` at the OUTER bracket, treating the nested image as ordinary caption
+# content). This module reports no opinion about that shape — it never
+# validates or resolves (module docstring) — a caller sees the mismatch and
+# decides what to do about it.
+
+
+def _code_span_ranges(text: str) -> list[tuple[int, int]]:
+    """Character-position ranges of every INLINE code span in one block's own
+    raw text (never a fence/indented code block — those are separate sibling
+    nodes, never inline-parsed, so their content never reaches here at all):
+    a backtick run, then the next run of the SAME length that is not itself
+    part of a longer run (CommonMark's own code-span closing rule) — a plain,
+    non-regex scan so a run shorter/longer than the opener is correctly
+    skipped rather than mismatched."""
+    ranges: list[tuple[int, int]] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] != "`":
+            i += 1
+            continue
+        j = i
+        while j < n and text[j] == "`":
+            j += 1
+        run_len = j - i
+        k = j
+        closed_at: int | None = None
+        while k < n:
+            if text[k] != "`":
+                k += 1
+                continue
+            k2 = k
+            while k2 < n and text[k2] == "`":
+                k2 += 1
+            if k2 - k == run_len:
+                closed_at = k2
+                break
+            k = k2
+        if closed_at is None:
+            i = j  # unmatched opener: not a code span, keep scanning past it
+            continue
+        ranges.append((i, closed_at))
+        i = closed_at
+    return ranges
+
+
+def _code_range_end(pos: int, ranges: list[tuple[int, int]]) -> int | None:
+    """The end of the code-span range strictly containing ``pos`` (its start
+    included, so the scan below can jump straight past the whole span as one
+    atomic unit — a bracket/backslash INSIDE a code span is literal content,
+    never part of the reference grammar around it), or ``None``."""
+    for a, b in ranges:
+        if a <= pos < b:
+            return b
+    return None
+
+
+_REF_DEST_STOP = frozenset(") \t\n\r\f\v")
+_WHITESPACE = frozenset(" \t\n\r\f\v")
+
+
+def _try_parse_ref(
+    text: str, bracket_pos: int, code_ranges: list[tuple[int, int]]
+) -> tuple[int, str] | None:
+    """``text[bracket_pos] == "["``. Bracket-depth-and-escape-aware caption
+    scan (the actual fix for a caption containing an escaped ``\\]`` or a
+    nested ``[...]``/``![...]``, which a flat ``[^\\]]*`` regex can never
+    match), then destination/title matching left exactly as permissive as
+    this module's existing callers already relied on (a literal ``)`` or
+    whitespace always ends the destination; not a defect in scope here).
+    Returns ``(end position exclusive, raw caption text)`` or ``None`` if
+    ``text`` at this position isn't a well-formed reference at all."""
+    n = len(text)
+    j = bracket_pos + 1
+    depth = 1
+    while j < n:
+        skip_to = _code_range_end(j, code_ranges)
+        if skip_to is not None:
+            j = skip_to
+            continue
+        c = text[j]
+        if c == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    if depth != 0 or j >= n:
+        return None
+    caption_raw = text[bracket_pos + 1 : j]
+    k = j + 1
+    if k >= n or text[k] != "(":
+        return None
+    k += 1
+    dest_start = k
+    while k < n and text[k] not in _REF_DEST_STOP:
+        k += 1
+    if k == dest_start:
+        return None  # empty destination — never a reference grison recognizes
+    if k < n and text[k] != ")":
+        m = k
+        while m < n and text[m] in _WHITESPACE:
+            m += 1
+        if m < n and text[m] == '"':
+            m += 1
+            while m < n and text[m] != '"':
+                m += 1
+            if m >= n:
+                return None
+            m += 1
+            while m < n and text[m] in _WHITESPACE:
+                m += 1
+        k = m
+    if k >= n or text[k] != ")":
+        return None
+    return k + 1, caption_raw
+
+
+def _scan_block_ref_spans(text: str) -> list[tuple[int, int]]:
+    """Every top-level ``![...](...)``/``[...](...)`` span in one block's own
+    raw text, in document order, local to ``text`` (see :func:`ref_spans` for
+    conversion to global document offsets)."""
+    code_ranges = _code_span_ranges(text)
+    spans: list[tuple[int, int]] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        skip_to = _code_range_end(i, code_ranges)
+        if skip_to is not None:
+            i = skip_to
+            continue
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            i += 2
+            continue
+        is_bang = c == "!" and i + 1 < n and text[i + 1] == "["
+        if is_bang or c == "[":
+            bracket_pos = i + 1 if is_bang else i
+            result = _try_parse_ref(text, bracket_pos, code_ranges)
+            if result is not None:
+                end_pos, _caption_raw = result
+                spans.append((i, end_pos))
+                i = end_pos
+                continue
+        i += 1
+    return spans
+
+
+def _line_offsets(text: str) -> list[int]:
+    """Char offset of the start of each 0-based line in ``text`` — converts a
+    block's ``.map`` (a line range) into character positions."""
+    offsets = [0]
+    for line in text.split("\n")[:-1]:
+        offsets.append(offsets[-1] + len(line) + 1)
+    return offsets
+
+
+_REF_BEARING_BLOCK_TYPES = ("paragraph", "heading")
+
+
+def ref_spans(md: str) -> list[tuple[int, int]]:
+    """The character ``(start, end)`` span of every reference :func:`scan_refs`
+    reports on the SAME ``md``, in the SAME order (``end`` is exclusive; the
+    span covers the ENTIRE syntax, leading ``!`` included for an embed) — see
+    the section docstring above for why a caller pairs these up with
+    :func:`scan_refs`'s own result by plain ordinal index rather than
+    re-deriving "which kind is this" itself, and what a count mismatch means."""
+    if not md.strip():
+        return []
+    normalized = md.replace("\r\n", "\n")
+    tree = SyntaxTreeNode(_MD.parse(normalized))
+    offsets = _line_offsets(normalized)
+    spans: list[tuple[int, int]] = []
+    for node in tree.walk():
+        if node.type not in _REF_BEARING_BLOCK_TYPES or not node.map:
+            continue
+        start_line, end_line = node.map
+        block_start = offsets[start_line]
+        block_end = offsets[end_line] if end_line < len(offsets) else len(normalized)
+        block_text = normalized[block_start:block_end]
+        spans.extend(
+            (block_start + a, block_start + b) for a, b in _scan_block_ref_spans(block_text)
+        )
+    return spans
