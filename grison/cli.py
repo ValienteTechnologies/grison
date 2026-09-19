@@ -61,7 +61,7 @@ from grison.remote.creds import Creds, MissingCreds, Settings, load_settings
 from grison.remote.creds import load as load_creds
 from grison.remote.ghostwriter import GhostwriterClient
 from grison.sinks import ParsePathNotFound, ParseSummary, run_parse
-from grison.validator import find_workspace_root, validate_workspace
+from grison.validator import WorkspaceNotFound, find_workspace_root, validate_workspace
 from grison.workspace import bootstrap_tree, inbox_dir
 
 app = typer.Typer(
@@ -101,7 +101,8 @@ def _guarded(fn: Callable[..., _T2]) -> Callable[..., _T2]:
     exit-code signaling) passes through untouched — this only catches what nothing
     else already handled.
 
-    :class:`~grison.remote.creds.MissingCreds` exits 2, not 1 (item 6, fix-fin1):
+    :class:`~grison.remote.creds.MissingCreds` and
+    :class:`~grison.validator.WorkspaceNotFound` exit 2, not 1:
     ENGINE.md §10 puts bad/missing credentials in the same "could not run" class
     as no-workspace/incompatible-server/lock-held, never in the "ran but needs
     attention" class exit 1 is for. ``sync`` catches it itself first (to also print
@@ -114,7 +115,7 @@ def _guarded(fn: Callable[..., _T2]) -> Callable[..., _T2]:
             return fn(*args, **kwargs)
         except typer.Exit:
             raise
-        except MissingCreds as e:
+        except (MissingCreds, WorkspaceNotFound) as e:
             typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2) from None
         except GrisonError as e:

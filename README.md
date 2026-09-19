@@ -170,7 +170,11 @@ grison escapes it correctly on the way to Ghostwriter.
 - Only the remote record changed → **pull**.
 - Both changed → **collision**: the remote version is written to a `<name>.remote.<ext>`
   sidecar next to the file, the local file is never overwritten. Resolve by hand, then
-  `grison sync --force-local <path>` or `--force-remote <path>`.
+  `grison sync --force-local <path>` or `--force-remote <path>`. A force flag always
+  means "this side wins for this path", including on a deletion the change guard
+  withheld: `--force-remote` restores a locally deleted record instead of deleting it
+  remotely, `--force-local` recreates a remotely deleted one instead of deleting it
+  locally.
 
 Every record must pass `grison validate` before it's pushed, created, or deleted — the
 validation gate blocks pushes, never pulls. A mass, sudden change (many records
