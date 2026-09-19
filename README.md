@@ -4,214 +4,266 @@
 [![Python](https://img.shields.io/pypi/pyversions/grison)](https://pypi.org/project/grison/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-grison turns raw security-scanner exports into clean markdown findings, gives you a
-plain-files workspace to triage and edit them in, and syncs the result into
-[Ghostwriter](https://github.com/GhostManager/Ghostwriter) (findings + evidence) and
-[BookStack](https://www.bookstackapp.com/) (methodology) with a git-style 3-way merge.
-
-Markdown in the middle is the point: findings are files, so the transform layer is
-whatever edits files best — a human in any editor, a script, or an LLM let loose on the
-workspace. grison itself has no AI subsystem; its job is to validate what changed and
-sync it safely.
-
-Supported scanner exports (auto-detected): Acunetix, Burp, Nessus, Nmap, OpenVAS,
-Qualys, sslyze, ZAP.
+grison mirrors [Ghostwriter](https://github.com/GhostManager/Ghostwriter) (findings,
+reports, evidence) and [BookStack](https://www.bookstackapp.com/) (wiki) into a plain
+markdown workspace and syncs edits back. Its job is to validate what changed and sync
+it safely, whether a person or an agent made the edit.
 
 ## Install
 
+Requires Python ≥3.11 on a POSIX system (grison uses `os.chmod`/`fcntl.flock`; it does
+not run on Windows).
+
 ```sh
 pipx install grison            # or: uv tool install grison
-grison --install-completion    # optional: shell tab completion (once, then restart shell)
 ```
 
-For development: `uv sync && uv run pytest` (Python 3.11+, managed with
-[uv](https://docs.astral.sh/uv/)).
-
-## Quickstart
+## Quick start
 
 ```sh
 mkdir engagement && cd engagement
-grison parse scan.nessus burp.xml    # first run scaffolds the workspace
-# triage findings/inbox/*.md, edit freely, move the keepers into place:
-cp findings/inbox/sqli-login.md findings/reports/6-acme-q3/
-grison status findings/              # validity report per record
-grison sync                          # reconcile with Ghostwriter + BookStack
+grison sync
 ```
 
-## The three verbs
+The first run in an empty directory scaffolds the whole workspace — `findings/`,
+`methodology/`, `.grison/` (with a commented credentials template at `.grison/env`),
+`CLAUDE.md`, and `.claude/settings.json` — then stops and asks you to fill in
+Ghostwriter (and, optionally, BookStack) credentials in `.grison/env`. Re-run
+`grison sync` and it pulls every existing report, finding, and wiki page into the
+tree.
 
-| Command | Does |
-|---|---|
-| `grison parse <path…>` | scanner export(s) → markdown findings in `findings/inbox/`. Offline. Auto-detects the scanner (`--scanner` to force), `--min-severity high,critical` or `medium-critical` to filter, `--dry-run` to preview. |
-| `grison status <path…>` | per-record validity: schema, enums, CVSS vector↔score, CWE ids, Ghostwriter HTML whitelist. Offline. |
-| `grison sync` | reconcile the workspace with Ghostwriter (findings) and BookStack (methodology). Direction is derived per record — see below. `--dry-run` previews the plan. |
+`.grison/env` is created `chmod 600` and is never committed (see
+[SECURITY.md](SECURITY.md)). `GRISON_*` environment variables override the file, for
+CI/headless use.
 
-There is deliberately no `pull`/`push` (sync derives direction), no `init` (the first
-run of any verb scaffolds the workspace), and no `validate` (status reports, sync
-enforces). Moving a finding between tiers is a plain `cp`/`mv`.
+## Workspace layout
 
-## The workspace
+```
+<workspace>/
+  .grison/
+  CLAUDE.md
+  .claude/
+    settings.json
+  .gitignore
+  findings/
+    library/
+    reports/
+      <report-dir>/
+        evidence/
+        narrative/
+        notes/
+        project.md
+        .report.yml
+    inbox/
+  methodology/
+    library/
+      <book>/
+        <chapter>/
+        images/
+        .book.yml
+      .shelves/
+    checklists/
+```
 
-The directory tree is the data model — location is identity:
+A concrete example, annotated:
 
 ```
 findings/
-  inbox/
   library/
-  reports/<id>-<slug>/
-    narrative/
-    evidence/
+    weak-tls-config.md            # reusable finding, not tied to any report
+  reports/
+    acme-corp-web-assessment/     # one directory per Ghostwriter report, named from its title
+      reflected-xss.md            # a reported finding
+      evidence/
+        xss-alert.png             # image referenced from a finding/narrative/note
+      narrative/
+        executive_summary.md      # one file per report extraFields section
+      notes/
+        follow-up.md              # a project note
+      project.md  .report.yml     # read-only mirrors, regenerated every sync
+  inbox/
+    sql-injection.md              # `grison parse` output — triage, then `mv`/`cp`
 methodology/
-  library/<book>/<chapter>/
-  checklists/<engagement>/
-.grison/
+  library/
+    web-application-testing/
+      .book.yml                   # read-only mirror of the BookStack book
+      recon.md                    # a page at the book root
+      images/
+        recon-diagram.png
+      reconnaissance/
+        .chapter.yml               # read-only mirror of the BookStack chapter
+        subdomain-enum.md          # a page inside that chapter
+    .shelves/
+      pentest-methodologies.yml   # read-only mirror of a BookStack shelf
+  checklists/
+    acme-2026-08/                 # a per-engagement working copy of a book
 ```
 
-| Path | Mirrors | Notes |
+`findings/inbox/` and `methodology/checklists/<engagement>/` are local-only: fully
+validated, but never synced and never recorded in `.grison/index.json`. Everything
+else in `findings/`/`methodology/` is one of the shapes below — an unrecognized file
+or directory anywhere in either tree is a hard validation failure.
+
+The complete, exact spec (every rule, with its id) is
+[`docs/workspace-format.md`](docs/workspace-format.md); a copy also ships inside every
+workspace at `.grison/SPEC.md`. This section is the day-to-day summary.
+
+## Authoring rules that matter day to day
+
+**No machine fields, no ids, ever.** No document — finding, narrative section, note,
+wiki page — carries a `grison:` block, an id, or a hash. Identity (which remote record
+a file corresponds to) lives entirely in the tracked `.grison/index.json`, keyed by
+the file's path.
+
+**File and directory names are stable handles.** A name you create may be anything
+matching `[a-z0-9][a-z0-9._-]*` (lowercase, starts with a letter/digit). Once grison
+creates a file or directory on pull, it never renames it again, even after the remote
+title changes. The one exception: a file directly inside an `evidence/` or `images/`
+folder keeps its name verbatim (non-ASCII, mixed case, whatever it arrived with) —
+that name is still checked, just against a different, narrower rule (no path
+separator, no leading dot, not shaped like a collision sidecar, valid UTF-8, ≤255
+bytes).
+
+**A finding's frontmatter:**
+
+| field | required | notes |
 |---|---|---|
-| `findings/inbox/` | nothing | parse output; triage here, then `cp` into a tier |
-| `findings/library/` | Ghostwriter finding library | reusable templates |
-| `findings/reports/<id>-<slug>/` | Ghostwriter reported findings | one dir per *existing* report; grison never creates reports |
-| `findings/reports/…/narrative/` | Ghostwriter report `extraFields` | one editable markdown file per report section (exec summary, methodology, …); 3-way per section. `.report.yml` holds the read-only metadata mirror |
-| `findings/reports/…/evidence/` | Ghostwriter evidence | images attached to a finding |
-| `methodology/library/` | BookStack books/chapters/pages | markdown-native, mirrors verbatim |
-| `methodology/checklists/` | nothing | per-engagement working copies, `cp -r` from library |
-| `.grison/` | — | creds + sync state; auto-gitignored, never commit |
+| `severity` | yes | `informational`, `low`, `medium`, `high`, `critical` |
+| `finding_type` | yes | `network`, `physical`, `wireless`, `web`, `mobile`, `cloud`, `host` |
+| `cvss.vector` | no | a CVSS 3.0/3.1 base vector; the score is always derived |
+| `cwe` | no | list of CWE ids, checked against an embedded MITRE index |
+| `tags` | no | list of strings, no duplicates, no surrounding whitespace |
+| `affected_entities` | no | free text — reported/inbox findings only, never `findings/library/` |
 
-BookStack's structure mirrors losslessly: `library/<book>/<page>.md` for pages at a
-book's root, `library/<book>/<chapter>/<page>.md` for chaptered pages. Every book and
-chapter — including empty ones — materializes as a directory holding a `.book.yml` /
-`.chapter.yml` mirror (ids, name, description, shelf membership, chapter order;
-pull-only). Page sort order (`priority`) and page tags live in the page frontmatter
-and sync in both directions. Moving a file between chapter directories moves the page
-on BookStack; a page moved into a chapter remotely relocates the local file on the
-next sync.
+No other frontmatter key is allowed. The body is exactly one `# {title}` line, then
+`## Description`, `## Impact`, `## Mitigation`, `## Replication Steps`,
+`## References`, each exactly once, in that order. When `cvss.vector` is set,
+`severity` must agree with its score band (inbox findings are exempt — a scanner's raw
+severity rating routinely disagrees with a naive CVSS band before you've triaged it).
 
-Sync matches records by remote id stored in the file, not by filename (filenames are
-cosmetic). A file whose directory disagrees with its stored id is a *move* and becomes
-a new record at the destination.
+**A wiki page's frontmatter:** `title` (required, non-blank), `priority` (optional
+integer, BookStack sort order), `tags` (optional, same shape rule as a finding's).
+No other key. A page's book and chapter come from which directory it sits in — there
+is no `book`/`chapter` field. The body is markdown BookStack stores and renders
+verbatim: no real HTML tags (a placeholder like `<domain>` is fine), only
+`http:`/`https:`/`mailto:` links, no heading-level skips, and the first heading must
+not repeat the title.
 
-## Finding schema
+**The only evidence/image form is an image line, alone in its own block:**
+`![caption](evidence/file.png "optional description")` in a finding, narrative
+section, or note; `![caption](images/file.png)` on a wiki page at its book's root, or
+`![caption](../images/file.png)` one chapter down. A plain link to the same path —
+`[see Figure 1](evidence/file.png)` — is a cross-reference, not an embed, and may
+appear inline. Neither form is ever allowed in a library or inbox finding (there is
+no report to hold evidence for). Removing an image line never deletes the file.
 
-One tier-agnostic schema: structured facts in YAML frontmatter, prose in fixed `##`
-sections.
+**Write a template-injection payload literally.** `{7*7}`, `{{7*7}}`, `{% debug %}`,
+`${{ ... }}` and similar Jinja/Handlebars/Go-template syntax are quoted exactly as the
+target reflected them, in a code span when it's code. Don't escape or "defuse" it —
+grison escapes it correctly on the way to Ghostwriter.
 
-```markdown
----
-grison:
-  kind: finding
-  tier: instance            # library | instance
-  gw: { table: reportedFinding, id: 183, report_id: 6 }
-  synced: { hash: sha256:…, at: 2026-07-14T12:00:00Z }  # the 3-way merge base
-severity: high              # informational|low|medium|high|critical
-finding_type: web           # network|physical|wireless|web|mobile|cloud|host
-cvss: { vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", score: 9.8 }
-cwe: ["CWE-79"]             # validated against an embedded CWE index
-affected_entities: |        # instances only
-  https://app.example/
-evidence:                   # instances only
-  - { file: evidence/shell.png, caption: Shell, friendly_name: shell, gw: { id: 38, hash: sha256:… } }
----
+## How sync decides
 
-# {title}
-## Description
-## Impact
-## Mitigation
-## Replication Steps
-## References
-```
+`grison sync` never asks push-or-pull: a per-record stored merge base decides.
 
-The pydantic models in `grison/model/` are the schema. CVSS is accepted as well-formed
-3.0 or 3.1, as authored. CWE ids are validated against a vendored index of the MITRE
-catalog, so everything works fully offline.
+- Only the local file changed since the last sync → **push**.
+- Only the remote record changed → **pull**.
+- Both changed → **collision**: the remote version is written to a `<name>.remote.<ext>`
+  sidecar next to the file, the local file is never overwritten. Resolve by hand, then
+  `grison sync --force-local <path>` or `--force-remote <path>`.
 
-## How sync decides direction
+Every record must pass `grison validate` before it's pushed, created, or deleted — the
+validation gate blocks pushes, never pulls. A mass, sudden change (many records
+looking edited/deleted at once, more than the change guard's threshold) withholds the
+writes for that run instead of applying them, reported as `withheld`.
 
-Nobody chooses push or pull — the stored merge base (`synced.hash`) determines it per
-record:
+Every remote write in one `grison sync` run — findings, report, and wiki phases alike
+— shares one undo snapshot (see `grison undo` below).
 
-- only local changed → **push**
-- only remote changed → **pull**
-- both changed → **collision**: the remote version is written to an `x.remote.md`
-  sidecar, local is never overwritten; resolve, then
-  `grison sync --force-local <file>` or `--force-remote <file>`
-- both converged under a stale base → repair the base, write nothing
+`grison validate` (and, in the same spirit, `status`/`sync`) uses a three-way exit
+code so a script can tell "your documents are wrong" apart from "the command itself
+couldn't run":
 
-## Guardrails
-
-Guardrails stop anomalous or destructive outcomes, never routine ones — no
-confirmation prompts, `--dry-run` is opt-in. Three layers:
-
-1. **Validation** — silent when green; a record must be valid to sync.
-2. **Trip-wires** — fire only on anomaly: mass-change guard, structure drift,
-   collision, duplicate identity, broken evidence link.
-3. **Snapshots** — every remote write batch is snapshotted first, with a paired
-   `rollback.py`, so every write is reversible.
-
-## Markdown ⇄ Ghostwriter HTML
-
-Ghostwriter's rich-text fields use a small closed vocabulary, and the converter fails
-loudly on anything outside it rather than corrupt silently. Inline: `**bold**`,
-`` `code` ``, `*em*`, `[links](…)`. Block: paragraphs and unordered/ordered lists
-(`- ` and `1. `, one level of 2-space sub-items, freely nested either way). Rejected
-inside a field: tables, images,
-headings (the `##` section headers are grison structure mapping to Ghostwriter's
-separate fields, not field content). Constructs grison canonicalizes on purpose —
-editor highlight spans, non-standard link `rel`/`target` — are reported as sync
-warnings when dropped, never absorbed silently. BookStack pages are markdown-native
-and mirror verbatim, no conversion; pages authored in the WYSIWYG editor are skipped
-loudly until converted to markdown in BookStack.
-
-## What syncs, what doesn't
-
-Every remote field has an explicit verdict — "not synced" always means grison can
-neither lose it nor damage it (partial updates never touch unlisted columns).
-
-**Two-way synced (in the merge base — edits on either side propagate, both-changed
-collides):** finding title, severity, type, CVSS vector + score, all five prose
-sections, affected entities; tags and CWE ids (Ghostwriter's tag table, `CWE:<n>`
-convention); evidence images with caption / friendly name / description (per-image
-merge base); report narrative sections (`report.extraFields`), each section its own
-merge base; BookStack page body, name, priority, tags, and chapter/book location.
-
-**Mirrored read-only (pull-only; local edits are detected and rejected, never
-silently discarded):** report metadata (`.report.yml` — project, client, dates,
-lifecycle flags); BookStack book/chapter/shelf structure (`.book.yml`,
-`.chapter.yml`, `.shelves/*.yml` — carry a READ-ONLY header; hand-edits error with a
-`.remote.yml` sidecar).
-
-**Deliberately not synced (remote-owned, unreachable by grison's writes):**
-Ghostwriter report-finding `position` (per-severity kanban order, server renumbers),
-`complete`/`assignedTo` QA state, finding/report comments, Observations,
-report templates and `reportConfiguration`, report-level evidence rows (never
-deleted by grison), dead-in-corpus columns (`hostDetectionTechniques`,
-`networkDetectionTechniques`, `findingGuidance`, per-finding `extraFields`);
-BookStack container tags/covers/templates, page `template` flag, revision history.
-Renaming books/chapters happens in BookStack, not by renaming local dirs (a rename
-tripwire blocks the ambiguous case). Severity/finding-type id mappings are verified
-against the live instance at sync start and abort on drift.
-
-## Configuration
-
-The first run in a directory scaffolds `.grison/env` — a commented template, chmod 600,
-auto-gitignored. Paste values there, or set the same keys as environment variables
-(env vars override the file; useful for CI):
-
-| Key | For |
+| code | meaning |
 |---|---|
-| `GRISON_GW_URL`, `GRISON_GW_TOKEN` | Ghostwriter — GraphQL API token |
-| `GRISON_BS_URL`, `GRISON_BS_TOKEN_ID`, `GRISON_BS_TOKEN_SECRET` | BookStack — REST API token; only needed for methodology sync |
-| `GRISON_CF_CLIENT_ID`, `GRISON_CF_CLIENT_SECRET` | optional — Cloudflare Access service token, if your deployment sits behind CF Access |
+| `0` | clean — nothing to fix, nothing failed |
+| `1` | ran to completion and found real problems (an invalid document, a collision, a withheld mass-change, a failed sync phase) |
+| `2` | could not run at all — e.g. `validate`/`status` found no workspace or were given a bad path, or `sync` hit an incompatible Ghostwriter schema before its first fetch |
 
-## Settings
+## Commands
 
-Two more keys in the same file — non-secret behavior toggles, same env-var-overrides-file
-precedence:
+- **`grison parse <path…> [--scanner NAME] [-o DIR] [--finding-type TYPE] [--min-severity SPEC] [--dry-run]`**
+  — turn a scanner export into markdown findings under `findings/inbox/` (default) or
+  `-o DIR`. Fully offline; auto-detects the scanner from file content, or force it with
+  `--scanner`. Supported: Acunetix, Burp Suite, Nessus, Nmap, OpenVAS, Qualys
+  (network scan and WAS export alike), sslyze, OWASP ZAP.
 
-| Key | Values | Default | Does |
-|---|---|---|---|
-| `GRISON_GIT` | `commit` | off | drive git around `sync`/`parse`: commit a checkpoint of any dirty tree before the run, then commit the result after (`grison: sync (...)`, `grison: parse <scanner>`) — only when the workspace root already sits inside a git repo. grison never `init`s, pushes, branches, or touches a remote; `--dry-run` commits nothing; any git failure is a warning, never a command failure. |
-| `GRISON_CLAUDE_MD` | `off` | on | scaffold a `CLAUDE.md` operator-notes file on first bootstrap (never overwritten if one already exists) |
+- **`grison status [--remote] [--json]`** — a whole-workspace overview: per-area
+  counts (clean/edited/new/deleted/moved/invalid/unknown), plus any live collision
+  sidecar, and when each phase last synced. Offline by default; `--remote` also
+  contacts BookStack and dry-run-classifies the wiki phase.
+
+- **`grison validate [PATHS…] [--json] [--deleted-ok]`** — the format checker, offline,
+  no credentials, no network. Runs from anywhere inside the workspace (walks up to
+  `.grison/`, like `git`). Without `PATHS`, checks everything. One line per failure:
+  `path:line: RULE-ID message — fix`.
+
+- **`grison sync [--dry-run] [--force-local PATH] [--force-remote PATH] [--json] [--verbose]`**
+  — reconcile with Ghostwriter and (if configured) BookStack. Bootstraps on first run.
+
+- **`grison undo [SNAPSHOT] [--list]`** — reverse a whole sync run's remote writes,
+  newest write first, guarded by the same pre-write re-fetch check the forward sync
+  uses (a record changed since the snapshot is reported, never silently overwritten).
+  One snapshot per `grison sync` run, kept under `.grison/snapshots/`; the newest 10
+  are kept, older ones pruned automatically. Owner-only — the scaffolded
+  `.claude/settings.json` denies an agent both `grison sync` and `grison undo`.
+
+- **`grison scaffold [--force]`** — (re)generate every scaffolded file on demand (e.g.
+  after upgrading grison): `.grison/SPEC.md`, `.grison/templates/`,
+  `.grison/terms.txt`, `CLAUDE.md`, `.claude/settings.json`, the root `.gitignore`'s
+  collision-sidecar entry, and (in a git repo) the `pre-commit` hook. Runs
+  automatically on every `grison sync`/`grison parse` too.
+
+## Agent-proofing
+
+Every workspace is scaffolded to survive an AI agent editing it unsupervised:
+
+- **`CLAUDE.md`** — generated agent instructions: layout, naming, frontmatter
+  tables, the evidence/image line forms, and "run `grison validate` before you
+  finish; fix every failure; never work around one." Self-healing while unmodified
+  and stale (an old grison/spec marker); a hand-edited copy is left alone.
+- **`.claude/settings.json` deny-list** — denies `Read` on the genuinely private
+  `.grison/` entries (`env`, `state/`, `snapshots/`, `lock`, `terms.txt`), denies
+  `Edit`/`Write` on all of `.grison/` and on every read-only mirror
+  (`project.md`, `.report.yml`, `.book.yml`, `.chapter.yml`, `.shelves/**`), and
+  denies the Bash text `grison sync`/`grison undo` in any spelling (advisory, not a
+  sandbox — see the module's own caveat). Self-healing on every run.
+- **A `PostToolUse` hook** (`grison hook post-edit`) validates only the file an agent
+  just edited (or deleted) and prints the failures back to it. It can never block the
+  edit — a `PostToolUse` hook runs after the tool call already happened — it only
+  informs.
+- **A git `pre-commit` hook** runs a whole-workspace `grison validate` and blocks the
+  commit on failure. An existing, non-grison `pre-commit` hook is never overwritten;
+  the text to add by hand is printed instead.
+
+## Supported remotes
+
+- **Ghostwriter ≥ 7.2.0** (feature-gated, not version-string-checked: grison verifies
+  the live GraphQL schema has what its own queries/mutations need, via a cached
+  fingerprint probe with a full introspection fallback on drift). Tested against
+  7.2.6.
+- **BookStack**, tested against the 26.05.x REST API. There is no equivalent hard
+  schema gate for BookStack.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability and what grison does
+(and doesn't do) with your credentials.
+
+## Spec
+
+The full workspace-format spec, with a rule id for every check `grison validate`
+performs, is [`docs/workspace-format.md`](docs/workspace-format.md).
 
 ## License
 
