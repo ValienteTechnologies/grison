@@ -200,8 +200,10 @@ couldn't run":
 
 - **`grison status [--remote] [--json]`** — a whole-workspace overview: per-area
   counts (clean/edited/new/deleted/moved/invalid/unknown), plus any live collision
-  sidecar, and when each phase last synced. Offline by default; `--remote` also
-  contacts BookStack and dry-run-classifies the wiki phase.
+  sidecar, and when each phase last synced. Offline by default; `--remote` contacts
+  Ghostwriter and BookStack and dry-run classifies every phase of `grison sync`
+  (report, evidence, narrative/notes, findings, wiki), printing per-kind pending
+  push/pull/collision counts and problem paths without writing anything.
 
 - **`grison validate [PATHS…] [--json] [--deleted-ok]`** — the format checker, offline,
   no credentials, no network. Runs from anywhere inside the workspace (walks up to
@@ -230,8 +232,9 @@ Every workspace is scaffolded to survive an AI agent editing it unsupervised:
 
 - **`CLAUDE.md`** — generated agent instructions: layout, naming, frontmatter
   tables, the evidence/image line forms, and "run `grison validate` before you
-  finish; fix every failure; never work around one." Self-healing while unmodified
-  and stale (an old grison/spec marker); a hand-edited copy is left alone.
+  finish; fix every failure; never work around one." Regenerated when its marker is
+  stale; a stale, hand-edited copy fails `grison validate` (WS-012) until
+  `grison scaffold --force` regenerates it.
 - **`.claude/settings.json` deny-list** — denies `Read` on the genuinely private
   `.grison/` entries (`env`, `state/`, `snapshots/`, `lock`, `terms.txt`), denies
   `Edit`/`Write` on all of `.grison/` and on every read-only mirror
