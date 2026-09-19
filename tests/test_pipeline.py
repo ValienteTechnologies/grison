@@ -5,8 +5,10 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+
 from grison.formats import finding as finding_fmt
-from grison.sinks import run_parse
+from grison.sinks import ParsePathNotFound, run_parse
 
 _FIX = Path(__file__).parent / "fixtures" / "scanners"
 _ALL_SCANNERS = {"acunetix", "burp", "nessus", "nmap", "openvas", "qualys", "sslyze", "zap"}
@@ -72,3 +74,29 @@ def test_single_file_and_min_severity(tmp_path: Path) -> None:
     summary = run_parse([_FIX / "burp_sample.xml"], out, min_severity="critical")
     assert summary.files_parsed == {"burp": 1}
     assert summary.findings == []  # filtered out by severity
+    assert summary.errors == []  # zero findings from a recognized file is not a failure
+
+
+def test_unrecognized_file_is_recorded_as_an_error_too(tmp_path: Path) -> None:
+    # Bug fix: an unrecognized file used to only land in `skipped_files`, never
+    # `errors` — the CLI only looks at `errors` to decide the exit code, so `grison
+    # parse` exited 0 having silently done nothing with it.
+    out = _out_dir(tmp_path)
+    notes = tmp_path / "notes.txt"
+    notes.write_text("not a scan\n")
+    summary = run_parse([notes], out)
+    assert any("notes.txt" in e and "unrecognized" in e for e in summary.errors)
+
+
+def test_missing_path_raises_before_any_file_is_touched(tmp_path: Path) -> None:
+    # Bug fix: a nonexistent path argument used to be silently added to
+    # `skipped_files` and the run proceeded (and exited 0) — it must instead refuse
+    # to run at all, so a typo'd path never comes back as a quiet success.
+    out = _out_dir(tmp_path)
+    good = _FIX / "burp_sample.xml"
+    missing = tmp_path / "no-such-file.xml"
+
+    with pytest.raises(ParsePathNotFound, match="no-such-file.xml"):
+        run_parse([good, missing], out)
+
+    assert not out.exists()  # not even the valid path was processed

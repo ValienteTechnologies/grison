@@ -53,12 +53,23 @@ def render_hook(root: Path) -> str:
     :func:`grison.gitdrive.commit` around grison's own commits (``GRISON_GIT=commit``)
     so a sync/parse-triggered commit — which already validated in Python before ever
     calling ``git commit`` — doesn't pay for a second, redundant whole-workspace
-    validate; see that module's docstring for the other half of this contract."""
+    validate; see that module's docstring for the other half of this contract.
+
+    ``command -v grison`` is checked explicitly before running it: a bare, unguarded
+    ``grison validate`` on a PATH without grison installed (a fresh clone before
+    ``uv sync``/``pip install``, a shell that doesn't source the profile a hook runs
+    under) must fail the commit with a clear, named reason — never a confusing shell
+    "command not found" mistaken for something else, and never a silent pass."""
     return f"""\
 #!/bin/sh
 {_MARKER}
 if [ -n "$GRISON_SKIP_PRECOMMIT_VALIDATE" ]; then
     exit 0
+fi
+if ! command -v grison >/dev/null 2>&1; then
+    echo "grison: commit blocked — the 'grison' command is not on PATH" >&2
+    echo "(install it, e.g. 'uv sync', or bypass with 'git commit --no-verify')" >&2
+    exit 1
 fi
 cd {_sh_quote(str(root))} || exit 1
 grison validate

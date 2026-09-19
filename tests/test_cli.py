@@ -100,10 +100,8 @@ def test_parse_bootstraps_and_status_reports_valid(
     # `grison status <path>` (v1 per-file finding validation) is gone — `grison
     # validate` is the offline per-document validity command now, and the new
     # `grison status` (no paths) is a whole-workspace overview instead. Findings are
-    # not yet engine-managed (a later step moves them onto format v2 — `grison
-    # parse`'s own output is still v1-shaped, see grison/remote/methodology.py's
-    # sibling modules for findings), so `grison status` reports them as a plain file
-    # count, not a validity verdict.
+    # engine-managed (format v2) same as everything else, so `grison status` reports
+    # a real per-record breakdown for them too, not just a plain file count.
     #
     # tests changed on purpose (bug fix): `grison parse` in an empty directory now
     # scaffolds the COMPLETE workspace via `bootstrap_workspace` (spec §10 /
@@ -158,14 +156,47 @@ def test_parse_in_empty_dir_then_validate_exits_clean(
     assert r2.exit_code == 0, r2.output
 
 
-def test_parse_skips_unrecognized(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_unrecognized_file_exits_1_naming_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Bug fix: a file no scanner recognizes used to only land in skipped_files
+    # (never `errors`), so `grison parse` exited 0 having done nothing useful with
+    # it. Policy: exit 1, with the file named.
     scans = tmp_path / "scans"
     scans.mkdir()
     (scans / "notes.txt").write_text("not a scan\n")
     monkeypatch.chdir(tmp_path)
     r = _runner.invoke(app, ["parse", str(scans)])
-    assert r.exit_code == 0
+    assert r.exit_code == 1
     assert "skipped" in r.output and "notes.txt" in r.output
+
+
+def test_parse_nonexistent_path_exits_2_before_any_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Bug fix: a path argument that doesn't exist is "could not run", not "nothing
+    # to do" — exit 2, and nothing gets scaffolded/parsed/written.
+    monkeypatch.chdir(tmp_path)
+    missing = tmp_path / "does-not-exist"
+    r = _runner.invoke(app, ["parse", str(missing)])
+    assert r.exit_code == 2
+    assert "does-not-exist" in r.output
+    assert not (tmp_path / "findings").exists()
+    assert not (tmp_path / ".grison").exists()
+
+
+def test_parse_zero_findings_from_recognized_file_exits_0(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A recognized file that simply produces no findings (e.g. everything filtered
+    # out by --min-severity) is a clean, successful run — exit 0, not an error.
+    monkeypatch.chdir(tmp_path)
+    r = _runner.invoke(
+        app,
+        ["parse", str(_FIX / "burp_sample.xml"), "--min-severity", "critical"],
+    )
+    assert r.exit_code == 0, r.output
+    assert list((tmp_path / "findings" / "inbox").glob("*.md")) == []
 
 
 def test_parse_dry_run_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

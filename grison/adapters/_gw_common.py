@@ -10,26 +10,23 @@ narrative/notes adapters need. Both are built from the same live client + index.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from grison.adapters._slug import slugify as _slugify
 from grison.index import Index, IndexKind
 from grison.markdown.refs import LocalRef, RemoteRef
 from grison.markdown.refscan import decode_ref_path
 from grison.remote.ghostwriter import GhostwriterClient
-
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def slugify(name: str) -> str:
     """A filesystem-safe, ``[a-z0-9][a-z0-9._-]*``-matching slug from a report title
     — used once, on pull, to name a brand-new report directory (D3/D4: file and
     directory names are stable handles, derived once and never renamed)."""
-    slug = _SLUG_RE.sub("-", name.strip().lower()).strip("-")
-    return slug or "report"
+    return _slugify(name, fallback="report")
 
 
 @dataclass
@@ -138,10 +135,9 @@ class GWReportContext:
     def evidence_for_report(self, report_id: int) -> dict[int, dict[str, Any]]:
         """Every ``gw.evidence`` row belonging to ``report_id``, in the small shape
         :class:`IndexRefResolver` needs (``friendly_name``/``caption``/``description``)
-        to carry a pulled embed's caption/description through on ``to_local`` —
-        mirroring :class:`grison.adapters.gw_findings.GwRefResolver`'s own
-        ``evidence_rows``. Fetched org-wide at most once per sync run (Ghostwriter has
-        no report-scoped evidence query) and cached on this context, filtered by
+        to carry a pulled embed's caption/description through on ``to_local``.
+        Fetched org-wide at most once per sync run (Ghostwriter has no
+        report-scoped evidence query) and cached on this context, filtered by
         report here."""
         if self._evidence_cache is None:
             self._evidence_cache = list(self.client.fetch_evidence())
@@ -187,16 +183,18 @@ class IndexRefResolver:
     excludes them, see that function's docstring) never has to supply it.
     ``to_local`` carries the evidence row's OWN caption/description through to the
     rendered ``![caption](path "description")`` line whenever ``evidence_rows`` is
-    given, mirroring :class:`grison.adapters.gw_findings.GwRefResolver` exactly (a
-    pulled narrative section/note used to always lose a captioned embed's
+    given (a pulled narrative section/note used to always lose a captioned embed's
     caption/description here — the bug this field exists to fix), AND resolves a
     cross-reference span by NAME when ``remote.id`` is ``None`` (a cross-
     reference's native HTML carries only its ``ref`` name, never an id — see
-    :mod:`grison.markdown.converter`'s module docstring), again mirroring
-    :class:`~grison.adapters.gw_findings.GwRefResolver`'s identical fallback — a
-    pulled narrative section/note cross-reference used to always round-trip as
-    the unresolved ``gw:evidence-ref:name=...`` placeholder here, even for an
-    evidence row synced down long ago. An unresolved reference is never fatal
+    :mod:`grison.markdown.converter`'s module docstring) — a pulled narrative
+    section/note cross-reference used to always round-trip as the unresolved
+    ``gw:evidence-ref:name=...`` placeholder here, even for an evidence row synced
+    down long ago. This is the ONE resolver for every report-scoped text kind
+    (narrative sections, notes, reported findings) — a near-identical resolver used
+    to be hand-duplicated in :mod:`grison.adapters.gw_findings` as
+    ``GwRefResolver``, and the same bugs above were fixed twice; that copy is gone.
+    An unresolved reference is never fatal
     by itself (see the converter's own "unresolved references" handling), so
     this is a safe, honest floor to build on rather than a stub: PUSH of an
     unknown reference is a clear ``ConverterError`` (surfaced by the validator
@@ -221,6 +219,12 @@ class IndexRefResolver:
 
     def _rows(self) -> dict[int, dict[str, Any]]:
         return self.evidence_rows() if callable(self.evidence_rows) else self.evidence_rows
+
+    def rows(self) -> dict[int, dict[str, Any]]:
+        """Public alias of :meth:`_rows` — for a caller that needs the resolved
+        ``{id: {friendly_name, caption, description}}`` mapping itself (e.g. to
+        build its own name -> id lookup), not just single-id resolution."""
+        return self._rows()
 
     def _id_for_local_path(self, path: str) -> int | None:
         if not path.startswith("evidence/"):
@@ -263,11 +267,9 @@ class IndexRefResolver:
             # ``ref`` name (see grison.markdown.converter's module docstring) —
             # so ``remote.id`` is ALWAYS ``None`` for one; without this fallback
             # this resolver could never resolve a cross-reference at all (every
-            # narrative section/note cross-reference round-tripped as the
-            # unresolved `` `gw:evidence-ref:name=...` `` placeholder, even for
-            # an evidence row synced down long ago), unlike
-            # :class:`grison.adapters.gw_findings.GwRefResolver`'s identical
-            # by-name fallback for the exact same case.
+            # narrative section/note/reported-finding cross-reference round-
+            # tripped as the unresolved `` `gw:evidence-ref:name=...` ``
+            # placeholder here, even for an evidence row synced down long ago).
             eid = next(
                 (i for i, r in self._rows().items() if r.get("friendly_name") == remote.name),
                 None,

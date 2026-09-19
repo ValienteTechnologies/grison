@@ -20,9 +20,8 @@ uv run mypy grison            # type checking
 uv run pytest -q              # unit + property + e2e tests
 ```
 
-CI (`.github/workflows/ci.yml`) currently runs `ruff check` and `pytest` on 3.11,
-3.12, and 3.13; run `ruff format --check` and `mypy grison` yourself before opening a
-PR, since they aren't wired into that workflow yet.
+CI (`.github/workflows/ci.yml`) runs all four gates above — `ruff check`, `ruff
+format --check`, `mypy grison`, and `pytest` — on 3.11, 3.12, and 3.13.
 
 ## How tests are organized
 

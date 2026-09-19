@@ -1168,13 +1168,6 @@ def _discover_library_files(root: Path) -> list[PurePosixPath]:
     return [PurePosixPath(_rel(root, p)) for p in sorted(lib_dir.glob("*.md"))]
 
 
-def _discover_inbox_files(root: Path) -> list[PurePosixPath]:
-    inbox_dir = root / "findings" / "inbox"
-    if not inbox_dir.is_dir():
-        return []
-    return [PurePosixPath(_rel(root, p)) for p in sorted(inbox_dir.glob("*.md"))]
-
-
 def _validate_inbox_dir(
     root: Path, index: Index | None, cterms: list[ConfidentialTerm]
 ) -> list[Failure]:

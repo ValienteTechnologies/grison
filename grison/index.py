@@ -12,10 +12,10 @@ sorted and every record sits on its own line, so two branches that each add or m
 a different record produce a diff a plain three-way text merge (``git merge-file``,
 no semantic JSON merge driver needed) can usually reconcile on its own.
 
-This module is not wired into the sync engine yet — that's the later engine step.
-It's a complete, independently-tested primitive: the engine will call
-:meth:`Index.load`/:meth:`Index.set`/:meth:`Index.move`/:meth:`Index.remove` and
-:meth:`Index.save` around its reconcile loop.
+A complete, independently-tested primitive that the sync engine's reconcile loop
+drives directly: every adapter/phase in :mod:`grison.cli` and :mod:`grison.adapters`
+calls :meth:`Index.load`/:meth:`Index.set`/:meth:`Index.move`/:meth:`Index.remove` and
+:meth:`Index.save` around its own reconcile loop.
 """
 
 from __future__ import annotations

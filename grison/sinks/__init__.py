@@ -3,6 +3,6 @@
 from __future__ import annotations
 
 from grison.sinks.file_sink import FileSink, SinkResult, slugify
-from grison.sinks.pipeline import ParseSummary, run_parse
+from grison.sinks.pipeline import ParsePathNotFound, ParseSummary, run_parse
 
-__all__ = ["FileSink", "ParseSummary", "SinkResult", "run_parse", "slugify"]
+__all__ = ["FileSink", "ParsePathNotFound", "ParseSummary", "SinkResult", "run_parse", "slugify"]
