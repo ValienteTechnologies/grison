@@ -30,6 +30,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from grison.adapters._gw_common import GWContext
+from grison.engine.filesets import caption_only_canonical
 from grison.engine.model import RemoteRecord
 from grison.errors import GrisonError
 
@@ -158,3 +159,12 @@ class GwEvidenceAdapter:
     def remote_label(self, data: Any) -> str:
         name = data.get("filename") or "(unknown)" if isinstance(data, dict) else str(data)
         return f'"{name}" (evidence)'
+
+    def canonical_remote(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Undo-only (:class:`grison.engine.adapter.PushUndoAdapter`): the
+        caption-push drift check `grison.engine.undo` runs before restoring a
+        pre-image over a record that may have been edited again since — see
+        :func:`~grison.engine.filesets.caption_only_canonical`'s docstring for
+        why this never needs bytes (D1: immutable per id) and is never called
+        for a genuine ``sync_fileset`` classification, only for undo replay."""
+        return caption_only_canonical(data)

@@ -91,6 +91,24 @@ def test_ref007_wrong_wiki_image_spelling(tmp_path: Path) -> None:
     assert "REF-007" in rule_ids(validate_workspace(root))
 
 
+def test_evidence_collision_sidecar_never_counts_toward_ref003(tmp_path: Path) -> None:
+    """Item 5 (fix-d): a live collision sidecar (``<name>.remote.<ext>``,
+    ENGINE.md §8) is never a real evidence file — the validator's evidence-
+    directory scan must exclude it, the same way ``grison.engine.filesets``'s own
+    local scan and ``grison status``'s sidecar-aware counts already do.
+    Demonstrated with an extension-less shadowed file (``readme`` -> sidecar
+    ``readme.remote``): without the exclusion,
+    ``PurePosixPath("readme.remote").stem == "readme"`` collides with the real
+    file's own stem — a false REF-003 that could never fire for any REAL pair of
+    evidence files (every real one has an extension — see
+    ``grison.engine.filesets``'s module docstring)."""
+    root = copy_fixture(tmp_path)
+    ev = root / "findings" / "reports" / "14-acme-corp" / "evidence"
+    (ev / "readme").write_text("not really an image, just proving the exclusion\n")
+    (ev / "readme.remote").write_text("a stale collision sidecar, never a real file\n")
+    assert "REF-003" not in rule_ids(validate_workspace(root))
+
+
 def test_non_ascii_evidence_filename_validates(tmp_path: Path) -> None:
     """markdown-it-py percent-encodes non-ASCII bytes in an image destination
     (``evidence/Phishing_Sonu%C3%A7lar%C4%B1.png`` for the author's own

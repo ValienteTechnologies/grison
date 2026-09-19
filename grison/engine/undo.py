@@ -38,10 +38,11 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from grison.engine.adapter import CreateUndoAdapter, RestorableUndoAdapter
+from grison.engine.adapter import CreateUndoAdapter, PushUndoAdapter, RestorableUndoAdapter
 from grison.engine.events import verb_for_outcome
 from grison.engine.state import StateStore
 from grison.fsio import atomic_write_bytes, atomic_write_text, ensure_private_dir
+from grison.hashing import digest
 from grison.index import Index, IndexKind
 
 SNAPSHOTS_DIR = ".grison/snapshots"
@@ -66,6 +67,18 @@ class UndoOp:
     same path (rather than deleting the file, which would lose the author's
     original words, or leaving it in its post-create rendered form, which was
     never what the author wrote) — see ``_replay_one``'s "create" branch."""
+    post_write_hash: str | None = None
+    """For a ``push``/``move_edit`` op only: the canonical hash of what the
+    record looked like immediately AFTER this op's write (the same hash the
+    forward apply loop stamps as the new ``state`` base — ENGINE.md §6's
+    canonicalisation-after-push, reused here) — what ``_replay_one`` compares a
+    fresh re-fetch against before restoring ``remote_preimage`` over it, via the
+    same :func:`grison.engine.apply.refetch_guard` the forward loop uses for its
+    own pre-write guard, so a record edited again since this run's write is
+    reported instead of clobbered. ``None`` only for an older snapshot recorded
+    before this field existed, or an op this guard doesn't apply to
+    (create/delete_remote use existence checks instead — see ``_replay_one``) —
+    ``refetch_guard`` already treats ``expected_hash=None`` as "not drifted"."""
 
 
 @dataclass
@@ -245,6 +258,31 @@ def _replay_one(  # noqa: PLR0912
 
     if op.outcome in ("push", "move_edit"):
         if op.id is None or op.remote_preimage is None:
+            return
+        if not isinstance(adapter, PushUndoAdapter):
+            problems.append(f"{op.path}: adapter for kind {op.kind!r} cannot verify it is "
+                            "still safe to restore — not restoring")
+            return
+        # The same pre-write re-fetch guard the forward apply loop runs before
+        # ANY remote write (ENGINE.md §3), turned around for undo: a record
+        # edited again since the write this op undoes must be reported, not
+        # silently overwritten with the older `remote_preimage` — this is the
+        # gap the module docstring calls out ("unlike the create and
+        # delete_remote branches"). Local import: `grison.engine.apply` imports
+        # this module (`Snapshot`/`UndoOp`) at its own top level, so importing it
+        # back from here at module scope would be circular.
+        from grison.engine.apply import refetch_guard
+        rid = op.id
+        _fresh, drifted = refetch_guard(
+            refetch=lambda: adapter.refetch(ctx, rid),
+            expected_hash=op.post_write_hash,
+            canonical_hash=lambda fresh: digest(adapter.canonical_remote(fresh.data)),
+            forced=False,
+        )
+        if drifted:
+            problems.append(f"{op.path}: changed since the sync that wrote it — "
+                            "not restoring (resolve by hand)")
+            _emit(on_event, f"failed {op.path}: changed since the sync, not restoring")
             return
         adapter.restore(ctx, op.remote_preimage)
         _emit(on_event, f"push {op.path} — restored pre-undo content")
