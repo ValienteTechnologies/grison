@@ -13,7 +13,7 @@ naming nothing) that motivated this factory.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from grison.engine.model import Event, VetoSeverity
@@ -98,7 +98,7 @@ def render_text_lines(events: Iterable[Event], *, verbose: bool = False) -> list
     ]
 
 
-def render_json(events: Iterable[Event], *, summary: dict[str, object] | None = None) -> str:
+def render_json(events: Iterable[Event], *, summary: Mapping[str, object] | None = None) -> str:
     """One JSON object per event (ALWAYS all of them, including INFO-severity —
     ``--json`` is for machine consumers that can filter for themselves), plus a final
     summary object — stable keys, one object per line (JSON Lines) so a consumer can

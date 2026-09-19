@@ -236,6 +236,8 @@ def _restore_local_mirror(target: Path, adapter: Any, restored: Any, op: UndoOp)
     if body_b64 is not None:
         atomic_write_bytes(target, base64.b64decode(body_b64))
         return
+    if op.path is None:
+        return
     render_local = getattr(adapter, "render_local", None)
     if callable(render_local):
         atomic_write_text(target, render_local(restored.data, path=PurePosixPath(op.path)))

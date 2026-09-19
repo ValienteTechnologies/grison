@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from xml.etree.ElementTree import Element
+
 import defusedxml.ElementTree as ET
 
 from grison.scanners.ir import ScanFinding, Severity
@@ -33,7 +35,7 @@ class QualysScanner(Scanner):
                 "Expected WAS_SCAN_REPORT or SCAN."
             )
 
-    def _parse_was(self, root: ET.Element, opts: ImportOptions) -> list[ScanFinding]:
+    def _parse_was(self, root: Element, opts: ImportOptions) -> list[ScanFinding]:
         # Build glossary: QID -> {title, severity, description, solution, ...}
         glossary: dict[str, dict] = {}
         for qid_el in root.findall(".//GLOSSARY/QID_LIST/QID"):
@@ -77,7 +79,7 @@ class QualysScanner(Scanner):
 
         return self._build_findings(aggregated, opts)
 
-    def _parse_vuln(self, root: ET.Element, opts: ImportOptions) -> list[ScanFinding]:
+    def _parse_vuln(self, root: Element, opts: ImportOptions) -> list[ScanFinding]:
         aggregated: dict[str, dict] = {}
 
         for ip_el in root.findall(".//IP"):
