@@ -164,6 +164,24 @@ of them raises ``ConverterError`` naming what to do instead (pass ``refs=``):
   invent a three-way split to preserve it; write it outside code if it must stay
   active.
 
+  A real, unescaped Jinja ``{% raw %}...{% endraw %}`` region found in pulled
+  HTML (``_RAW_BLOCK_RE``) is a THIRD case, distinct from both of the above:
+  never emitted by grison's own push any more (the per-token mechanism above
+  replaced the old design that used it — see the proof reference below), but
+  real/legacy stored data can still carry one, and Jinja's own semantics say
+  everything between the tags is unconditionally literal. ``html_to_md``
+  resolves the whole region straight to its plain literal text — never to a
+  ``gw:`` active-expression marker, and never leaving the ``{% raw %}``/
+  ``{% endraw %}`` markers themselves in the markdown, so the very next push
+  re-escapes it (if needed) through the ONE per-token mechanism rather than
+  reproducing the (now-legacy) raw-wrap shape. This is what keeps the escaping
+  mechanism from ever nesting: a Jinja string-literal quoting expression
+  (``{{ '{{' }}``) found INSIDE a raw block would be self-defeating (a raw
+  block already disables evaluation of everything inside it, so the quoting
+  expression itself renders literally, unevaluated, instead of resolving to the
+  token it names) — grison's push never produces this shape because it never
+  emits ``{% raw %}`` in the first place.
+
   The legacy evidence forms (``{{.name}}``, ``{{.ref name}}``) are handled above,
   not by the active/literal distinction. Any OTHER dot-form (``{{.caption}}``,
   ``{{.caption name}}``, or a bare ``{{.name}}`` NOT alone in its paragraph) is
@@ -224,6 +242,25 @@ proving this). The complete list:
      indented sub-item); a THIRD (or deeper) level found in source HTML
      collapses into the same single sub-level rather than being rejected
      (see "Nesting" above).
+  7. **Non-ASCII (or otherwise CommonMark-insignificant) whitespace at a
+     rendered line's edge is dropped, the same as an ASCII space.** A real
+     TipTap editor routinely leaves a stray ``&nbsp;`` run in stored HTML
+     (confirmed against a live Ghostwriter 7.2.6 export); keeping it as
+     visible markdown content would be self-defeating, since markdown-it's
+     own CommonMark paragraph-content parser trims the exact same character
+     class (Python's ``str.strip()``, no args) on the very next push — so
+     ``_finalize_line`` trims that whole class up front instead of just the
+     literal space character, matching what the next round trip does to it
+     regardless.
+  8. **An empty or whitespace-only top-level ``<p>``/heading block is
+     dropped entirely, not kept as an empty markdown block.** A trailing
+     ``<p></p>`` or ``&nbsp;``-only paragraph (both real TipTap artifacts —
+     normalization 7 above is what makes the SECOND one empty too) would
+     otherwise leave a phantom multi-blank-line gap in the ``"\\n\\n".join``
+     output; real CommonMark collapses any run of blank lines between
+     blocks down to a single boundary on every reparse regardless, so
+     grison's own output reflects that collapse from the start
+     (``_render_top_level_blocks``) rather than drifting on the next round.
 
 Every one of these is a real, reported normalization — never a silent change —
 and every one keeps the converter's own output an immediate fixpoint: pushing
@@ -255,10 +292,15 @@ _INLINE_TAGS = {"strong", "code", "em", "a", "br"}
 _UNWRAP_TAGS = {"span"}
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 _ALLOWED_TAGS = _BLOCK_TAGS | _INLINE_TAGS | _UNWRAP_TAGS
-# Report-narrative fields (report.extraFields) use the same vocabulary as finding
-# fields plus headings — the finding converter rejects headings as a corruption
-# tripwire, so heading support is opt-in via ``headings=True`` and never loosens the
-# strict finding path.
+# Heading support is opt-in via ``headings=True`` (never loosened by default) — but
+# it is NOT narrative-only: a real Ghostwriter 7.2.6 TipTap editor emits h1-h6 in a
+# plain FINDING field too (confirmed against a live export,
+# ``tests/fixtures/lab-samples/gw-findings.json``'s library finding 3, whose stored
+# ``description`` is ``<h3>Overview</h3><p>...</p>`` — grison's finding adapters call
+# both converter functions with ``headings=True`` for exactly this reason). Every
+# tag the 7.2.6 editor is confirmed to emit (across the whole ``lab-samples/``
+# corpus — findings and wiki pages alike) is already on this allow-list or
+# ``_HEADING_TAGS`` below; no other block tag was found.
 
 # Ghostwriter's legacy dot-syntax: r"\{\{\s*\.([^\{\}]*?)\s*\}\}" verbatim from
 # html_rich_text.py — whitespace after "{{" and before "}}" is tolerated; the
@@ -281,6 +323,21 @@ _INLINE_SPECIAL_RE = re.compile(
     r"|\{%(?P<active_stmt>.*?)%\}"
     r"|\{#(?P<active_comment>.*?)#\}",
     re.DOTALL,
+)
+# A literal Jinja ``{% raw %}...{% endraw %}`` block found in STORED html — never
+# emitted by grison's own push any more (see ``_jinja_escape_html``'s per-token
+# design), but real data can still carry one (an older grison push, or a human
+# typing raw-block syntax directly in Ghostwriter's editor): Jinja's own semantics
+# say everything between the tags is literal, unconditionally, so ``html_to_md``
+# must resolve it to plain literal text — never to ``gw:`` active-expression code
+# spans, and never leaving the ``{% raw %}``/``{% endraw %}`` markers themselves in
+# the markdown (see module docstring, "Active template expressions"). Matched
+# non-greedily (DOTALL) so the FIRST ``{% endraw %}`` closes it, exactly like a real
+# Jinja lexer never nests raw blocks; an unmatched opener with no closer anywhere in
+# the field falls through to the ordinary active-statement handling below (unusual,
+# but such a field is already un-exportable either way, raw-wrapped or not).
+_RAW_BLOCK_RE = re.compile(
+    r"\{%-?\s*raw\s*-?%\}(?P<raw_content>.*?)\{%-?\s*endraw\s*-?%\}", re.DOTALL
 )
 _UNRESOLVED_RE = re.compile(r"^gw:evidence-ref:(?:id=(?P<id>\d+)|name=(?P<name>.*))$", re.DOTALL)
 _GW_REF_ENCODED_ATTR = "data-gw-ref-encoded"
@@ -400,7 +457,7 @@ def _md_escape_line_start(line: str) -> str:
     return line[:pos] + "\\" + line[pos:]
 
 
-def _finalize_line(text: str) -> str:
+def _finalize_line(text: str, on_loss: Callable[[str], None] | None = None) -> str:
     """Finalize each physical line of already-rendered inline content (a
     paragraph, or one list item's own line) before it's written out as its own
     markdown line: strip leading AND trailing whitespace (HTML collapses/
@@ -412,8 +469,30 @@ def _finalize_line(text: str) -> str:
     the next push — either way exactly backwards for content that was never
     meant to carry that whitespace), then escape a leading block-sigil-looking
     sequence so it can never be misread as a heading/list marker/blockquote/
-    fence either."""
-    return "\n".join(_md_escape_line_start(line.strip(" ")) for line in text.split("\n"))
+    fence either.
+
+    The strip uses Python's full (Unicode-aware) whitespace definition, matching
+    markdown-it-py's own ``rules_block/paragraph.py`` (``state.getLines(...).strip()``
+    — plain ``str.strip()``, same character class) — NOT just the ASCII space:
+    a non-breaking space (``\\xa0``, real corpus data — TipTap/GW's own editor
+    leaves stray ``&nbsp;`` runs in stored HTML) left in literally would round-trip
+    as real markdown content, but the very next ``md_to_html`` re-parse silently
+    trims it away as commonmark-insignificant regardless — a construct that never
+    reaches a stable fixpoint otherwise. Reported via ``on_loss`` only when
+    something OTHER than a plain ASCII space gets dropped this way (a plain-space
+    trim is not, matching this function's own prior behavior — see module
+    docstring's normalization list)."""
+    lines = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped != line.strip(" "):
+            _report_loss(
+                on_loss,
+                "non-breaking or other non-ASCII whitespace at a line edge dropped "
+                "(normalization; matches CommonMark's own paragraph-content trim)",
+            )
+        lines.append(_md_escape_line_start(stripped))
+    return "\n".join(lines)
 
 
 def _fence_code(text: str) -> str:
@@ -552,7 +631,8 @@ def html_to_md(
     on_loss: Callable[[str], None] | None = None,
 ) -> str:
     """Convert a GW rich-text HTML fragment to markdown. ``headings=True`` also
-    accepts ``<h1>``-``<h6>`` (for report-narrative fields, not finding fields).
+    accepts ``<h1>``-``<h6>`` — grison's finding adapters pass this too (a real
+    TipTap editor emits headings in finding fields as well, not just narrative).
 
     ``refs``, if given, resolves embedded-evidence/cross-reference constructs (see
     the module docstring); without one, encountering any of them raises
@@ -570,7 +650,38 @@ def html_to_md(
     if len(builder.stack) != 1:
         raise ConverterError(f"unclosed HTML tag: <{builder.stack[-1].tag}>")
     blocks = _merge_adjacent_top_level_lists(_group_top_level(builder.root.children), on_loss)
-    return "\n\n".join(_render_block(block, refs, on_loss) for block in blocks)
+    return "\n\n".join(_render_top_level_blocks(blocks, refs, on_loss))
+
+
+def _render_top_level_blocks(
+    blocks: list[_Node], refs: RefResolver | None, on_loss: Callable[[str], None] | None
+) -> list[str]:
+    """Render each top-level block, DROPPING a ``<p>``/heading that renders to
+    nothing (an empty ``<p></p>``, or one whose only content is CommonMark-
+    insignificant whitespace — see ``_finalize_line``) instead of keeping it as an
+    empty string in the join. A real GW export (``&nbsp;``-padded or genuinely
+    empty trailing paragraphs — TipTap's own editor leaves these behind routinely)
+    otherwise leaves a PHANTOM multi-blank-line gap in the output: harmless to a
+    human reader, but not to the next round trip — CommonMark itself collapses any
+    run of blank lines between real blocks down to a single block boundary on
+    every reparse, so ``canonical(md_to_html(html_to_md(h)))`` would drift from
+    ``canonical(h)`` (the exact bug behind a fresh pull's spurious one-time settle
+    push) unless grison's OWN output already reflects that collapse up front. A
+    ``<ul>``/``<ol>`` is never dropped this way — an empty list is already
+    vanishingly unlikely real data and has no analogous "collapses to nothing"
+    CommonMark behavior to match."""
+    rendered: list[str] = []
+    for block in blocks:
+        text = _render_block(block, refs, on_loss)
+        if text == "" and block.tag != "ul" and block.tag != "ol":
+            _report_loss(
+                on_loss,
+                f"empty/whitespace-only <{block.tag}> block dropped "
+                "(no markdown representation)",
+            )
+            continue
+        rendered.append(text)
+    return rendered
 
 
 def _group_top_level(children: list[_Node | str]) -> list[_Node]:
@@ -697,7 +808,7 @@ def _render_block(
             if embed is not None:
                 return embed
         _report_dropped_attrs(node, on_loss)
-        return _finalize_line(_render_inline(node.children, refs, on_loss))
+        return _finalize_line(_render_inline(node.children, refs, on_loss), on_loss)
     if node.tag in _HEADING_TAGS:
         _report_dropped_attrs(node, on_loss)
         return "#" * int(node.tag[1]) + " " + _render_inline(node.children, refs, on_loss)
@@ -792,11 +903,11 @@ def _render_li(
         inline_children = [
             c for c in li.children if not (isinstance(c, _Node) and c.tag in _LIST_TAGS)
         ]
-        head = _finalize_line(_render_inline(inline_children, refs, on_loss))
+        head = _finalize_line(_render_inline(inline_children, refs, on_loss), on_loss)
         return [head, *nested]
     if len(blocks) == 1 and blocks[0].tag == "p":
         _report_dropped_attrs(blocks[0], on_loss)
-        head = _finalize_line(_render_inline(blocks[0].children, refs, on_loss))
+        head = _finalize_line(_render_inline(blocks[0].children, refs, on_loss), on_loss)
         return [head, *nested]
 
     lines: list[str] = []
@@ -814,7 +925,7 @@ def _render_li(
             if embed is not None:
                 text = embed
             else:
-                text = _finalize_line(_render_inline(b.children, refs, on_loss))
+                text = _finalize_line(_render_inline(b.children, refs, on_loss), on_loss)
         if lines:
             lines.append("")
         lines.append(text)
@@ -1162,11 +1273,38 @@ def _render_cross_ref_span(
 def _render_text_run(
     text: str, refs: RefResolver | None, on_loss: Callable[[str], None] | None
 ) -> str:
-    """Render one literal HTML text node as markdown: a D10 escape token (see
-    ``_jinja_escape_html``) unwraps to the literal delimiter text it stands
-    for first, then legacy ``.ref`` cross-refs, then active (un-escaped)
-    Jinja delimiters (see module docstring); anything else is escaped
-    literal text."""
+    """Render one literal HTML text node as markdown: a ``{% raw %}...{% endraw %}``
+    region (see ``_RAW_BLOCK_RE``) resolves to its own plain literal text FIRST and
+    unconditionally — Jinja's raw block already means "never evaluate this", so
+    nothing inside one is ever treated as an active expression or re-escaped as a
+    ``gw:`` marker, matching D10's contract that the escaping mechanism is never
+    nested; everything OUTSIDE a raw region then goes through the ordinary special-
+    form scan: a D10 escape token (see ``_jinja_escape_html``) unwraps to the
+    literal delimiter text it stands for first, then legacy ``.ref`` cross-refs,
+    then active (un-escaped) Jinja delimiters (see module docstring); anything else
+    is escaped literal text."""
+    out: list[str] = []
+    pos = 0
+    for rm in _RAW_BLOCK_RE.finditer(text):
+        if rm.start() > pos:
+            out.append(_render_text_run_specials(text[pos : rm.start()], refs, on_loss))
+        literal = _JINJA_STRLIT_RE.sub(lambda m: m.group(1), rm.group("raw_content"))
+        out.append(_md_escape_run(literal))
+        _report_loss(
+            on_loss,
+            "{% raw %}...{% endraw %} block resolved to its literal text (normalization)",
+        )
+        pos = rm.end()
+    out.append(_render_text_run_specials(text[pos:], refs, on_loss))
+    return "".join(out)
+
+
+def _render_text_run_specials(
+    text: str, refs: RefResolver | None, on_loss: Callable[[str], None] | None
+) -> str:
+    """The non-raw-block half of :func:`_render_text_run`'s scan — factored out so
+    a raw region can bypass it entirely instead of being scanned for (and
+    misinterpreted as) an active expression."""
     out: list[str] = []
     pos = 0
     for m in _INLINE_SPECIAL_RE.finditer(text):
@@ -1214,6 +1352,25 @@ def _render_dot_form_inline(
     )
 
 
+def _unwrap_jinja_escapes(text: str) -> str:
+    """Resolve every D10 escape token (``_jinja_escape_html``'s per-token form) AND
+    every ``{% raw %}...{% endraw %}`` region back to plain literal text — used for
+    ``<code>`` content, which (per module docstring) is always literal regardless of
+    shape, so a raw-wrap found there is exactly as redundant as it is in plain text
+    and resolves the same way (see ``_render_text_run``); any D10 strlit token found
+    INSIDE a raw region (only possible in already-malformed legacy data, since
+    grison's own push never nests them) is unwrapped too, defensively."""
+    out: list[str] = []
+    pos = 0
+    for rm in _RAW_BLOCK_RE.finditer(text):
+        if rm.start() > pos:
+            out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), text[pos : rm.start()]))
+        out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), rm.group("raw_content")))
+        pos = rm.end()
+    out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), text[pos:]))
+    return "".join(out)
+
+
 def _render_code_text(nodes: list[_Node | str]) -> str:
     """<code> content is never inline-parsed, so just flatten its text (unwrapping
     any cosmetic <span>, and unwrapping each D10 escape token — see
@@ -1224,7 +1381,7 @@ def _render_code_text(nodes: list[_Node | str]) -> str:
     parts = []
     for n in nodes:
         if isinstance(n, str):
-            parts.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), n))
+            parts.append(_unwrap_jinja_escapes(n))
         elif n.tag == "span":
             parts.append(_render_code_text(n.children))
         else:
@@ -1256,7 +1413,8 @@ def md_to_html(
 ) -> str:
     """Convert markdown (the tiny closed GW subset, plus the reference/template
     special forms) to an HTML fragment. ``headings=True`` also accepts ATX
-    headings ``# ``-``###### `` (for report-narrative fields). ``refs``, if given,
+    headings ``# ``-``###### `` (report-narrative fields and finding fields alike —
+    see :func:`html_to_md`). ``refs``, if given,
     resolves embed/cross-reference markdown into Ghostwriter's native HTML forms
     (see module docstring); without one, any of them raises ``ConverterError``.
     ``jinja_escape=True`` (the default, for Ghostwriter-bound text) wraps literal

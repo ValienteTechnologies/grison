@@ -228,7 +228,10 @@ def test_md_to_html_literal_angle_bracket_can_be_escaped() -> None:
     assert md_to_html(r"value is \<missing\>") == "<p>value is &lt;missing&gt;</p>"
 
 
-# --- headings=True (report-narrative mode) ---------------------------------------------------
+# --- headings=True (report-narrative AND finding fields — see
+# grison.markdown.converter's module docstring: a real TipTap 7.2.6 editor emits
+# h1-h6 in plain finding fields too, not just narrative; grison's finding adapters
+# pass headings=True for exactly this reason) --------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -252,9 +255,13 @@ def test_heading_mode_html_round_trips() -> None:
     assert html_to_md(md_to_html(md, headings=True), headings=True) == md
 
 
-def test_headings_still_rejected_in_strict_finding_mode() -> None:
+def test_headings_still_rejected_by_default() -> None:
+    """The converter's OWN default (``headings=False``) still rejects headings —
+    unchanged by the finding-adapter fix above; what changed is that
+    ``grison.adapters.gw_findings`` now passes ``headings=True`` explicitly
+    (matching the report/narrative adapters), not this default."""
     with pytest.raises(ConverterError):
-        html_to_md("<h2>x</h2>")  # default headings=False — the corruption tripwire
+        html_to_md("<h2>x</h2>")
     with pytest.raises(ConverterError):
         md_to_html("## x")
 
