@@ -322,6 +322,80 @@ def test_mass_evidence_delete_is_guarded_and_announced(run_grison, gw_server, wo
     assert len(gw_server.store.evidence) == 8  # nothing was actually deleted while withheld
 
 
+def test_force_remote_on_a_withheld_evidence_deletion_restores_it(run_grison, gw_server, workspace):
+    """Item 11 (fix-fin1): "the remote wins" force semantics apply to file sets
+    too — D1/D9's shared engine (:mod:`grison.engine.filesets`) reuses the exact
+    same :func:`grison.engine.classify.classify` every document adapter does.
+    Before this fix, naming a locally-deleted, guard-withheld evidence file on
+    ``--force-remote`` only exempted it from WITHHELD while leaving the outcome
+    DELETE_REMOTE — the remote row still got deleted. Now it restores the file
+    locally instead and the remote row survives."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_reported_finding(
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
+    )
+    for i in range(8):
+        gw_server.store.seed_evidence(
+            reportId=report["id"],
+            friendlyName=f"shot-{i}",
+            document=f"evidence/shot-{i}.png",
+        )
+    run_grison("sync")  # establishes the local evidence/ mirror
+
+    ev_dir = workspace / "findings" / "reports" / "report-a" / "evidence"
+    files = sorted(ev_dir.glob("*"))
+    assert len(files) == 8
+    for f in files:
+        f.unlink()
+
+    result = run_grison("sync", "--force-remote", str(files[0]))
+
+    assert "MASS-CHANGE GUARD tripped on gw.evidence" in result.output, result.output
+    assert files[0].exists()  # restored, not deleted
+    assert len(gw_server.store.evidence) == 8  # every row survives — none actually deleted
+
+
+def test_force_local_on_a_withheld_evidence_deletion_recreates_it(run_grison, gw_server, workspace):
+    """The mirror image: a remote-deleted, guard-withheld evidence file named on
+    ``--force-local`` used to only exempt it from WITHHELD while leaving the
+    outcome DELETE_LOCAL — the local file still got deleted. Now it recreates the
+    row remotely (a fresh upload) and the local file survives untouched."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_reported_finding(
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
+    )
+    rows = [
+        gw_server.store.seed_evidence(
+            reportId=report["id"],
+            friendlyName=f"shot-{i}",
+            document=f"evidence/shot-{i}.png",
+        )
+        for i in range(8)
+    ]
+    run_grison("sync")  # establishes the local evidence/ mirror
+    ev_dir = workspace / "findings" / "reports" / "report-a" / "evidence"
+    files = sorted(ev_dir.glob("*"))
+    assert len(files) == 8
+    for row in rows:
+        gw_server.store.evidence.remove(gw_server.store._by_id(gw_server.store.evidence, row["id"]))
+
+    result = run_grison("sync", "--force-local", str(files[0]))
+
+    assert "MASS-CHANGE GUARD tripped on gw.evidence" in result.output, result.output
+    for f in files:
+        assert f.exists()  # NONE deleted locally — forced one recreated, rest withheld
+    # the forced file's row exists again remotely (recreated under a new id)
+    assert len(gw_server.store.evidence) == 1
+
+
 def test_undo_reverses_a_library_push_and_an_evidence_upload(run_grison, gw_server, workspace):
     """G: ``grison undo`` covers the findings phase too — a library
     ``update_finding_by_pk`` and a report-scoped ``uploadEvidence`` from the SAME

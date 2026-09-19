@@ -215,6 +215,94 @@ def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
     assert sidecar.exists()  # ...but --dry-run must NEVER delete it for real (ENGINE.md §9)
 
 
+class DriftingAdapter(FakeAdapter):
+    """A ``fetch_remote`` frozen at construction time (as if classification's bulk
+    fetch ran before an out-of-band remote edit landed), while ``refetch`` — called
+    by :func:`grison.engine.apply.refetch_guard` immediately before the write —
+    reads the store's CURRENT state. Simulates ENGINE.md §3's pre-write drift
+    window: a record changed on the server between classification and the write
+    that was about to happen."""
+
+    def __init__(self, store: FakeStore, frozen: dict[int, str]) -> None:
+        super().__init__(store)
+        self._frozen = frozen
+
+    def fetch_remote(self, ctx: Any) -> dict[int, RemoteRecord]:
+        return {
+            rid: RemoteRecord(id=rid, data={"text": text}, witness={})
+            for rid, text in self._frozen.items()
+        }
+
+
+def test_dry_run_pre_write_drift_never_writes_a_collision_sidecar(tmp_path: Path) -> None:
+    """Item 3 (HIGH, fix-fin1): ``_apply_update``'s drift branch used to write the
+    collision sidecar BEFORE checking ``dry`` — ENGINE.md §9 says dry-run performs
+    NO writes of any kind, but a pre-write re-fetch guard drift discovered during a
+    ``--dry-run`` PUSH got a real sidecar written anyway. Mirrors the sibling
+    ``test_dry_run_never_deletes_a_real_collision_sidecar`` above, but for the
+    re-fetch-guard drift path (a plan that classified PUSH, not COLLISION) rather
+    than a plan that was already a COLLISION at classification time."""
+    root = tmp_path
+    (root / "recs").mkdir()
+    (root / "recs" / "x.txt").write_text("v1", encoding="utf-8")
+    store = FakeStore()
+    adapter = FakeAdapter(store)
+    _run_once(root, adapter)
+    rid = next(iter(store.records))
+    assert store.records[rid] == "v1"
+
+    # local edit -> classifies PUSH (L != base, R == base)...
+    (root / "recs" / "x.txt").write_text("local-edit", encoding="utf-8")
+    # ...but the store already moved on since the bulk fetch classification used —
+    # the pre-write re-fetch guard must catch this and never fire the real write.
+    frozen = dict(store.records)
+    store.records[rid] = "remote-edit-after-classification"
+    drifting = DriftingAdapter(store, frozen)
+    sidecar = root / sidecar_path(PurePosixPath("recs/x.txt"))
+
+    index = Index.load(root)
+    state = StateStore(root)
+    snapshot = Snapshot()
+    plans, events, _summary = run(
+        root,
+        ctx=None,
+        adapter=drifting,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        failures=[],
+        options=RunOptions(dry_run=True),
+    )
+
+    assert plans[0].outcome is Outcome.COLLISION
+    assert not sidecar.exists()  # --dry-run must never write it for real (ENGINE.md §9)
+    assert any(e.verb == "collision" and e.dry_run for e in events)
+    # the store itself is untouched — no write of any kind happened.
+    assert store.records[rid] == "remote-edit-after-classification"
+
+    # a REAL (non-dry) run hitting the exact same drift DOES write the sidecar —
+    # proves the fix gates the write on `dry`, it doesn't just always skip it.
+    frozen2 = dict(frozen)
+    store.records[rid] = "remote-edit-after-classification-2"
+    drifting2 = DriftingAdapter(store, frozen2)
+    index2 = Index.load(root)
+    state2 = StateStore(root)
+    snapshot2 = Snapshot()
+    plans2, _events2, _summary2 = run(
+        root,
+        ctx=None,
+        adapter=drifting2,
+        index=index2,
+        state=state2,
+        snapshot=snapshot2,
+        failures=[],
+        options=RunOptions(),
+    )
+    assert plans2[0].outcome is Outcome.COLLISION
+    assert sidecar.exists()
+    assert sidecar.read_text(encoding="utf-8") == "remote-edit-after-classification-2"
+
+
 def test_healthy_create_writes_index_before_local_canonicalisation(tmp_path: Path) -> None:
     """Sanity check for the same ordering on the non-crashing path: index entry, then
     local file (already covered implicitly above, asserted directly here too)."""

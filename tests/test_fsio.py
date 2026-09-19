@@ -101,6 +101,37 @@ def test_non_private_write_is_not_0600(tmp_path: Path) -> None:
     assert _mode(p) != 0o600
 
 
+def test_private_write_creates_parent_dirs_0700_under_a_lenient_umask(tmp_path: Path) -> None:
+    """Item 4 (HIGH, fix-fin1): ``_atomic_write``'s parent-dir creation used to be a
+    bare ``mkdir(parents=True, exist_ok=True)`` regardless of ``private`` — umask-
+    governed, so a new ``.grison/state/<kind>/`` directory landed wider than 0700
+    under a lenient umask (e.g. 0o002 -> 0775) until something else happened to
+    tighten it. A private write must create every missing parent 0700 itself,
+    umask notwithstanding."""
+    old_umask = os.umask(0o002)
+    try:
+        p = tmp_path / ".grison" / "state" / "gw.finding" / "1.json"
+        fsio.atomic_write_text(p, "{}", private=True)
+    finally:
+        os.umask(old_umask)
+    assert _mode(p) == 0o600
+    assert _mode(p.parent) == 0o700
+    assert _mode(p.parent.parent) == 0o700
+    assert _mode(p.parent.parent.parent) == 0o700
+
+
+def test_non_private_write_parent_dirs_are_ordinary_mkdir(tmp_path: Path) -> None:
+    """Only a PRIVATE write forces 0700 parents — a tracked workspace path's own
+    parent directories are unaffected by this fix."""
+    old_umask = os.umask(0o002)
+    try:
+        p = tmp_path / "findings" / "library" / "x.md"
+        fsio.atomic_write_text(p, "# hi")
+    finally:
+        os.umask(old_umask)
+    assert _mode(p.parent) != 0o700
+
+
 # --- privacy: directories --------------------------------------------------------
 
 

@@ -262,6 +262,7 @@ def _replay_one(  # noqa: PLR0912
             _emit(on_event, f"skip {op.path}: already gone, nothing to undo")
             return
         adapter.delete(ctx, op.id)
+        kept_as_new = False
         if op.path is not None:
             index.remove(op.path)
             state.forget(op.kind, op.id)
@@ -273,9 +274,21 @@ def _replay_one(  # noqa: PLR0912
             target = root / op.path
             if op.local_preimage is not None:
                 atomic_write_text(target, op.local_preimage)
+                kept_as_new = True
             else:
                 target.unlink(missing_ok=True)
         _emit(on_event, f"delete-remote {op.path or op.id} — undoing create")
+        if kept_as_new:
+            # item 13, fix-fin1: by design (the author's own words are never
+            # deleted by an undo) the local file survives, now unindexed — the
+            # very next `grison sync` sees a new, never-before-seen local file
+            # and creates it again. Silence here would leave the operator
+            # thinking the create was fully reverted; this line says exactly
+            # what state the file is in and what to do if that's not wanted.
+            _emit(
+                on_event,
+                f"{op.path}: local file kept as new; delete it or the next sync recreates it",
+            )
         return
 
     # Every other recorded outcome (push/move_edit/delete_remote) needs restore() —

@@ -273,6 +273,35 @@ def test_undo_of_a_page_create_restores_the_authors_original_file(run_grison, bs
     assert Index.load(Path.cwd()).get("methodology/library/playbook/new-page.md") is None
 
 
+def test_undo_of_a_create_prints_the_kept_as_new_message_and_status_shows_it_new(
+    run_grison, bs_server
+) -> None:
+    """Item 13 (fix-fin1): undoing a CREATE keeps the author's own file on disk by
+    design (their words are never deleted by an undo) — it just un-indexes it, so
+    the very next ``grison sync`` would recreate it. Before this fix, ``grison
+    undo`` said nothing about that, leaving the operator to discover it by
+    surprise on the next sync. Now it prints exactly what state the file is in,
+    and ``grison status`` (run right after, no sync in between) already shows it
+    as ``new`` — a direct consequence of the index/state entries being removed,
+    which this test locks in rather than assumes."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page_path = Path.cwd() / "methodology" / "library" / "playbook" / "new-page.md"
+    _write_page_file(page_path, title="New Page", body="New page body text.")
+    run_grison("sync")
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "methodology/library/playbook/new-page.md: local file kept as new; "
+        "delete it or the next sync recreates it" in result.output
+    )
+    assert not any(p["book_id"] == book["id"] for p in bs_server.store.pages)
+
+    status = run_grison("status")
+    assert "methodology: new 1" in status.output
+
+
 def test_copying_a_synced_page_creates_a_new_remote_page(run_grison, bs_server):
     """tests changed on purpose (D3): there is no id in the document any more, so
     copying a file can no longer collide on identity — it is an ordinary CREATE."""
@@ -412,6 +441,67 @@ def test_mass_change_guard_withholds_pulls_too(run_grison, bs_server):
     for i in range(6):
         path = Path.cwd() / "methodology" / "library" / "playbook" / f"page-{i}.md"
         assert "changed on BookStack" not in path.read_text(encoding="utf-8")
+
+
+def test_force_remote_on_a_withheld_deletion_restores_it_not_deletes_the_remote(
+    run_grison, bs_server
+):
+    """Item 11 (fix-fin1): before this fix, ``--force-remote <path>`` on a
+    locally-deleted, guard-withheld page only exempted it from WITHHELD while
+    leaving the outcome DELETE_REMOTE — the remote copy still got deleted, the
+    opposite of what "the remote wins" means. Now it restores the file locally
+    instead (a PULL) and the remote record survives."""
+    book = bs_server.store.seed_book(name="Playbook")
+    pages = [
+        bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"Body {i}.")
+        for i in range(6)
+    ]
+    run_grison("sync")
+    paths = [Path.cwd() / "methodology" / "library" / "playbook" / f"page-{i}.md" for i in range(6)]
+    for path in paths:
+        path.unlink()  # delete all 6 locally -> would DELETE_REMOTE all 6, trips the guard
+
+    result = run_grison("sync", "--force-remote", str(paths[0]))
+
+    assert "MASS-CHANGE GUARD tripped on bs.page — writes withheld." in result.output
+    assert paths[0].exists()  # restored, not deleted
+    assert paths[0].read_text(encoding="utf-8").strip().endswith("Body 0.")
+    for path in paths[1:]:
+        assert not path.exists()  # still deleted locally — withheld, no write either way
+    # every remote page survives — the forced one because it was restored, the
+    # rest because the guard withheld their deletion.
+    for pg in pages:
+        assert bs_server.store.page(pg["id"]) is not None
+
+
+def test_force_local_on_a_withheld_deletion_recreates_it_not_deletes_it_locally(
+    run_grison, bs_server
+):
+    """The mirror image: a remote-deleted, guard-withheld page named on
+    ``--force-local`` used to only exempt it from WITHHELD while leaving the
+    outcome DELETE_LOCAL — the local file still got deleted, the opposite of
+    "the local side wins". Now it recreates the record remotely (CREATE) and
+    the local file survives untouched."""
+    book = bs_server.store.seed_book(name="Playbook")
+    pages = [
+        bs_server.store.seed_page(book_id=book["id"], name=f"Page {i}", markdown=f"Body {i}.")
+        for i in range(6)
+    ]
+    run_grison("sync")  # pulls all 6
+    for pg in pages:
+        bs_server.store.pages.remove(bs_server.store.page(pg["id"]))  # gone, not recycled
+    paths = [Path.cwd() / "methodology" / "library" / "playbook" / f"page-{i}.md" for i in range(6)]
+
+    result = run_grison("sync", "--force-local", str(paths[0]))
+
+    assert "MASS-CHANGE GUARD tripped on bs.page — writes withheld." in result.output
+    for path in paths:
+        assert path.exists()  # NONE deleted locally — forced one recreated, rest withheld
+    recreated = [p for p in bs_server.store.pages if p["name"] == "Page 0"]
+    assert len(recreated) == 1  # recreated remotely, under a new id
+    assert recreated[0]["id"] != pages[0]["id"]
+    for pg in pages[1:]:
+        assert bs_server.store.page(pg["id"]) is None  # still gone remotely — withheld, no undo
 
 
 def test_wysiwyg_page_is_skipped_not_mirrored(run_grison, bs_server):
@@ -1079,6 +1169,37 @@ def test_undo_reverts_a_push(run_grison, bs_server):
 
     assert result.exit_code == 0, result.output
     assert bs_server.store.page(page["id"])["markdown"] == "# Original"
+
+
+def test_undo_exits_2_when_credentials_are_missing(run_grison, workspace, bs_server):
+    """Item 6 (MEDIUM, fix-fin1): ``grison undo``'s own ``creds.require_bookstack()``
+    call has no local try/except — before this fix it fell through to ``_guarded``'s
+    generic ``GrisonError`` handling and exited 1. ENGINE.md §10 puts missing/bad
+    credentials in the "could not run" class (exit 2), same as no-workspace/
+    incompatible-server/lock-held — never the "ran but needs attention" class."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
+    run_grison("sync")
+    path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    _write_page_file(path, title="Notes", body="# Edited")
+    run_grison("sync")  # a real push -> a bs.page-kind snapshot exists to undo
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited"
+
+    # BookStack credentials go missing between the push and the undo attempt.
+    env_path = workspace / ".grison" / "env"
+    text = env_path.read_text(encoding="utf-8")
+    text = re.sub(r"^GRISON_BS_TOKEN_ID=.*$", "GRISON_BS_TOKEN_ID=", text, flags=re.MULTILINE)
+    text = re.sub(
+        r"^GRISON_BS_TOKEN_SECRET=.*$", "GRISON_BS_TOKEN_SECRET=", text, flags=re.MULTILINE
+    )
+    env_path.write_text(text, encoding="utf-8")
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 2, result.output
+    assert "missing BookStack credentials" in result.output
+    # nothing was undone — the push survives exactly as it was.
+    assert bs_server.store.page(page["id"])["markdown"] == "# Edited"
 
 
 def test_undo_of_a_push_refuses_to_clobber_a_record_edited_again_since(run_grison, bs_server):

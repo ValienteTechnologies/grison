@@ -28,7 +28,8 @@ from grison.engine.model import (
     Plan,
     RemoteRecord,
 )
-from grison.engine.sidecar import sidecar_path
+from grison.engine.sidecar import clear_stale_sidecars, write_sidecar
+from grison.engine.sidecar import sidecar_path as sidecar_path  # re-exported — see module docstring
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
 from grison.fsio import atomic_write_text
@@ -36,13 +37,17 @@ from grison.hashing import digest
 from grison.index import Index, IndexKind
 from grison.validator.registry import Failure
 
-_MASS_CHANGE_MIN = 5
-_MASS_CHANGE_RATIO = 0.2
+#: The ONE change-guard's threshold + outcome classification (ENGINE.md 'Apply
+#: loop' item 2) — public (no leading underscore): :mod:`grison.engine.filesets`
+#: imports these and :func:`change_guard` itself rather than re-declaring its own
+#: copies (item 5, fix-fin1 — same pattern as :func:`refetch_guard`/``sidecar_path``).
+MASS_CHANGE_MIN = 5
+MASS_CHANGE_RATIO = 0.2
 
 # Outcomes whose apply step is a real remote write (a create/update/delete call) —
 # these count toward the change guard's W, and are what the pre-write re-fetch guard
 # and undo capture wrap.
-_REMOTE_WRITE_OUTCOMES = frozenset(
+REMOTE_WRITE_OUTCOMES = frozenset(
     {Outcome.PUSH, Outcome.CREATE, Outcome.DELETE_REMOTE, Outcome.MOVE_EDIT}
 )
 # Outcomes whose apply step overwrites/removes something ALREADY local (ENGINE.md's
@@ -50,7 +55,7 @@ _REMOTE_WRITE_OUTCOMES = frozenset(
 # PULL_NEW deliberately excluded: it creates a file that didn't exist before — there
 # is nothing local to lose, so a first sync (or discovering a batch of brand-new
 # remote records) is never itself withheld by the D-side guard.
-_LOCAL_WRITE_OUTCOMES = frozenset({Outcome.PULL, Outcome.DELETE_LOCAL})
+LOCAL_WRITE_OUTCOMES = frozenset({Outcome.PULL, Outcome.DELETE_LOCAL})
 
 
 def _remote_hash(adapter: Adapter, remote: RemoteRecord | None) -> str | None:
@@ -66,7 +71,7 @@ class RunOptions:
     dry_run: bool = False
     force_local: frozenset[PurePosixPath] = frozenset()
     force_remote: frozenset[PurePosixPath] = frozenset()
-    mass_change_ratio: float = _MASS_CHANGE_RATIO
+    mass_change_ratio: float = MASS_CHANGE_RATIO
 
 
 def run(  # noqa: PLR0913
@@ -136,7 +141,7 @@ def run(  # noqa: PLR0913
     # veto (server-side condition the table can't express) and the validation gate —
     # both only ever turn a remote-write outcome into SKIP/INVALID; pulls proceed.
     for p in plans:
-        if p.outcome in _REMOTE_WRITE_OUTCOMES and p.path is not None:
+        if p.outcome in REMOTE_WRITE_OUTCOMES and p.path is not None:
             if str(p.path) in invalid_paths:
                 p.rule_ids = tuple(f.rule_id for f in failures if f.path == str(p.path))
                 p.outcome = Outcome.INVALID
@@ -152,7 +157,7 @@ def run(  # noqa: PLR0913
                 p.reason = veto.reason
                 p.severity = veto.severity
 
-    _apply_change_guard(plans, options, summary)
+    change_guard(plans, options)
 
     for p in plans:
         _apply_one(root, ctx, adapter, p, index, state, snapshot, events, options)
@@ -166,7 +171,7 @@ def run(  # noqa: PLR0913
             summary.problem_paths.append(label)
 
     if not options.dry_run:
-        _clear_stale_sidecars(root, plans)
+        clear_stale_sidecars(root, plans)
     return plans, events, summary
 
 
@@ -303,7 +308,17 @@ def _classify_missing(
     return Plan(kind=kind, outcome=outcome, path=path, id=rid, remote=remote, base_hash=base_hash)
 
 
-def _apply_change_guard(plans: list[Plan], options: RunOptions, summary: KindSummary) -> None:
+def change_guard(plans: list[Plan], options: Any) -> None:
+    """The ONE change-guard rule (ENGINE.md 'Apply loop' item 2, "one change guard
+    with one threshold"): mutates ``plans`` in place, flipping every unforced
+    remote-write outcome to :data:`~grison.engine.model.Outcome.WITHHELD` when W
+    (the weighted remote-write count) trips the threshold, independently doing the
+    same for D (the weighted local-write count). ``options`` only needs
+    ``force_local``/``force_remote``/``mass_change_ratio`` — both :class:`RunOptions`
+    (this module) and :class:`grison.engine.filesets.RunOptions` (the file-set
+    engine's own, differently-shaped options dataclass) satisfy that by duck typing,
+    which is how :mod:`grison.engine.filesets` shares this one implementation
+    instead of re-declaring its own copy (item 5, fix-fin1)."""
     total = max(len(plans), 1)
 
     def _weight(p: Plan) -> int:
@@ -314,15 +329,15 @@ def _apply_change_guard(plans: list[Plan], options: RunOptions, summary: KindSum
             p.path in options.force_local or p.path in options.force_remote
         )
 
-    remote_writes = [p for p in plans if p.outcome in _REMOTE_WRITE_OUTCOMES and not _is_forced(p)]
+    remote_writes = [p for p in plans if p.outcome in REMOTE_WRITE_OUTCOMES and not _is_forced(p)]
     w = sum(_weight(p) for p in remote_writes)
-    if w > _MASS_CHANGE_MIN and w > options.mass_change_ratio * total:
+    if w > MASS_CHANGE_MIN and w > options.mass_change_ratio * total:
         for p in remote_writes:
             p.outcome = Outcome.WITHHELD
 
-    local_writes = [p for p in plans if p.outcome in _LOCAL_WRITE_OUTCOMES and not _is_forced(p)]
+    local_writes = [p for p in plans if p.outcome in LOCAL_WRITE_OUTCOMES and not _is_forced(p)]
     d = sum(_weight(p) for p in local_writes)
-    if d > _MASS_CHANGE_MIN and d > options.mass_change_ratio * total:
+    if d > MASS_CHANGE_MIN and d > options.mass_change_ratio * total:
         for p in local_writes:
             p.outcome = Outcome.WITHHELD
 
@@ -434,11 +449,20 @@ def _apply_create(  # noqa: PLR0913
     if dry:
         events.append(Event(verb="create", path=str(p.path), dry_run=True))
         return
+    # item 11, fix-fin1: a force-local "resurrect" of a remote-deleted record
+    # (classify.py converts DELETE_LOCAL -> CREATE) reaches here with `p.id`
+    # still set to the OLD, now-gone remote id — the same Plan the classify
+    # loop built for the original present-indexed slot, only its outcome
+    # changed. An ordinary CREATE (a brand-new, never-indexed local file) never
+    # sets `p.id` at all, so this is unambiguous.
+    old_id = p.id
     rec = adapter.create(ctx, p.local.doc)
     # crash-ordering (ENGINE.md §7): the index entry is written the instant the server
     # returns an id, before ANY other bookkeeping — a crash right after this line can
     # never produce a duplicate create on the next sync (see tests/test_engine_apply.py).
     index.set(str(p.path), IndexKind(adapter.kind), rec.id)
+    if old_id is not None and old_id != rec.id:
+        state.forget(adapter.kind, old_id)
     # local_preimage: the author's own pre-create bytes — undoing this create restores
     # them (grison.engine.undo._replay_one), rather than deleting the file or leaving
     # it in its post-create mirrored form.
@@ -532,8 +556,16 @@ def _apply_update(  # noqa: PLR0913
     dry = options.dry_run
     fresh, drifted = _refetch_guard(ctx, adapter, p, options)
     if drifted:
-        _write_collision_sidecar(root, adapter, p, fresh)
         p.outcome = Outcome.COLLISION
+        if dry:
+            # ENGINE.md §9: dry run performs everything except writes of any kind —
+            # a drift discovered here must report the same "would collide" event a
+            # real run would, without writing the sidecar (item 3, fix-fin1: this
+            # branch used to write it unconditionally, before the `dry` check below
+            # it, unlike _apply_collision's own equivalent branch).
+            events.append(Event(verb="collision", path=str(p.path), dry_run=True))
+            return
+        _write_collision_sidecar(root, adapter, p, fresh)
         events.append(
             Event(
                 verb="collision",
@@ -798,10 +830,16 @@ def _write_collision_sidecar(
     p: Plan,
     remote: RemoteRecord | None,
 ) -> None:
-    if p.path is None or remote is None:
+    """The document binding of :func:`grison.engine.sidecar.write_sidecar` (item 5,
+    fix-fin1 — same shared write :mod:`grison.engine.filesets` uses for its own,
+    bytes-shaped records): renders ``remote`` through the adapter's own
+    ``render_local`` and writes the result at ``sidecar_path(p.path)``."""
+    path = p.path
+    if path is None or remote is None:
         return
-    text = adapter.render_local(remote.data, path=p.path)
-    atomic_write_text(root / sidecar_path(p.path), text)
+    write_sidecar(
+        root, path, remote, lambda: adapter.render_local(remote.data, path=path).encode("utf-8")
+    )
 
 
 def _apply_collision(
@@ -816,13 +854,3 @@ def _apply_collision(
         return
     _write_collision_sidecar(root, adapter, p, p.remote)
     events.append(Event(verb="collision", path=str(p.path)))
-
-
-def _clear_stale_sidecars(root: Path, plans: list[Plan]) -> None:
-    """ENGINE.md §8: a sidecar is cleared as soon as its record is no longer in
-    collision (resolved by force flag, or the two sides converged)."""
-    for p in plans:
-        if p.path is None or p.outcome is Outcome.COLLISION:
-            continue
-        sidecar = root / sidecar_path(p.path)
-        sidecar.unlink(missing_ok=True)

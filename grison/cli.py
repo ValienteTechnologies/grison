@@ -22,6 +22,7 @@ from typing import Annotated, Any, TypeVar
 import typer
 
 from grison import gitdrive
+from grison import manifest as manifest_mod
 from grison.adapters import bs_structure, gw_report
 from grison.adapters._bs_common import build_context
 from grison.adapters._gw_common import GWContext, GWReportContext
@@ -54,7 +55,7 @@ from grison.index import Index, IndexKind
 from grison.markdown.refscan import scan_refs
 from grison.model import FindingType
 from grison.remote.bookstack import BookStackClient
-from grison.remote.bootstrap import bootstrap_workspace
+from grison.remote.bootstrap import BootstrapResult, bootstrap_workspace
 from grison.remote.compat import SchemaCompatibilityError, check_ghostwriter_compatibility
 from grison.remote.creds import Creds, MissingCreds, Settings, load_settings
 from grison.remote.creds import load as load_creds
@@ -98,7 +99,14 @@ def _guarded(fn: Callable[..., _T2]) -> Callable[..., _T2]:
     e.g. ``GRISON_GW_URL=http://…`` raises ``HttpConfigError`` straight through
     typer's own rich-traceback handler). A command's own ``typer.Exit`` (its normal
     exit-code signaling) passes through untouched — this only catches what nothing
-    else already handled."""
+    else already handled.
+
+    :class:`~grison.remote.creds.MissingCreds` exits 2, not 1 (item 6, fix-fin1):
+    ENGINE.md §10 puts bad/missing credentials in the same "could not run" class
+    as no-workspace/incompatible-server/lock-held, never in the "ran but needs
+    attention" class exit 1 is for. ``sync`` catches it itself first (to also print
+    its own scaffold-status lines before exiting) — this is the backstop for every
+    OTHER command that lets it reach here uncaught, e.g. ``grison undo``."""
 
     @functools.wraps(fn)
     def wrapper(*args: object, **kwargs: object) -> _T2:
@@ -106,11 +114,123 @@ def _guarded(fn: Callable[..., _T2]) -> Callable[..., _T2]:
             return fn(*args, **kwargs)
         except typer.Exit:
             raise
+        except MissingCreds as e:
+            typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2) from None
         except GrisonError as e:
             typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1) from None
 
     return wrapper
+
+
+def _is_bootstrapped(root: Path) -> bool:
+    """Whether ``root`` has already been through a bootstrap (of any format,
+    including a v1 workspace this grison refuses to sync — see
+    :func:`_refuse_if_format_mismatch`) — the same detection
+    :func:`grison.validator.find_workspace_root` uses. A genuinely fresh directory
+    (no ``.grison/`` at all) is the ONLY case a first ``grison sync``/``grison
+    parse`` is allowed to bootstrap from scratch (item 2, fix-fin1)."""
+    return (root / ".grison").is_dir()
+
+
+def _refuse_if_format_mismatch(root: Path) -> None:
+    """D13 (item 10, fix-fin1): every command that reads an EXISTING workspace
+    refuses a format mismatch outright — exit 2, before any work (no bootstrap
+    self-heal, no remote call, no validator run) — never silently proceeding as if
+    the workspace were the current format. Distinct from ``grison validate``'s own
+    WS-005/WS-006 failures, which report the exact same check as one finding among
+    everything else `validate` found (exit 1) — this is the harder "could not run
+    safely at all" gate every OTHER command needs.
+
+    A no-op when there is nothing to check yet: a genuinely fresh directory (no
+    ``manifest.yml`` AND no real v1 content — :func:`grison.manifest.
+    has_v1_content`, the SAME precise signal ``bootstrap_workspace`` itself uses)
+    bootstraps normally at ``CURRENT_FORMAT``. Checking ``.grison/`` existence
+    alone would be wrong here — a directory whose ``.grison/env`` exists but has
+    no ``manifest.yml`` and no real content yet (freshly written, hand-created, or
+    copied in) is NOT a v1 workspace either, exactly the gap ``bootstrap_
+    workspace``'s own docstring calls out; only a real ``manifest.yml`` on record,
+    or real pre-v2 content, means there is an actual format to check."""
+    manifest_path = root / manifest_mod.MANIFEST_RELATIVE_PATH
+    if not manifest_path.is_file() and not manifest_mod.has_v1_content(root):
+        return
+    try:
+        manifest_mod.check(root)
+    except (manifest_mod.WorkspaceNeedsMigration, manifest_mod.WorkspaceTooNew) as e:
+        typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from None
+
+
+def _refuse_if_workspace_rules_fail(root: Path) -> None:
+    """Item 1 (CRITICAL, fix-fin1): WS-* rules (WS-011/WS-012 — a missing/hand-
+    edited ``.claude/settings.json``, ``CLAUDE.md``, or ``.grison/SPEC.md``; WS-007
+    a malformed manifest; WS-008 git hygiene; …) are workspace-level, not scoped to
+    any one phase — before this fix, each sync phase filtered
+    ``validate_workspace``'s failures down to its own path prefix
+    (``findings``/``methodology``/``findings/reports``), so a WS-* failure (whose
+    ``path`` is e.g. ``.claude/settings.json`` or ``CLAUDE.md``, matching none of
+    those prefixes) was silently dropped by every phase and never gated anything;
+    ``grison undo`` ran no validation at all. Now: ANY WS-* failure refuses the
+    whole run outright — exit 2, before any remote write — "could not run safely",
+    the same class as bad creds/incompatible-server/lock-held. Called BEFORE the
+    self-healing ``bootstrap_workspace``/``grison scaffold`` (non-``--force``) pass
+    ever runs, so a hand-edit that scaffolding would otherwise quietly re-heal is
+    still caught first."""
+    failures = [f for f in validate_workspace(root) if f.rule_id.startswith("WS-")]
+    if not failures:
+        return
+    for f in failures:
+        loc = f"{f.path}:{f.line}" if f.line is not None else f.path
+        typer.secho(f"{loc}: {f.rule_id} {f.message} — {f.fix}", fg=typer.colors.RED, err=True)
+    typer.secho(
+        "workspace-level check failed — could not run safely", fg=typer.colors.RED, err=True
+    )
+    raise typer.Exit(code=2)
+
+
+def _bootstrap_would_create(root: Path) -> list[str]:
+    """The paths a real (non-``--dry-run``) first bootstrap would write in a fresh
+    directory (item 2, fix-fin1) — sourced from the same constants
+    ``bootstrap_workspace``/``scaffold_workspace`` themselves write, so this list
+    can't silently drift from what they actually do. For reporting only: this
+    function never touches the filesystem."""
+    from grison.index import INDEX_RELATIVE_PATH
+    from grison.scaffold import settings_json as settings_json_mod
+    from grison.scaffold import spec as spec_mod
+    from grison.scaffold import templates as templates_mod
+    from grison.scaffold.orchestrate import CLAUDE_MD_RELATIVE_PATH
+    from grison.validator.terms import TERMS_RELATIVE_PATH
+    from grison.workspace import WORKSPACE_DIRS
+
+    paths = [f"{d}/" for d in WORKSPACE_DIRS]
+    paths += [
+        ".grison/env",
+        manifest_mod.MANIFEST_RELATIVE_PATH,
+        ".grison/.gitignore",
+        INDEX_RELATIVE_PATH,
+        spec_mod.SPEC_RELATIVE_PATH,
+        *sorted(
+            f"{templates_mod.TEMPLATES_RELATIVE_DIR}/{name}"
+            for name in templates_mod.all_templates()
+        ),
+        TERMS_RELATIVE_PATH,
+        settings_json_mod.SETTINGS_RELATIVE_PATH,
+        CLAUDE_MD_RELATIVE_PATH,
+        ".gitignore (root — the collision-sidecar ignore entry)",
+        ".git/hooks/pre-commit (only inside a git repository)",
+    ]
+    return paths
+
+
+def _print_would_bootstrap(root: Path) -> None:
+    typer.secho(
+        f"{root} is not a grison workspace yet — a real (non-dry-run) "
+        "`grison sync`/`grison parse` would bootstrap it first, writing:",
+        fg=typer.colors.YELLOW,
+    )
+    for p in _bootstrap_would_create(root):
+        typer.echo(f"  would create {p}")
 
 
 @app.callback()
@@ -158,6 +278,13 @@ def parse(
         # `parse` staying fully offline is unaffected. Without this, `grison parse`
         # in an empty directory left no manifest.yml/index.json behind and the very
         # next `grison validate` exited 2 "no grison workspace found".
+        #
+        # item 10, fix-fin1 (D13): a directory that already IS a workspace (of
+        # any format) is refused outright before this scaffolding self-heal ever
+        # touches it, exactly like `sync` — `parse` writing into a format-
+        # mismatched workspace's findings/inbox/ would be just as wrong as
+        # `sync` reconciling one.
+        _refuse_if_format_mismatch(root)
         bootstrap_workspace(root)
         out_dir = inbox_dir(root)
     else:
@@ -221,6 +348,7 @@ def status(
     except GrisonError as e:
         typer.secho(f"error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from None
+    _refuse_if_format_mismatch(root)  # D13 (item 10) — before any work
 
     failures = validate_workspace(root)
     state = StateStore(root)
@@ -294,6 +422,7 @@ def status(
                         force_local=set(),
                         force_remote=set(),
                         snapshot=Snapshot(),
+                        quiet=json_output,
                     )
                     remote_summaries["report"] = reports_result.summaries
                     findings_result = _run_findings_phase(
@@ -321,6 +450,7 @@ def status(
                         force_local=set(),
                         force_remote=set(),
                         snapshot=Snapshot(),
+                        quiet=json_output,
                     )
                     remote_summaries["wiki"] = wiki_result.summaries
             except GrisonError as e:
@@ -328,6 +458,13 @@ def status(
         else:
             remote_bs_error = "BookStack credentials not configured"
 
+    # item 12, fix-fin1: a findings-kind (library or reported) collision sidecar
+    # used to be invisible from `grison status` entirely — neither counted toward
+    # the exit code nor surfaced in `--json`/text output, unlike `report`'s and
+    # `methodology`'s own top-level `collision_sidecars`. One merged view (same
+    # helper `reports_offline` already uses to combine ITS two engine-managed
+    # kinds) makes `findings.collision_sidecars` a real, first-class field.
+    findings_offline = _merge_offline([lib_offline, rf_offline])
     offline_problems = bool(
         offline.counts["invalid"]
         or offline.counts["unknown"]
@@ -336,6 +473,7 @@ def status(
         or lib_offline.counts["unknown"]
         or rf_offline.counts["invalid"]
         or rf_offline.counts["unknown"]
+        or findings_offline.collision_sidecars
     )
     reports_problems = bool(
         reports_offline.counts["invalid"]
@@ -348,6 +486,7 @@ def status(
         payload = {
             "findings": {
                 "managed": True,
+                "collision_sidecars": [str(p) for p in findings_offline.collision_sidecars],
                 "library": {
                     "counts": lib_offline.counts,
                     "non_clean": [_entry_json(e) for e in lib_offline.non_clean],
@@ -395,6 +534,7 @@ def status(
     rf_line = ", ".join(f"{b} {n}" for b, n in rf_offline.counts.items() if n)
     typer.echo(f"findings (library): {lib_line or 'clean'}")
     typer.echo(f"findings (reports): {rf_line or 'clean'}")
+    _print_collision_sidecars(findings_offline.collision_sidecars, area="findings")
     reports_counts_line = ", ".join(f"{b} {n}" for b, n in reports_offline.counts.items() if n)
     typer.echo(f"report: {reports_counts_line or 'clean'}")
     if evidence_counts:
@@ -522,15 +662,24 @@ def _merge_offline(statuses: list[OfflineStatus]) -> OfflineStatus:
     return OfflineStatus(entries=entries, collision_sidecars=sidecars)
 
 
+def _print_collision_sidecars(sidecars: list[PurePosixPath], *, area: str) -> None:
+    """The one collision-sidecar text block — shared by every area that has one
+    (`report`/`methodology` via :func:`_print_offline_non_clean`, and `findings`
+    directly, item 12 fix-fin1: a findings-kind collision sidecar used to be
+    printed nowhere at all)."""
+    if not sidecars:
+        return
+    typer.echo(f"{area}: {len(sidecars)} collision-sidecar(s) pending")
+    for sidecar in sidecars:
+        typer.secho(
+            f"  ! {sidecar}: unresolved collision — run `grison sync "
+            "--force-local`/`--force-remote`",
+            fg=typer.colors.RED,
+        )
+
+
 def _print_offline_non_clean(offline: OfflineStatus, *, area: str) -> None:
-    if offline.collision_sidecars:
-        typer.echo(f"{area}: {len(offline.collision_sidecars)} collision-sidecar(s) pending")
-        for sidecar in offline.collision_sidecars:
-            typer.secho(
-                f"  ! {sidecar}: unresolved collision — run `grison sync "
-                "--force-local`/`--force-remote`",
-                fg=typer.colors.RED,
-            )
+    _print_collision_sidecars(offline.collision_sidecars, area=area)
     for entry in offline.non_clean:
         color = typer.colors.RED if entry.bucket in ("invalid", "unknown") else None
         detail = ""
@@ -629,19 +778,32 @@ def sync(
     ] = False,
     force_local: Annotated[
         Path | None,
-        typer.Option("--force-local", help="Resolve a file's collision by taking local (push)."),
+        typer.Option(
+            "--force-local",
+            help="The local side wins for this path: resolve a collision by "
+            "pushing, or — on a record the remote side deleted (including one the "
+            "change guard would otherwise withhold) — recreate it remotely instead "
+            "of deleting it locally.",
+        ),
     ] = None,
     force_remote: Annotated[
         Path | None,
-        typer.Option("--force-remote", help="Resolve a file's collision by taking remote (pull)."),
+        typer.Option(
+            "--force-remote",
+            help="The remote side wins for this path: resolve a collision by "
+            "pulling, or — on a record deleted locally (including one the change "
+            "guard would otherwise withhold) — restore it locally instead of "
+            "deleting it remotely.",
+        ),
     ] = None,
     json_output: Annotated[
         bool,
         typer.Option(
             "--json",
-            help="Emit the wiki phase's events as JSON lines (one object "
-            "per event plus a final summary object). The findings/report phases are "
-            "not yet engine-managed and keep their existing text output either way.",
+            help="Emit ONE combined JSON document for the whole run: "
+            "{report, findings, wiki, snapshot, exit_code} — each phase's slot is "
+            "null (never ran), {error} (raised before it could run), or "
+            "{events, summary} (see docs/workspace-format.md §9.6).",
         ),
     ] = False,
     verbose: Annotated[
@@ -667,7 +829,36 @@ def sync(
     to the older findings/report phases).
     """
     root = Path.cwd()
-    boot = bootstrap_workspace(root)
+    _refuse_if_format_mismatch(root)  # D13 (item 10) — before any bootstrap/work
+    bootstrapped = _is_bootstrapped(root)
+    if dry_run and not bootstrapped:
+        # item 2, fix-fin1: a real (non-dry) first sync bootstraps a fresh
+        # directory from scratch (~11 files) — `--dry-run` must never do that
+        # write for real, and there is nothing else to preview yet either, so
+        # this reports what a real run would create and stops.
+        _print_would_bootstrap(root)
+        raise typer.Exit(code=2)
+    if bootstrapped:
+        _refuse_if_workspace_rules_fail(root)  # item 1 — before the self-heal below
+    if dry_run:
+        from grison.scaffold import ScaffoldResult
+
+        # bootstrap_tree only ever creates plain, empty directories (never a
+        # file), so it never shows up in a before/after byte comparison — the
+        # same reasoning `status --remote`'s own dry classify already relies on
+        # (see its comment below). Everything else `bootstrap_workspace` would
+        # write for real (env template, manifest.yml, scaffolded files, self-
+        # healing chmod passes) is skipped entirely under `--dry-run`.
+        bootstrap_tree(root)
+        boot = BootstrapResult(
+            created_dirs=[],
+            env_created=False,
+            env_path=root / ".grison" / "env",
+            claude_md_created=False,
+            scaffold=ScaffoldResult(),
+        )
+    else:
+        boot = bootstrap_workspace(root)
     creds = load_creds(root)
     settings = load_settings(root)
     try:
@@ -678,7 +869,10 @@ def sync(
         if boot.claude_md_created:
             typer.secho("Scaffolded workspace + wrote CLAUDE.md", fg=typer.colors.GREEN)
         typer.secho(str(e), fg=typer.colors.YELLOW)
-        raise typer.Exit(code=1) from None
+        # ENGINE.md §10: missing/bad credentials is "could not run" — exit 2, same
+        # class as no-workspace/incompatible-server/lock-held (item 6, fix-fin1;
+        # this used to exit 1, the "ran but needs attention" class).
+        raise typer.Exit(code=2) from None
 
     fl = {force_local.resolve()} if force_local else set()
     fr = {force_remote.resolve()} if force_remote else set()
@@ -745,6 +939,7 @@ def sync(
                     force_local=fl,
                     force_remote=fr,
                     snapshot=snapshot,
+                    quiet=json_output,
                 ),
                 phase_errors,
             )
@@ -785,6 +980,7 @@ def sync(
                         force_local=fl,
                         force_remote=fr,
                         snapshot=snapshot,
+                        quiet=json_output,
                     )
 
             wiki = _run_phase("wiki", _do_wiki, phase_errors)
@@ -800,23 +996,43 @@ def sync(
         if wiki is not None:
             wiki.snapshot_dir = snapshot_dir
 
-        if result is not None:
-            if json_output:
-                typer.echo(_findings_json(result))
-            else:
+        if json_output:
+            # item 8, fix-fin1: ONE combined JSON document for the whole run —
+            # before this fix, `--json` printed one JSON-Lines blob per phase
+            # (findings, then report, then wiki), each with its own repeated
+            # `snapshot_dir`/`exit_code` — three separate streams a consumer had
+            # to know to concatenate-and-parse rather than one parse() call.
+            # `snapshot`/the overall `exit_code` are hoisted here, once; each
+            # phase's own value is `null` if it never even ran (e.g. no BookStack
+            # credentials configured), `{"error": "..."}` if it raised before
+            # producing a result, or its normal `{"events": [...], "summary":
+            # {...}}` otherwise.
+            typer.echo(
+                json.dumps(
+                    {
+                        "report": _phase_payload_or_error(
+                            rep, _reports_payload, phase_errors, "report"
+                        ),
+                        "findings": _phase_payload_or_error(
+                            result, _findings_payload, phase_errors, "findings"
+                        ),
+                        "wiki": _phase_payload_or_error(wiki, _wiki_payload, phase_errors, "wiki"),
+                        "snapshot": str(snapshot_dir) if snapshot_dir is not None else None,
+                        "exit_code": 1 if bad else 0,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            if result is not None:
                 _print_findings_summary(result, dry_run=dry_run, verbose=verbose)
-        if rep is not None:
-            if json_output:
-                typer.echo(_reports_json(rep))
-            else:
+            if rep is not None:
                 _print_reports_summary(rep, dry_run=dry_run, verbose=verbose)
-        if wiki is not None:
-            if json_output:
-                typer.echo(_wiki_json(wiki))
-            else:
+            if wiki is not None:
                 _print_wiki_summary(wiki, dry_run=dry_run, verbose=verbose)
-        if not json_output and snapshot_dir is not None:
-            typer.echo(f"snapshot: {snapshot_dir}")
+            if snapshot_dir is not None:
+                typer.echo(f"snapshot: {snapshot_dir}")
 
         if not dry_run:  # capturing state is the point, even (especially) after failures
             _git_commit_or_warn(root, settings, _git_sync_message(bad, result, rep, wiki))
@@ -856,6 +1072,27 @@ def sync(
 def _phase_error(phase_errors: list[str], name: str) -> str | None:
     prefix = f"{name} sync failed: "
     return next((m[len(prefix) :] for m in phase_errors if m.startswith(prefix)), None)
+
+
+_PhaseResult = TypeVar("_PhaseResult")
+
+
+def _phase_payload_or_error(
+    result: _PhaseResult | None,
+    payload_fn: Callable[[_PhaseResult], dict[str, Any]],
+    phase_errors: list[str],
+    name: str,
+) -> dict[str, Any] | None:
+    """One phase's slot in ``sync --json``'s combined document (item 8, fix-fin1):
+    the phase's normal ``{"events": [...], "summary": {...}}`` payload when it
+    produced a result, ``{"error": "..."}`` when it raised before producing one,
+    or ``null`` when it never even ran at all (e.g. the wiki phase with no
+    BookStack credentials configured) — the three states a phase can be in,
+    never conflated."""
+    if result is not None:
+        return payload_fn(result)
+    error = _phase_error(phase_errors, name)
+    return {"error": error} if error is not None else None
 
 
 def _reports_last_sync_summary(rep: ReportsPhaseResult) -> dict[str, Any]:
@@ -1079,16 +1316,22 @@ def _run_findings_phase(
     )
 
 
-def _findings_json(findings: FindingsPhaseResult) -> str:
-    summary = {
-        "kinds": {
-            k: {"counts": s.counts, "problem_paths": s.problem_paths}
-            for k, s in findings.summaries.items()
+def _findings_payload(findings: FindingsPhaseResult) -> dict[str, Any]:
+    """This phase's contribution to ``sync --json``'s ONE combined document (item
+    8, fix-fin1) — ``events``/``summary`` only; ``snapshot``/the run's overall
+    ``exit_code`` are hoisted to the top level (the SAME snapshot dir and overall
+    exit-code decision are shared by every phase this run, so repeating them
+    per-phase was pure redundancy, not independent information)."""
+    return {
+        "events": [engine_events.event_dict(e) for e in findings.events],
+        "summary": {
+            "kinds": {
+                k: {"counts": s.counts, "problem_paths": s.problem_paths}
+                for k, s in findings.summaries.items()
+            },
+            "exit_code": findings.exit_code,
         },
-        "snapshot_dir": str(findings.snapshot_dir) if findings.snapshot_dir else None,
-        "exit_code": findings.exit_code,
     }
-    return engine_events.render_json(findings.events, summary=summary)
 
 
 def _print_findings_summary(
@@ -1146,6 +1389,7 @@ def _run_wiki_phase(
     force_local: set[Path],
     force_remote: set[Path],
     snapshot: Snapshot,
+    quiet: bool = False,
 ) -> WikiPhaseResult:
     """The wiki phase: BookStack structure (books/chapters/shelves — creates any new
     local book/chapter directory, then regenerates the read-only mirrors), then pages
@@ -1157,7 +1401,16 @@ def _run_wiki_phase(
     ``snapshot`` is ``grison.cli.sync``'s ONE run-wide :class:`Snapshot`, shared with
     the report and findings phases that already ran — this phase's own writes
     (structure, images, pages) append to it too, never their own snapshot; ``sync``
-    persists it once, after this (the last) phase runs."""
+    persists it once, after this (the last) phase runs.
+
+    ``quiet`` (item 8, fix-fin1): the structure pass's own progress lines
+    ("create book …"/"mirror …") print unconditionally via ``typer.secho``
+    regardless of ``--json`` — under ``sync --json``/``status --remote --json``
+    that stray plain text would land BEFORE the one JSON document those commands
+    print, breaking a consumer's ``json.loads`` on the combined output. ``quiet``
+    (the caller's own ``json_output``) suppresses it; the same information is
+    already in ``structure.created_books``/``materialized``/etc., which the
+    JSON payload surfaces properly."""
     index = Index.load(root)
     state = StateStore(root)
     ctx = build_context(client, state)
@@ -1175,7 +1428,7 @@ def _run_wiki_phase(
         state,
         snapshot,
         dry_run=dry_run,
-        on_event=lambda msg: typer.secho(msg, dim=True),
+        on_event=None if quiet else lambda msg: typer.secho(msg, dim=True),
     )
 
     options = RunOptions(
@@ -1297,23 +1550,26 @@ def _report_dirs_for_status(index: Index) -> dict[PurePosixPath, int]:
     }
 
 
-def _wiki_json(wiki: WikiPhaseResult) -> str:
-    summary = {
-        "kinds": {
-            k: {"counts": s.counts, "problem_paths": s.problem_paths}
-            for k, s in wiki.summaries.items()
+def _wiki_payload(wiki: WikiPhaseResult) -> dict[str, Any]:
+    """See :func:`_findings_payload`'s docstring — same "events + summary only"
+    shape, ``snapshot``/overall ``exit_code`` hoisted to the top level."""
+    return {
+        "events": [engine_events.event_dict(e) for e in wiki.events],
+        "summary": {
+            "kinds": {
+                k: {"counts": s.counts, "problem_paths": s.problem_paths}
+                for k, s in wiki.summaries.items()
+            },
+            "structure": {
+                "created_books": wiki.structure.created_books,
+                "created_chapters": wiki.structure.created_chapters,
+                "materialized": wiki.structure.materialized,
+                "skipped": wiki.structure.skipped,
+                "errors": wiki.structure.errors,
+            },
+            "exit_code": wiki.exit_code,
         },
-        "structure": {
-            "created_books": wiki.structure.created_books,
-            "created_chapters": wiki.structure.created_chapters,
-            "materialized": wiki.structure.materialized,
-            "skipped": wiki.structure.skipped,
-            "errors": wiki.structure.errors,
-        },
-        "snapshot_dir": str(wiki.snapshot_dir) if wiki.snapshot_dir else None,
-        "exit_code": wiki.exit_code,
     }
-    return engine_events.render_json(wiki.events, summary=summary)
 
 
 def _print_wiki_summary(wiki: WikiPhaseResult, *, dry_run: bool, verbose: bool = False) -> None:
@@ -1398,6 +1654,7 @@ def _run_reports_phase(
     force_local: set[Path],
     force_remote: set[Path],
     snapshot: Snapshot,
+    quiet: bool = False,
 ) -> tuple[ReportsPhaseResult, dict[int, dict[int, dict[str, Any]]]]:
     """The reports phase: report directories + `.report.yml`/`project.md` mirrors
     (:func:`grison.adapters.gw_report.sync_report_dirs` — structure-style, like the
@@ -1428,7 +1685,11 @@ def _run_reports_phase(
     findings and (if it runs) wiki phases append to the SAME object; this phase
     (the first one to run) never persists it and never creates its own (one undo
     snapshot per sync run, not one per phase — see :mod:`grison.engine.undo`'s
-    module docstring)."""
+    module docstring).
+
+    ``quiet`` (item 8, fix-fin1): see :func:`_run_wiki_phase`'s own docstring —
+    same reason (suppress the dir-mirror pass's raw ``typer.secho`` progress
+    lines under ``--json``, never valid JSON on their own)."""
     index = Index.load(root)
     state = StateStore(root)
     ctx = build_gw_context(client, index)
@@ -1440,7 +1701,7 @@ def _run_reports_phase(
         state,
         snapshot,
         dry_run=dry_run,
-        on_event=lambda msg: typer.secho(msg, dim=True),
+        on_event=None if quiet else lambda msg: typer.secho(msg, dim=True),
     )
     _refresh_report_dirs(ctx, index)
 
@@ -1563,23 +1824,26 @@ def _refresh_report_dirs(ctx: GWReportContext, index: Index) -> None:
             ctx.report_id_by_dir[name] = rec.id
 
 
-def _reports_json(reports: ReportsPhaseResult) -> str:
-    summary = {
-        "kinds": {
-            k: {"counts": s.counts, "problem_paths": s.problem_paths}
-            for k, s in reports.summaries.items()
+def _reports_payload(reports: ReportsPhaseResult) -> dict[str, Any]:
+    """See :func:`_findings_payload`'s docstring — same "events + summary only"
+    shape, ``snapshot``/overall ``exit_code`` hoisted to the top level."""
+    return {
+        "events": [engine_events.event_dict(e) for e in reports.events],
+        "summary": {
+            "kinds": {
+                k: {"counts": s.counts, "problem_paths": s.problem_paths}
+                for k, s in reports.summaries.items()
+            },
+            "dirs": {
+                "created": reports.dirs.created,
+                "materialized": reports.dirs.materialized,
+                "scope_failures": reports.dirs.scope_failures,
+                "skipped": reports.dirs.skipped,
+                "errors": reports.dirs.errors,
+            },
+            "exit_code": reports.exit_code,
         },
-        "dirs": {
-            "created": reports.dirs.created,
-            "materialized": reports.dirs.materialized,
-            "scope_failures": reports.dirs.scope_failures,
-            "skipped": reports.dirs.skipped,
-            "errors": reports.dirs.errors,
-        },
-        "snapshot_dir": str(reports.snapshot_dir) if reports.snapshot_dir else None,
-        "exit_code": reports.exit_code,
     }
-    return engine_events.render_json(reports.events, summary=summary)
 
 
 def _print_reports_summary(
@@ -1694,6 +1958,8 @@ def undo(
     ``.claude/settings.json`` deny-list).
     """
     root = find_workspace_root(Path.cwd())
+    _refuse_if_format_mismatch(root)  # D13 (item 10) — before any work
+    _refuse_if_workspace_rules_fail(root)  # item 1 — before any replay
     names = engine_list_snapshots(root)
     if list_:
         if not names:
@@ -1930,7 +2196,7 @@ def _print_parse_summary(summary: ParseSummary, out_dir: Path, *, dry_run: bool)
     sink = summary.sink
     if sink is not None:
         verb = "Would write" if dry_run else "Wrote"
-        typer.echo(f"{verb} {len(sink.written)} → {out_dir}  ({len(sink.unchanged)} unchanged)")
+        typer.echo(f"{verb} {len(sink.written)} to {out_dir}  ({len(sink.unchanged)} unchanged)")
 
     for path, reason in summary.skipped_files:
         typer.secho(f"skipped  {path.name}: {reason}", fg=typer.colors.YELLOW)

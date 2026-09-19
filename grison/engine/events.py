@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from grison.engine.model import Event, VetoSeverity
 
@@ -117,27 +117,27 @@ def render_text_lines(events: Iterable[Event], *, verbose: bool = False) -> list
     return [render_text(e) for e in events if verbose or e.severity is not VetoSeverity.INFO]
 
 
+def event_dict(e: Event) -> dict[str, Any]:
+    """One event's plain-dict JSON shape (ALWAYS every field, including
+    INFO-severity — ``--json`` is for machine consumers that can filter for
+    themselves) — the one place this shape is defined, shared by
+    :func:`render_json` (JSON Lines) and ``grison sync --json``'s single
+    combined document (:mod:`grison.cli`, item 8, fix-fin1) so the two can never
+    quietly disagree on what an event looks like."""
+    return {
+        "verb": e.verb,
+        "path": e.path,
+        "label": e.label,
+        "detail": e.detail,
+        "dry_run": e.dry_run,
+        "severity": e.severity.value if e.severity is not None else None,
+    }
+
+
 def render_json(events: Iterable[Event], *, summary: Mapping[str, object] | None = None) -> str:
-    """One JSON object per event (ALWAYS all of them, including INFO-severity —
-    ``--json`` is for machine consumers that can filter for themselves), plus a final
-    summary object — stable keys, one object per line (JSON Lines) so a consumer can
-    stream it."""
-    lines = []
-    for e in events:
-        lines.append(
-            json.dumps(
-                {
-                    "type": "event",
-                    "verb": e.verb,
-                    "path": e.path,
-                    "label": e.label,
-                    "detail": e.detail,
-                    "dry_run": e.dry_run,
-                    "severity": e.severity.value if e.severity is not None else None,
-                },
-                sort_keys=True,
-            )
-        )
+    """One JSON object per event, plus a final summary object — stable keys, one
+    object per line (JSON Lines) so a consumer can stream it."""
+    lines = [json.dumps({"type": "event", **event_dict(e)}, sort_keys=True) for e in events]
     if summary is not None:
         lines.append(json.dumps({"type": "summary", **summary}, sort_keys=True))
     return "\n".join(lines)

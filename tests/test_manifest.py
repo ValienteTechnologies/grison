@@ -68,6 +68,42 @@ def test_read_missing_manifest_with_v1_env_file_is_format_1(tmp_path: Path) -> N
     assert m.read(tmp_path).format == 1
 
 
+# --- has_v1_content (item 10, fix-fin1): the PRECISE v1 signal bootstrap_workspace
+# and the D13 format-mismatch gates (grison.cli/grison.validator.core) share, as
+# opposed to read()'s own cruder "env exists" heuristic above --------------------
+
+
+def test_has_v1_content_false_for_a_bare_directory(tmp_path: Path) -> None:
+    assert m.has_v1_content(tmp_path) is False
+
+
+def test_has_v1_content_false_for_env_only_no_real_content(tmp_path: Path) -> None:
+    """The exact gap ``read()``'s own heuristic has (see the test above) — a
+    directory whose ``.grison/env`` merely exists, with no real findings/
+    methodology content, must NOT count as v1 content by this precise check,
+    even though ``read()`` itself would call it format 1."""
+    (tmp_path / ".grison").mkdir()
+    (tmp_path / ".grison" / "env").write_text("GRISON_GW_URL=\n")
+    assert m.has_v1_content(tmp_path) is False
+
+
+def test_has_v1_content_true_for_a_real_finding(tmp_path: Path) -> None:
+    (tmp_path / "findings" / "library").mkdir(parents=True)
+    (tmp_path / "findings" / "library" / "x.md").write_text("---\n---\n")
+    assert m.has_v1_content(tmp_path) is True
+
+
+def test_has_v1_content_true_for_real_methodology_content(tmp_path: Path) -> None:
+    (tmp_path / "methodology" / "library" / "book").mkdir(parents=True)
+    (tmp_path / "methodology" / "library" / "book" / "page.md").write_text("---\n---\n")
+    assert m.has_v1_content(tmp_path) is True
+
+
+def test_has_v1_content_false_for_an_empty_findings_dir(tmp_path: Path) -> None:
+    (tmp_path / "findings" / "library").mkdir(parents=True)
+    assert m.has_v1_content(tmp_path) is False
+
+
 def test_read_rejects_missing_format_key(tmp_path: Path) -> None:
     (tmp_path / ".grison").mkdir()
     (tmp_path / ".grison" / "manifest.yml").write_text(yaml.safe_dump({"other": 1}))

@@ -35,7 +35,17 @@ _DEFAULT_FILE_MODE = 0o644
 
 
 def _atomic_write(path: Path, data: bytes, *, private: bool) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if private:
+        # A private file's parent directory must be 0700 from the moment it is
+        # created — a bare `mkdir` is umask-governed (a lenient umask, e.g. 0o002,
+        # would leave a brand-new `.grison/state/<kind>/` world/group-readable for
+        # however long until something else happened to tighten it), so this reuses
+        # the same private-dir helper `.grison/` itself is bootstrapped with, which
+        # creates every missing ancestor 0700 and belt-and-suspenders chmods each
+        # one regardless of umask (item 4, fix-fin1).
+        ensure_private_dir(path.parent)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}-{id(data)}")
     mode = _PRIVATE_FILE_MODE if private else _DEFAULT_FILE_MODE
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)

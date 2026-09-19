@@ -178,6 +178,39 @@ def test_status_reports_a_live_collision_sidecar(run_grison, bs_server):
     assert "methodology: edited 1" in result.output
 
 
+def test_status_reports_a_live_findings_collision_sidecar(run_grison, gw_server, workspace):
+    """Item 12 (fix-fin1): before this fix, a library/reported-findings collision
+    sidecar was invisible from `grison status` entirely — neither counted toward
+    the exit code, nor surfaced under the top-level `findings` object in
+    `--json` (unlike `report`/`methodology`'s own `collision_sidecars`), nor
+    printed in text output."""
+    gw_server.store.seed_finding(
+        id=1,
+        title="Weak TLS Ciphers",
+        severityId=3,
+        findingTypeId=4,
+        description="<p>old text</p>",
+    )
+    run_grison("sync")
+    path = workspace / "findings" / "library" / "weak-tls-ciphers.md"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("old text", "local edit"), encoding="utf-8"
+    )
+    row = gw_server.store._by_id(gw_server.store.findings, 1)
+    assert row is not None
+    row["description"] = "<p>remote edit</p>"
+    run_grison("sync")  # writes the .remote.md sidecar, never resolved
+
+    result = run_grison("status")
+    assert result.exit_code == 1, result.output  # a live collision sidecar IS a problem
+    assert "findings: 1 collision-sidecar(s) pending" in result.output
+    assert "! findings/library/weak-tls-ciphers.md: unresolved collision" in result.output
+
+    json_result = run_grison("status", "--json")
+    payload = json.loads(json_result.output)
+    assert payload["findings"]["collision_sidecars"] == ["findings/library/weak-tls-ciphers.md"]
+
+
 # ---------------------------------------------------------------------------
 # --remote: will-pull/collision/remote-deleted via dry-run classify (item 4)
 # ---------------------------------------------------------------------------
@@ -275,6 +308,29 @@ def test_status_remote_json_shape(run_grison, gw_server, bs_server):
     assert "kinds" in remote["wiki"]
 
 
+def test_status_remote_json_is_valid_json_when_a_new_book_would_be_created(
+    run_grison, bs_server
+) -> None:
+    """Item 8 (fix-fin1) regression: ``status --remote``'s dry-run classify calls
+    the SAME wiki-phase structure pass ``sync`` does — before this fix, a brand
+    new local book/chapter directory made that pass print its own raw
+    ``typer.secho`` progress lines ("would create book …") REGARDLESS of
+    ``--json``, corrupting the JSON output with leading plain text. The earlier
+    ``test_status_remote_json_shape`` never caught this because it only edits an
+    ALREADY-synced book (no structure event fires); this one seeds a brand-new
+    book so the structure pass has something to report."""
+    run_grison("sync")  # establishes the workspace with nothing to sync yet
+    book_dir = Path.cwd() / "methodology" / "library" / "new-book"
+    book_dir.mkdir(parents=True)
+    (book_dir / "notes.md").write_text("---\ntitle: Notes\n---\n\n# Notes\n", encoding="utf-8")
+
+    result = run_grison("status", "--remote", "--json")
+
+    payload = json.loads(result.output)  # raises if any stray text preceded the JSON
+    wiki_counts = payload["remote"]["wiki"]["kinds"]["bs.page"]["counts"]
+    assert sum(wiki_counts.values()) == 1  # the new page was classified, one way or another
+
+
 def test_status_remote_reports_missing_credentials_per_leg(run_grison, workspace):
     (workspace / ".grison" / "env").write_text(
         "GRISON_GW_URL=\nGRISON_GW_TOKEN=\nGRISON_BS_URL=\n"
@@ -317,6 +373,7 @@ def test_status_json_stable_shape(run_grison, bs_server):
     # `evidence` breakdown, D1's file-set mirror — moved here from `findings`
     # since evidence syncs on the report phase now, see fix item 5).
     assert payload["findings"]["managed"] is True
+    assert payload["findings"]["collision_sidecars"] == []  # item 12, fix-fin1
     zero_counts = {
         "clean": 0,
         "edited": 0,

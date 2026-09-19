@@ -6,6 +6,7 @@ driving (``GRISON_GIT=commit``), and first-run bootstrap.
 from __future__ import annotations
 
 import fcntl
+import json
 import subprocess
 from pathlib import Path
 
@@ -284,7 +285,9 @@ def test_first_run_bootstrap_creates_env_template_and_exits_with_message(
     result = CliRunner().invoke(cli_mod.app, ["sync"])
 
     env_path = root / ".grison" / "env"
-    assert result.exit_code == 1
+    # ENGINE.md §10: missing credentials is "could not run" — exit 2, not 1 (item
+    # 6, fix-fin1 — this test used to assert exit 1).
+    assert result.exit_code == 2
     assert env_path.exists()
     assert "GRISON_GW_URL=" in env_path.read_text(encoding="utf-8")
     assert oct(env_path.stat().st_mode)[-3:] == "600"
@@ -334,6 +337,188 @@ def test_sync_exits_2_on_a_transport_failure_during_the_probe(run_grison, gw_ser
     assert "503" in result.output
 
 
+# ---------------------------------------------------------------------------
+# Workspace-level WS-* rules gate sync/undo outright (item 1, fix-fin1)
+# ---------------------------------------------------------------------------
+
+
+def test_sync_refuses_when_a_canonical_deny_rule_is_hand_removed(
+    run_grison, workspace, gw_server, bs_server, monkeypatch
+) -> None:
+    """Item 1 (CRITICAL, fix-fin1): before this fix, every sync phase filtered
+    ``validate_workspace``'s failures down to its own path prefix
+    (``findings``/``methodology``/``findings/reports``) — a WS-012 failure (whose
+    path is ``.claude/settings.json``, matching none of those prefixes) was
+    silently dropped, so a hand-edit removing one of grison's own deny rules never
+    gated anything. Now: any WS-* failure refuses the WHOLE run outright, before
+    the first remote request of any kind."""
+    run_grison("sync")  # real bootstrap + scaffold — settings.json now carries the
+    # canonical baseline, recorded in .grison/state/mirrors.json
+
+    settings_path = workspace / ".claude" / "settings.json"
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    deny = data["permissions"]["deny"]
+    assert "Bash(*grison sync*)" in deny
+    deny.remove("Bash(*grison sync*)")
+    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    gw_before, bs_before = len(gw_server.request_log), len(bs_server.request_log)
+    import grison.cli as cli_mod
+
+    def _no_remote_client(*a: object, **k: object) -> None:
+        raise AssertionError("no remote client should ever be constructed")
+
+    monkeypatch.setattr(cli_mod, "_make_gw_client", _no_remote_client)
+    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 2, result.output
+    assert "WS-012" in result.output
+    assert ".claude/settings.json" in result.output
+    assert len(gw_server.request_log) == gw_before  # not one request of any kind
+    assert len(bs_server.request_log) == bs_before
+
+
+def test_undo_refuses_when_a_canonical_deny_rule_is_hand_removed(
+    run_grison, workspace, gw_server, bs_server, monkeypatch
+) -> None:
+    """Item 1, ``grison undo`` half: before this fix, ``undo`` ran no validation at
+    all. A snapshot exists (from a real push) but the same hand-edit must still
+    refuse the undo outright, before any replay."""
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
+    run_grison("sync")  # pull
+    path = workspace / "methodology" / "library" / "playbook" / "notes.md"
+    path.write_text("---\ntitle: Notes\n---\n\n# Edited\n", encoding="utf-8")
+    run_grison("sync")  # push -> a real snapshot exists to undo
+
+    settings_path = workspace / ".claude" / "settings.json"
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    deny = data["permissions"]["deny"]
+    assert "Bash(*grison undo*)" in deny
+    deny.remove("Bash(*grison undo*)")
+    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    bs_before = len(bs_server.request_log)
+    import grison.cli as cli_mod
+
+    def _no_remote_client(*a: object, **k: object) -> None:
+        raise AssertionError("no remote client should ever be constructed")
+
+    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 2, result.output
+    assert "WS-012" in result.output
+    assert len(bs_server.request_log) == bs_before  # not one request — no replay at all
+
+
+def test_grison_scaffold_force_lets_sync_proceed_again(
+    run_grison, workspace, gw_server, bs_server
+) -> None:
+    """The prescribed fix for a WS-012 refusal: ``grison scaffold --force``
+    recomputes ``.claude/settings.json`` from scratch (re-adding the removed deny
+    rule) and re-records its digest — the very next ``sync`` must proceed
+    normally again, not stay refused."""
+    run_grison("sync")
+    settings_path = workspace / ".claude" / "settings.json"
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    data["permissions"]["deny"].remove("Bash(*grison sync*)")
+    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    refused = run_grison("sync")
+    assert refused.exit_code == 2, refused.output
+
+    scaffolded = run_grison("scaffold", "--force")
+    assert scaffolded.exit_code == 0, scaffolded.output
+    healed = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "Bash(*grison sync*)" in healed["permissions"]["deny"]
+
+    result = run_grison("sync")
+    assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# D13 format-mismatch gate on every command that reads a workspace (item 10)
+# ---------------------------------------------------------------------------
+
+
+def _write_format_1_manifest(workspace: Path) -> None:
+    (workspace / ".grison" / "manifest.yml").write_text("format: 1\n", encoding="utf-8")
+
+
+def test_sync_refuses_a_format_1_manifest(
+    run_grison, workspace, gw_server, bs_server, monkeypatch
+) -> None:
+    """Item 10 (fix-fin1, D13): before this fix, only ``grison validate`` ever
+    consulted the manifest format — ``sync``/``status``/``undo`` never called
+    ``manifest.check()`` at all, so a workspace whose ``.grison/manifest.yml``
+    says ``format: 1`` got fully synced as if it were current. Now every command
+    refuses outright, before any work."""
+    _write_format_1_manifest(workspace)
+    before = sorted(p.relative_to(workspace) for p in workspace.rglob("*") if p.is_file())
+    gw_before, bs_before = len(gw_server.request_log), len(bs_server.request_log)
+    import grison.cli as cli_mod
+
+    def _no_remote_client(*a: object, **k: object) -> None:
+        raise AssertionError("no remote client should ever be constructed")
+
+    monkeypatch.setattr(cli_mod, "_make_gw_client", _no_remote_client)
+    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 2, result.output
+    assert "format 1" in result.output
+    assert "no migration converts it" in result.output
+    after = sorted(p.relative_to(workspace) for p in workspace.rglob("*") if p.is_file())
+    assert after == before  # nothing written
+    assert len(gw_server.request_log) == gw_before
+    assert len(bs_server.request_log) == bs_before
+
+
+def test_status_refuses_a_format_1_manifest(run_grison, workspace) -> None:
+    _write_format_1_manifest(workspace)
+    before = sorted(p.relative_to(workspace) for p in workspace.rglob("*") if p.is_file())
+
+    result = run_grison("status")
+
+    assert result.exit_code == 2, result.output
+    assert "format 1" in result.output
+    after = sorted(p.relative_to(workspace) for p in workspace.rglob("*") if p.is_file())
+    assert after == before
+
+
+def test_undo_refuses_a_format_1_manifest(
+    run_grison, workspace, gw_server, bs_server, monkeypatch
+) -> None:
+    """A real snapshot exists (from before the workspace's format was corrupted) —
+    the refusal must still win over replaying it."""
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# Original")
+    run_grison("sync")  # pull
+    path = workspace / "methodology" / "library" / "playbook" / "notes.md"
+    path.write_text("---\ntitle: Notes\n---\n\n# Edited\n", encoding="utf-8")
+    run_grison("sync")  # push -> a real snapshot exists
+
+    _write_format_1_manifest(workspace)
+    bs_before = len(bs_server.request_log)
+    import grison.cli as cli_mod
+
+    def _no_remote_client(*a: object, **k: object) -> None:
+        raise AssertionError("no remote client should ever be constructed")
+
+    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+
+    result = run_grison("undo")
+
+    assert result.exit_code == 2, result.output
+    assert "format 1" in result.output
+    assert len(bs_server.request_log) == bs_before  # no replay at all
+
+
 def test_sync_re_introspects_and_updates_the_cache_after_a_server_upgrade(
     run_grison,
     gw_server,
@@ -358,3 +543,66 @@ def test_sync_re_introspects_and_updates_the_cache_after_a_server_upgrade(
     cached = load_cache(workspace)
     assert cached is not None
     assert cached.fingerprint == fingerprint_from_schema(load_fake_gw_schema())
+
+
+# ---------------------------------------------------------------------------
+# `sync --json` emits ONE combined document for the whole run (item 8, fix-fin1)
+# ---------------------------------------------------------------------------
+
+
+def test_sync_json_emits_one_combined_document(run_grison, bs_server) -> None:
+    """Before this fix, ``--json`` printed one JSON-Lines blob per phase
+    (findings, then report, then wiki), each repeating its own ``snapshot_dir``/
+    ``exit_code`` — three separate streams a consumer had to know to
+    concatenate. Now it is exactly ONE JSON document: ``{"report": …,
+    "findings": …, "wiki": …, "snapshot": …, "exit_code": n}``, each phase's
+    slot shaped ``{"events": [...], "summary": {...}}``."""
+    book = bs_server.store.seed_book(name="Playbook")
+    bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="# N")
+
+    result = run_grison("sync", "--json")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)  # exactly one JSON document — json.loads
+    # would raise on anything but a single well-formed document (in particular,
+    # on the old JSON-Lines-per-phase shape, which is not valid JSON as a whole).
+    assert set(payload) == {"report", "findings", "wiki", "snapshot", "exit_code"}
+    assert payload["exit_code"] == 0
+    for phase in ("report", "findings", "wiki"):
+        assert set(payload[phase]) == {"events", "summary"}
+        assert isinstance(payload[phase]["events"], list)
+        assert isinstance(payload[phase]["summary"], dict)
+    assert any(e["verb"] == "pull" for e in payload["wiki"]["events"])
+    assert payload["wiki"]["summary"]["kinds"]["bs.page"]["counts"]["pull_new"] == 1
+
+
+def test_sync_json_wiki_slot_is_null_when_bookstack_is_not_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wiki phase never even runs without BookStack credentials — its slot in
+    the combined document is `null`, distinct from `{"error": ...}` (it raised)
+    or a real payload (it ran)."""
+    from grison.remote.bootstrap import bootstrap_workspace
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GRISON_GW_URL", "https://gw.test")
+    monkeypatch.setenv("GRISON_GW_TOKEN", "tok")
+    for key in ("GRISON_BS_URL", "GRISON_BS_TOKEN_ID", "GRISON_BS_TOKEN_SECRET"):
+        monkeypatch.delenv(key, raising=False)
+    bootstrap_workspace(tmp_path)
+
+    import grison.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(
+        cli_mod, "_run_findings_phase", lambda *a, **k: cli_mod.FindingsPhaseResult()
+    )
+    monkeypatch.setattr(
+        cli_mod, "_run_reports_phase", lambda *a, **k: (cli_mod.ReportsPhaseResult(), {})
+    )
+
+    result = CliRunner().invoke(cli_mod.app, ["sync", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["wiki"] is None

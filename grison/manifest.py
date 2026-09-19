@@ -77,6 +77,24 @@ def _path(root: Path) -> Path:
     return root / MANIFEST_RELATIVE_PATH
 
 
+def has_v1_content(root: Path) -> bool:
+    """Whether ``root`` has any real pre-v2 content under ``findings/`` or
+    ``methodology/`` — the precise signal that this is a genuine v1 workspace, as
+    opposed to a directory whose ``.grison/env`` merely exists (by hand, copied
+    in, or freshly template-written) with no real content yet, which
+    :func:`grison.remote.bootstrap.bootstrap_workspace` deliberately starts at
+    ``CURRENT_FORMAT`` instead — see its own docstring and :func:`read`'s "a
+    workspace with v1 artefacts... but no manifest reads as format 1" comment,
+    which this function's result feeds into everywhere that heuristic matters
+    (item 10, fix-fin1: shared so the bootstrap-vs-refuse decision can never
+    disagree with itself)."""
+    return any(
+        d.is_dir() and any(p.is_file() for p in d.rglob("*"))
+        for d in (root / "findings", root / "methodology")
+        if d.is_dir()
+    )
+
+
 def read(root: Path) -> Manifest:
     """Read ``.grison/manifest.yml``. A workspace with v1 artefacts
     (``.grison/env`` exists) but no manifest reads as format 1 — the manifest

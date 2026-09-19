@@ -115,7 +115,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
-from grison.engine.apply import refetch_guard, sidecar_path
+from grison.engine.apply import MASS_CHANGE_RATIO, REMOTE_WRITE_OUTCOMES, refetch_guard
+from grison.engine.apply import change_guard as _apply_change_guard
 from grison.engine.classify import classify
 from grison.engine.identity import Missing, Unindexed, pair
 from grison.engine.model import (
@@ -126,7 +127,9 @@ from grison.engine.model import (
     RemoteRecord,
     VetoSeverity,
 )
+from grison.engine.sidecar import clear_stale_sidecars as _clear_stale_sidecars
 from grison.engine.sidecar import is_sidecar_name
+from grison.engine.sidecar import write_sidecar as _write_sidecar
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
 from grison.fsio import atomic_write_bytes
@@ -137,18 +140,12 @@ from grison.markdown.refs import LocalRef, RemoteRef
 from grison.markdown.refscan import FoundRef, ref_spans, scan_refs
 from grison.validator.registry import Failure
 
-#: Same values as grison.engine.apply's — one change-guard rule for every record
-#: type (ENGINE.md), file sets included. A separate, literal copy rather than an
-#: import of apply.py's private constants: this module implements its own loop
-#: (see module docstring) and this is the one piece of apply.py it must not
-#: silently drift from if that module's thresholds ever change.
-_MASS_CHANGE_MIN = 5
-_MASS_CHANGE_RATIO = 0.2
-
-_REMOTE_WRITE_OUTCOMES = frozenset(
-    {Outcome.PUSH, Outcome.CREATE, Outcome.DELETE_REMOTE, Outcome.MOVE_EDIT}
-)
-_LOCAL_WRITE_OUTCOMES = frozenset({Outcome.PULL, Outcome.DELETE_LOCAL})
+# One change guard, one pre-write re-fetch guard, one collision-sidecar
+# write/clear for every record type (ENGINE.md) — file sets included. Imported
+# from grison.engine.apply/grison.engine.sidecar (item 5, fix-fin1) rather than
+# re-declared: this module used to carry its own literal copies of the
+# threshold/outcome-set constants and the change-guard/sidecar functions, which
+# could silently drift from apply.py's if either was edited alone.
 
 
 @dataclass(frozen=True)
@@ -156,7 +153,7 @@ class RunOptions:
     dry_run: bool = False
     force_local: frozenset[PurePosixPath] = frozenset()
     force_remote: frozenset[PurePosixPath] = frozenset()
-    mass_change_ratio: float = _MASS_CHANGE_RATIO
+    mass_change_ratio: float = MASS_CHANGE_RATIO
 
 
 @dataclass(frozen=True)
@@ -729,7 +726,7 @@ def sync_fileset(  # noqa: PLR0913
     # INVALID — a pull/delete-local proceeds regardless, exactly like a
     # document's own gate.
     for p in plans:
-        if p.outcome in _REMOTE_WRITE_OUTCOMES and p.path is not None:
+        if p.outcome in REMOTE_WRITE_OUTCOMES and p.path is not None:
             if str(p.path) in invalid_paths:
                 p.rule_ids = tuple(f.rule_id for f in failures if f.path == str(p.path))
                 p.outcome = Outcome.INVALID
@@ -1006,30 +1003,6 @@ def _classify_missing(
     )
 
 
-def _apply_change_guard(plans: list[Plan], options: RunOptions) -> None:
-    total = max(len(plans), 1)
-
-    def _weight(p: Plan) -> int:
-        return 2 if p.outcome in (Outcome.DELETE_REMOTE, Outcome.DELETE_LOCAL) else 1
-
-    def _forced(p: Plan) -> bool:
-        return p.path is not None and (
-            p.path in options.force_local or p.path in options.force_remote
-        )
-
-    remote_writes = [p for p in plans if p.outcome in _REMOTE_WRITE_OUTCOMES and not _forced(p)]
-    w = sum(_weight(p) for p in remote_writes)
-    if w > _MASS_CHANGE_MIN and w > options.mass_change_ratio * total:
-        for p in remote_writes:
-            p.outcome = Outcome.WITHHELD
-
-    local_writes = [p for p in plans if p.outcome in _LOCAL_WRITE_OUTCOMES and not _forced(p)]
-    d = sum(_weight(p) for p in local_writes)
-    if d > _MASS_CHANGE_MIN and d > options.mass_change_ratio * total:
-        for p in local_writes:
-            p.outcome = Outcome.WITHHELD
-
-
 def _refetch_guard(
     ctx: Any,
     adapter: FileSetAdapter,
@@ -1215,31 +1188,17 @@ def _write_collision_sidecar(
     path: PurePosixPath | None,
     remote: RemoteRecord | None,
 ) -> None:
-    """Mirrors :func:`grison.engine.apply._write_collision_sidecar` for a file
-    set's bytes (ENGINE.md §8): the remote version, fetched via
-    :meth:`FileSetAdapter.fetch_body` and written atomically next to the file at
-    :func:`~grison.engine.apply.sidecar_path` (``shot.png`` ->
-    ``shot.remote.png``) — never a document: the scaffolded ``.gitignore``'s
-    ``*.remote.*`` entry already covers it (unlike the document engine, a
-    file-set sidecar's extension is whatever the shadowed file's is, not a fixed
-    ``.md``, so a literal ``.remote.md`` pattern would have missed it — see
-    :func:`~grison.engine.sidecar.is_sidecar_name`). A no-op when there's no local
-    path to sidecar next to, or no remote record to read bytes from (e.g. "edited
-    locally, deleted remotely" — there is nothing on the server left to show)."""
+    """The file-set binding of :func:`grison.engine.sidecar.write_sidecar` (item 5,
+    fix-fin1 — same shared write :mod:`grison.engine.apply` uses for its own,
+    text-shaped records): the remote version's bytes come from
+    :meth:`FileSetAdapter.fetch_body`, never a document render — never a document:
+    the scaffolded ``.gitignore``'s ``*.remote.*`` entry already covers it (unlike
+    the document engine, a file-set sidecar's extension is whatever the shadowed
+    file's is, not a fixed ``.md``, so a literal ``.remote.md`` pattern would have
+    missed it — see :func:`~grison.engine.sidecar.is_sidecar_name`)."""
     if path is None or remote is None:
         return
-    body = adapter.fetch_body(ctx, remote.id)
-    atomic_write_bytes(root / sidecar_path(path), body)
-
-
-def _clear_stale_sidecars(root: Path, plans: list[Plan]) -> None:
-    """Mirrors :func:`grison.engine.apply._clear_stale_sidecars` (ENGINE.md §8): a
-    sidecar is cleared as soon as its record is no longer in collision (resolved
-    by a force flag, or the two sides converged)."""
-    for p in plans:
-        if p.path is None or p.outcome is Outcome.COLLISION:
-            continue
-        (root / sidecar_path(p.path)).unlink(missing_ok=True)
+    _write_sidecar(root, path, remote, lambda: adapter.fetch_body(ctx, remote.id))
 
 
 def _apply_delete_local(
@@ -1280,6 +1239,11 @@ def _apply_create(  # noqa: PLR0913
     if dry:
         events.append(_event("create", path=p.path, dry_run=True))
         return
+    # item 11, fix-fin1: a force-local "resurrect" of a remote-deleted file
+    # (classify.py converts DELETE_LOCAL -> CREATE) reaches here with `p.id`
+    # still set to the OLD, now-gone remote id — see the mirrored comment in
+    # grison.engine.apply._apply_create.
+    old_id = p.id
     body = local_files[p.path.name]
     opinion = captions.get(p.path.name)
     caption = opinion.caption if opinion is not None and opinion.has_opinion else ""
@@ -1288,6 +1252,8 @@ def _apply_create(  # noqa: PLR0913
         ctx, filename=p.path.name, body=body, caption=caption, description=description
     )
     index.set(str(p.path), IndexKind(adapter.kind), row.id)
+    if old_id is not None and old_id != row.id:
+        state.forget(adapter.kind, old_id)
     snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=row.id))
     body_hash = _hash_bytes(body)
     state.put(

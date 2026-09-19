@@ -369,6 +369,123 @@ def test_force_flags_have_no_effect_outside_a_collision() -> None:
     )
 
 
+# --- force-local / force-remote on an ORDINARY (non-colliding) deletion -------------
+# Item 11, fix-fin1: the mass-change guard may withhold an unambiguous DELETE_REMOTE/
+# DELETE_LOCAL — "--force-remote PATH" always means the remote wins (restore, never
+# delete the remote copy); "--force-local PATH" always means the local side wins
+# (recreate, never delete the local copy). classify() itself performs this
+# resolution — apply.py's change guard then sees the already-resolved outcome.
+
+
+def test_force_remote_on_a_plain_delete_remote_restores_it() -> None:
+    """Row 6 (DELETE_REMOTE, no collision at all — R == base): before this fix,
+    naming this path on ``--force-remote`` only exempted it from the mass-change
+    guard's WITHHELD conversion while leaving the outcome as DELETE_REMOTE — the
+    remote record still got deleted, exactly backwards from what "the remote
+    wins" promises. Now it restores the file (PULL) instead."""
+    assert (
+        classify(
+            indexed=True,
+            local_present=False,
+            remote_present=True,
+            local_hash=None,
+            remote_hash=BASE,
+            base_hash=BASE,
+            force_remote=True,
+        )
+        is Outcome.PULL
+    )
+
+
+def test_force_local_on_a_plain_delete_remote_is_unaffected() -> None:
+    """The MATCHING-direction flag on a plain DELETE_REMOTE changes nothing — the
+    local deletion already IS what --force-local means ("the local side wins");
+    the guard's own exemption (not classify()'s job) is what lets it through."""
+    assert (
+        classify(
+            indexed=True,
+            local_present=False,
+            remote_present=True,
+            local_hash=None,
+            remote_hash=BASE,
+            base_hash=BASE,
+            force_local=True,
+        )
+        is Outcome.DELETE_REMOTE
+    )
+
+
+def test_force_local_on_a_plain_delete_local_recreates_it() -> None:
+    """Row 8 (DELETE_LOCAL, no collision at all — L == base): before this fix,
+    naming this path on ``--force-local`` only exempted it from the guard while
+    leaving the outcome as DELETE_LOCAL — the local file still got deleted,
+    exactly backwards from "the local side wins". Now it recreates the record
+    remotely (CREATE) instead."""
+    assert (
+        classify(
+            indexed=True,
+            local_present=True,
+            remote_present=False,
+            local_hash=BASE,
+            remote_hash=None,
+            base_hash=BASE,
+            force_local=True,
+        )
+        is Outcome.CREATE
+    )
+
+
+def test_force_remote_on_a_plain_delete_local_is_unaffected() -> None:
+    assert (
+        classify(
+            indexed=True,
+            local_present=True,
+            remote_present=False,
+            local_hash=BASE,
+            remote_hash=None,
+            base_hash=BASE,
+            force_remote=True,
+        )
+        is Outcome.DELETE_LOCAL
+    )
+
+
+def test_force_local_on_a_plain_delete_local_has_no_effect_for_read_only() -> None:
+    """A read-only record type can never push/create an already-indexed record
+    (ENGINE.md) — recreating one remotely would violate the exact contract
+    ``_clamp_read_only`` defends elsewhere, so --force-local has no effect here;
+    the deletion proceeds exactly as it would without the flag."""
+    assert (
+        classify(
+            indexed=True,
+            local_present=True,
+            remote_present=False,
+            local_hash=BASE,
+            remote_hash=None,
+            base_hash=BASE,
+            read_only=True,
+            force_local=True,
+        )
+        is Outcome.DELETE_LOCAL
+    )
+
+
+def test_force_local_on_a_plain_delete_local_has_no_effect_for_append_only() -> None:
+    assert (
+        classify(
+            indexed=True,
+            local_present=True,
+            remote_present=False,
+            local_hash=BASE,
+            remote_hash=None,
+            base_hash=BASE,
+            append_only=True,
+            force_local=True,
+        )
+        is Outcome.DELETE_LOCAL
+    )
+
+
 # --- read-only record types ----------------------------------------------------------
 
 

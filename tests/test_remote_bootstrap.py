@@ -9,7 +9,7 @@ import pytest
 
 from grison import manifest as manifest_mod
 from grison.remote.bootstrap import bootstrap_workspace
-from grison.remote.creds import MissingCreds, load
+from grison.remote.creds import Creds, MissingCreds, load
 
 _GW_VARS = ("GRISON_GW_URL", "GRISON_GW_TOKEN", "GRISON_CF_CLIENT_ID", "GRISON_CF_CLIENT_SECRET")
 
@@ -23,7 +23,9 @@ def test_load_from_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         "GRISON_CF_CLIENT_ID=cid\nGRISON_CF_CLIENT_SECRET=sec\n"
     )
     creds = load(tmp_path)
-    assert creds.gw_url == "https://gw.example" and creds.gw_token == "tok"
+    # gw_token is one of the four secret fields (item 7, fix-fin1) — SecretStr, not
+    # str, so the raw value is only reachable via get_secret_value().
+    assert creds.gw_url == "https://gw.example" and creds.gw_token.get_secret_value() == "tok"
     assert creds.cf_headers() == {"CF-Access-Client-Id": "cid", "CF-Access-Client-Secret": "sec"}
     creds.require_ghostwriter()  # complete → no raise
 
@@ -32,7 +34,42 @@ def test_env_var_overrides_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     (tmp_path / ".grison").mkdir()
     (tmp_path / ".grison" / "env").write_text("GRISON_GW_TOKEN=from-file\n")
     monkeypatch.setenv("GRISON_GW_TOKEN", "from-env")
-    assert load(tmp_path).gw_token == "from-env"
+    assert load(tmp_path).gw_token.get_secret_value() == "from-env"
+
+
+def test_creds_repr_and_str_never_contain_a_secret_value() -> None:
+    """Item 7 (LOW, fix-fin1): the four secret fields (``gw_token``,
+    ``bs_token_id``, ``bs_token_secret``, ``cf_client_secret``) are ``SecretStr``,
+    not plain ``str`` — a stray debug log, an uncaught-exception traceback frame,
+    or a test-failure printing the whole ``Creds`` object must never leak a real
+    token/secret. ``gw_url``/``bs_url``/``cf_client_id`` are not secrets and stay
+    plain ``str``, so they DO appear verbatim."""
+    creds = Creds(
+        gw_url="https://gw.example",
+        gw_token="super-secret-gw-token",
+        bs_url="https://bs.example",
+        bs_token_id="super-secret-bs-id",
+        bs_token_secret="super-secret-bs-secret",
+        cf_client_id="cf-client-id",
+        cf_client_secret="super-secret-cf-secret",
+    )
+    for secret in (
+        "super-secret-gw-token",
+        "super-secret-bs-id",
+        "super-secret-bs-secret",
+        "super-secret-cf-secret",
+    ):
+        assert secret not in repr(creds)
+        assert secret not in str(creds)
+    # the non-secret fields are unaffected — still readable in repr/str.
+    assert "https://gw.example" in repr(creds)
+    assert "cf-client-id" in repr(creds)
+    # the real values are still reachable through get_secret_value() — this is
+    # about accidental logging, not about grison itself losing access to creds.
+    assert creds.gw_token.get_secret_value() == "super-secret-gw-token"
+    assert creds.bs_token_id.get_secret_value() == "super-secret-bs-id"
+    assert creds.bs_token_secret.get_secret_value() == "super-secret-bs-secret"
+    assert creds.cf_client_secret.get_secret_value() == "super-secret-cf-secret"
 
 
 def test_require_ghostwriter_lists_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
