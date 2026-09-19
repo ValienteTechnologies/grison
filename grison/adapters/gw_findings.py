@@ -251,7 +251,11 @@ def _remote_sections_canonical(
         for eid, row in (refs.evidence_rows.items() if refs is not None else ())
         if row.get("friendly_name")
     }
-    return {f: canonical_remote_prose(data.get(f) or "", name_to_id=name_to_id)
+    # headings=True: a real TipTap editor emits h1-h6 in finding fields too (see
+    # grison.markdown.converter's module docstring) — must match render_local's/
+    # _gw_fields' own headings=True or this canonical form and the local file's
+    # would disagree on any finding whose stored HTML has a heading.
+    return {f: canonical_remote_prose(data.get(f) or "", headings=True, name_to_id=name_to_id)
             for f in _SECTIONS}
 
 
@@ -265,7 +269,8 @@ def _gw_fields(  # noqa: PLR0913
         "findingTypeId": doc.finding_type.gw_id,
     }
     for f in _SECTIONS:
-        fields[f] = md_to_html(getattr(doc, f), refs=refs, jinja_escape=True)
+        # headings=True: see _remote_sections_canonical's comment above.
+        fields[f] = md_to_html(getattr(doc, f), refs=refs, jinja_escape=True, headings=True)
     if doc.cvss is not None:
         fields["cvssVector"] = doc.cvss.vector
         fields["cvssScore"] = parse_cvss(doc.cvss.vector).base_score
@@ -354,7 +359,8 @@ class GwLibraryFindingAdapter:
             cvss=finding_fmt.FindingCvss(vector=data["cvssVector"]) if data.get("cvssVector")
             else None,
             cwe=cwe, tags=plain, title=data.get("title") or "Untitled",
-            **{f: html_to_md(data.get(f) or "") for f in _SECTIONS},
+            # headings=True: see _remote_sections_canonical's comment above.
+            **{f: html_to_md(data.get(f) or "", headings=True) for f in _SECTIONS},
         )
         return finding_fmt.dump(doc)
 
@@ -518,7 +524,8 @@ class GwReportedFindingAdapter:
             cwe=cwe, tags=plain, title=data.get("title") or "Untitled",
             affected_entities=_affected_entities_from_html(data.get("affectedEntities") or "")
             or None,
-            **{f: html_to_md(data.get(f) or "", refs=resolver) for f in _SECTIONS},
+            # headings=True: see _remote_sections_canonical's comment above.
+            **{f: html_to_md(data.get(f) or "", headings=True, refs=resolver) for f in _SECTIONS},
         )
         return finding_fmt.dump(doc)
 

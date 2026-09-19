@@ -726,3 +726,158 @@ def test_non_ascii_evidence_filename_pushes_from_a_reported_finding(
     assert "findings (gw.reportedFinding): push 1" in result.output, result.output
     row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
     assert 'data-evidence-id="90"' in row["description"]
+
+
+# --- lab-discovered defects (engine-findings-lab.md scenarios 1 and 13) -----------
+# Real Ghostwriter 7.2.6 seed data hit three converter bugs on a totally fresh
+# sync — reproduced here with the exact seed HTML that triggered each one.
+
+
+def test_library_finding_with_a_real_editor_heading_pulls_and_stays_clean(
+    run_grison, gw_server, workspace,
+):
+    """Defect 1: a real TipTap 7.2.6 editor writes h1-h6 into a plain FINDING
+    field, not just report narrative — the exact stored HTML from
+    ``tests/fixtures/lab-samples/gw-findings.json``'s library finding 3
+    (title "Default Credentials on Admin Panel" in the real lab). Before the
+    fix this raised ``ConverterError: unsupported HTML tag: <h3>`` on every
+    single sync, forever (engine-findings-lab.md, "Two defects", #1)."""
+    gw_server.store.seed_finding(
+        id=3,
+        title="Default Credentials on Admin Panel",
+        severityId=3,
+        findingTypeId=1,
+        description=(
+            "<h3>Overview</h3><p>The admin panel at <code>/admin</code> accepts "
+            "the vendor default credentials <code>admin:admin</code>.</p>"
+        ),
+    )
+
+    first = run_grison("sync")
+
+    assert first.exit_code == 0, first.output
+    assert "findings (gw.finding): pull_new 1" in first.output, first.output
+    path = workspace / "findings" / "library" / "default-credentials-on-admin-panel.md"
+    text = path.read_text(encoding="utf-8")
+    assert "### Overview" in text
+    assert "The admin panel at `/admin`" in text
+
+    second = run_grison("sync")  # a fresh pull must not need a settle push
+
+    assert "findings (gw.finding): clean" in second.output, second.output
+    assert "push" not in second.output, second.output
+
+
+def test_reported_finding_heading_edit_pushes_back_as_html(run_grison, gw_server, workspace):
+    """The push direction of defect 1: an author editing a section that already
+    has (or gains) a markdown heading must push back as real ``<hN>`` HTML, not
+    fail ``md_to_html`` the way it did before the finding adapters passed
+    ``headings=True`` (see ``grison.markdown.converter``'s module docstring)."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_reported_finding(
+        id=50, reportId=report["id"], title="Finding One", severityId=3, findingTypeId=4,
+        description="<p>plain text</p>",
+    )
+    run_grison("sync")
+
+    path = _rdir(workspace) / "finding-one.md"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Description\n\nplain text",
+        "## Description\n\n### Overview\n\nplain text",
+        1,
+    )
+    path.write_text(text, encoding="utf-8")
+
+    result = run_grison("sync")
+
+    assert "findings (gw.reportedFinding): push 1" in result.output, result.output
+    row = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert row["description"] == "<h3>Overview</h3>\n\n<p>plain text</p>"
+
+
+def test_raw_wrapped_template_literal_pulls_as_plain_text_not_gw_markers(
+    run_grison, gw_server, workspace,
+):
+    """Defect 2: existing stored HTML with a real Jinja ``{% raw %}...{% endraw %}``
+    block (from an older grison push, or a human typing it directly — the exact
+    seed content from engine-findings-lab.md's "Template Injection Payload
+    Reference" finding). Before the fix ``html_to_md`` produced malformed markdown
+    with mismatched backtick fences, treating every token inside the raw block as
+    an independently-active Jinja expression; the fix resolves the whole raw
+    region to its plain literal text (D10: a raw block means "never evaluate
+    this"), with no ``gw:`` code spans and no raw markers left in the markdown."""
+    gw_server.store.seed_finding(
+        id=12,
+        title="Template Injection Payload Reference",
+        severityId=2,
+        findingTypeId=1,
+        description="<p>{% raw %}{{7*7}} and {% debug %}{% endraw %}</p>",
+    )
+
+    first = run_grison("sync")
+
+    assert first.exit_code == 0, first.output
+    path = workspace / "findings" / "library" / "template-injection-payload-reference.md"
+    text = path.read_text(encoding="utf-8")
+    assert "{{7*7}} and {% debug %}" in text
+    assert "gw:" not in text
+    assert "{% raw %}" not in text
+    assert "{% endraw %}" not in text
+    assert "`" not in text  # no code-span fencing was needed at all
+
+    second = run_grison("sync")  # a fresh pull must not need a settle push
+
+    assert "findings (gw.finding): clean" in second.output, second.output
+    assert "push" not in second.output, second.output
+
+    # Force a re-push (unrelated field edit) and confirm the re-pushed HTML uses
+    # D10's ONE proven mechanism (per-token Jinja string-literal escaping) with
+    # no nesting — never the old, broken "quoting inside a raw block" shape.
+    path.write_text(
+        text.replace("## Impact", "## Impact\n\nedited", 1), encoding="utf-8",
+    )
+    result = run_grison("sync")
+    assert "findings (gw.finding): push 1" in result.output, result.output
+    row = gw_server.store._by_id(gw_server.store.findings, 12)
+    assert row["description"] == (
+        "<p>{{ '{{' }}7*7{{ '}}' }} and {{ '{%' }} debug {{ '%}' }}</p>"
+    )
+    assert "{% raw %}" not in row["description"]  # never re-emitted; never nested inside one
+
+
+def test_nbsp_padded_trailing_paragraphs_pull_clean_with_no_settle_push(
+    run_grison, gw_server, workspace,
+):
+    """Defect 3: the exact stored HTML of the real lab's "Missing HTTP Security
+    Headers" library finding (id 4) — a real body paragraph followed by a
+    genuinely empty ``<p></p>`` and a ``<p>&nbsp;&nbsp;&nbsp;</p>`` (TipTap's own
+    editor leaves these behind routinely). Before the fix, canonical_local(pulled
+    file) != canonical_remote(html) for this record: ``html_to_md`` kept the
+    ``&nbsp;`` run as visible content and left phantom blank blocks in the join,
+    neither of which survives ``md_to_html``'s real CommonMark reparse — so a
+    totally fresh, untouched pull needed exactly one spurious settle push
+    (engine-findings-lab.md, Scenario 1's "second sync not clean")."""
+    gw_server.store.seed_finding(
+        id=4,
+        title="Missing HTTP Security Headers",
+        severityId=3,
+        findingTypeId=1,
+        description=(
+            "<p>The application does not set <code>Content-Security-Policy</code>, "
+            "<code>X-Content-Type-Options</code>, or "
+            "<code>Strict-Transport-Security</code>.</p><p></p>"
+            "<p>&nbsp;&nbsp;&nbsp;</p>"
+        ),
+        impact="<p>Increases exposure to XSS and MIME-sniffing attacks.</p>",
+        mitigation="<p>Add the missing headers at the reverse proxy layer.</p>",
+        replication_steps="<p>Inspect response headers with <code>curl -I</code>.</p>",
+    )
+
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+
+    second = run_grison("sync")  # a fresh, untouched pull must never need a push
+
+    assert "findings (gw.finding): clean" in second.output, second.output
+    assert "push" not in second.output, second.output

@@ -98,6 +98,8 @@ def inline_fragment(draw: st.DrawFn) -> str:
                 "cross_ref",
                 "escaped",
                 "template_literal",
+                "template_active",
+                "raw_literal_text",
             ]
         )
     )
@@ -122,6 +124,18 @@ def inline_fragment(draw: st.DrawFn) -> str:
         return f"[{word}]({path})"
     if kind == "escaped":
         return rf"\*{word}\*"
+    if kind == "template_active":
+        # the reserved gw: form — an ACTIVE (un-escaped) Jinja expression the
+        # author deliberately wrote as such (see module docstring).
+        return "`gw:{{ " + word + " }}`"
+    if kind == "raw_literal_text":
+        # author text that happens to SPELL "{% raw %}"/"{% endraw %}" with no
+        # jinja intent at all — must round-trip as ordinary literal text, never
+        # specially interpreted (there is no markdown "raw block" authoring
+        # syntax at all; D10 escaping neutralizes these words' own braces like
+        # any other literal delimiter tokens — see
+        # test_literal_raw_endraw_author_text_not_eaten_by_own_unwrap).
+        return "{% raw %} " + word + " {% endraw %}"
     return draw(st.sampled_from(["{{ x }}", "{% if x %}", "{# a comment #}"]))
 
 
@@ -504,6 +518,59 @@ def test_html_to_md_output_is_an_immediate_fixpoint(html: str) -> None:
     assert m2 == m, f"non-fixpoint: html={html!r} m={m!r} m2={m2!r}"
 
 
+# --- defect fix: trailing empty/&nbsp;-only top-level <p> blocks (real TipTap
+# editor artifact — the exact seed was Ghostwriter 7.2.6's own "Missing HTTP
+# Security Headers" library finding, see tests/e2e/test_findings_e2e.py's
+# ``test_nbsp_padded_trailing_paragraphs_pull_clean_with_no_settle_push``). Mixes
+# a real content paragraph with genuinely-empty and whitespace-only (plain space,
+# tab, and non-breaking space) sibling <p> blocks, at every position.
+
+_PADDING_BLOCK_BODIES = ["", " ", "  ", "\t", "\xa0", "\xa0\xa0\xa0", " \xa0 "]
+
+
+@st.composite
+def top_level_blocks_with_empty_padding(draw: st.DrawFn) -> str:
+    n_real = draw(st.integers(min_value=1, max_value=2))
+    n_padding = draw(st.integers(min_value=1, max_value=3))
+    blocks = [f"<p>{draw(st.sampled_from(WORDS))}</p>" for _ in range(n_real)]
+    blocks += [f"<p>{draw(st.sampled_from(_PADDING_BLOCK_BODIES))}</p>" for _ in range(n_padding)]
+    draw(st.randoms()).shuffle(blocks)
+    return "".join(blocks)
+
+
+@_SETTINGS
+@given(top_level_blocks_with_empty_padding())
+def test_empty_and_nbsp_padded_blocks_reach_a_stable_canonical_form(html: str) -> None:
+    """The core of the fix: whatever ``html_to_md`` emits for this shape must
+    already be at the canonical form ``md_to_html`` will reduce it to on the
+    NEXT round anyway — never "close, but one more settle push needed" (the
+    exact bug: a fresh pull's local file, once dumped/reparsed, disagreed with
+    ``canonical_remote_prose``'s un-normalized ``html_to_md`` output)."""
+    md = html_to_md(html)
+    html2 = md_to_html(md)
+    # canonical stability from the FIRST html_to_md call already — not merely
+    # after an extra round trip.
+    assert md_to_html(html_to_md(html2)) == html2
+    assert html_to_md(html2) == md
+
+
+def _paragraph_texts(html: str) -> list[str]:
+    """Per-top-level-``<p>`` visible text, empty/whitespace-only (NBSP included —
+    see ``_visible_text``) ones dropped: models what a reader actually sees from
+    a sequence of BLOCK elements, where — unlike ``_visible_text``'s own
+    adjacent-INLINE-element assumption — missing whitespace in the raw HTML
+    SOURCE between two top-level ``<p>`` tags carries no visual meaning at all (a
+    browser always renders each block on its own line regardless)."""
+    return [t for p in re.findall(r"<p[^>]*>(.*?)</p>", html, re.DOTALL) if (t := _visible_text(p))]
+
+
+@_SETTINGS
+@given(top_level_blocks_with_empty_padding())
+def test_empty_and_nbsp_padded_blocks_keep_real_visible_text(html: str) -> None:
+    md = html_to_md(html)
+    assert _paragraph_texts(md_to_html(md)) == _paragraph_texts(html)
+
+
 # --- neither direction ever invents/multiplies an invisible (Cf) character ---
 # The old zero-width-space disambiguation mechanism (removed — see
 # _merge_adjacent_inline) would have failed this outright, since it wrote
@@ -572,3 +639,75 @@ def test_md_to_html_never_invents_or_multiplies_invisible_characters(doc: str) -
         f"md_to_html changed invisible-character counts: "
         f"input={input_cf} output={output_cf} (doc={doc!r}, html={html!r})"
     )
+
+
+# --- D10 defect fix: {% raw %}...{% endraw %} regions in STORED html ------------
+# ``inline_fragment`` above already mixes literal delimiters, ``gw:`` active
+# references, code spans and literal "raw"/"endraw" author TEXT into every
+# existing property in this file (fixpoint, canonical stability, never-raises).
+# This section adds the one shape those can't reach: a REAL, unescaped Jinja
+# ``{% raw %}...{% endraw %}`` region actually present in HTML — never emitted by
+# grison's own push any more, but real/legacy stored data can still carry one (see
+# ``grison.markdown.converter``'s ``_RAW_BLOCK_RE``) — mixed with plain text and
+# genuinely active ``{{ }}`` expressions sitting OUTSIDE it in the same field.
+
+_RAW_INNER_SNIPPETS = [
+    "{{7*7}}",
+    "{% debug %}",
+    "{{7*7}} and {% debug %}",
+    "{{ {% }}",  # nested/overlapping delimiters, still just literal inside raw
+    "plain text, no delimiters at all",
+]
+
+
+@st.composite
+def html_with_raw_blocks(draw: st.DrawFn) -> str:
+    n = draw(st.integers(min_value=1, max_value=3))
+    parts: list[str] = []
+    for _ in range(n):
+        kind = draw(st.sampled_from(["plain", "raw", "active"]))
+        word = draw(st.sampled_from(WORDS))
+        if kind == "plain":
+            parts.append(_esc_html_text(word))
+        elif kind == "raw":
+            inner = draw(st.sampled_from(_RAW_INNER_SNIPPETS))
+            parts.append(f"{{% raw %}}{inner}{{% endraw %}}")
+        else:
+            parts.append("{{ " + word + " }}")
+    return "<p>" + " ".join(parts) + "</p>"
+
+
+@_SETTINGS
+@given(html_with_raw_blocks())
+def test_raw_block_resolves_to_literal_text_with_no_raw_markers_left(html: str) -> None:
+    md = html_to_md(html)
+    # the {% raw %}/{% endraw %} markers themselves are fully consumed — each
+    # generated raw fragment is a complete, self-contained pair, so neither
+    # word can survive as literal text in the markdown (D10: a raw region means
+    # "this text is literal", not "keep the wrapper too").
+    assert "{% raw %}" not in md
+    assert "{% endraw %}" not in md
+
+
+@_SETTINGS
+@given(html_with_raw_blocks())
+def test_raw_block_html_to_md_reaches_immediate_fixpoint(html: str) -> None:
+    md = html_to_md(html)
+    md2 = html_to_md(md_to_html(md))
+    assert md2 == md, f"non-fixpoint: html={html!r} md={md!r} md2={md2!r}"
+
+
+@_SETTINGS
+@given(html_with_raw_blocks())
+def test_raw_block_repush_never_nests_escaping(html: str) -> None:
+    """The escaping mechanism is never nested (D10): once pulled and re-pushed,
+    the HTML never contains a Jinja string-literal quoting expression
+    (``{{ '...' }}``) INSIDE a ``{% raw %}...{% endraw %}`` block — because
+    grison's push never emits ``{% raw %}`` at all any more (the per-token
+    mechanism proven in
+    ``/home/tfp/repos/grison-rework/proofs/d10-jinja-escape-lab.md`` section 9
+    replaced it), so the two can never co-occur, structurally."""
+    md = html_to_md(html)
+    html2 = md_to_html(md)
+    assert "{% raw %}" not in html2
+    assert "{% endraw %}" not in html2

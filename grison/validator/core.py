@@ -180,7 +180,12 @@ def _check_finding_body(
                                 "no report to hold evidence for", line=ref.line))
             return out
         try:
-            md_to_html(text)
+            # headings=True: a real TipTap editor emits h1-h6 in finding fields
+            # too (see grison.markdown.converter's module docstring) — must match
+            # the finding adapters' own headings=True or a freshly-pulled,
+            # unmodified finding whose stored HTML has a heading would fail
+            # validation immediately.
+            md_to_html(text, headings=True)
         except ConverterError as e:
             out.append(fail(registry.FND_BODY_NOT_CONVERTIBLE, rel, f"{field}: {e}"))
         return out
@@ -203,11 +208,12 @@ def _check_finding_body(
             ref_issue = True
     # Only fall through to the real converter when refscan found no reference problem
     # of its own — REF-001/002/006's rule assignment never depends on the converter's
-    # error text (see D3 review); this still catches everything else (tables, ATX
-    # headings, raw HTML, unsupported constructs) in the common case.
+    # error text (see D3 review); this still catches everything else (tables, raw
+    # HTML, unsupported constructs) in the common case. headings=True: see the
+    # library/inbox branch above — same reason.
     if not ref_issue:
         try:
-            md_to_html(text, refs=OfflineEvidenceResolver(evidence_dir))
+            md_to_html(text, headings=True, refs=OfflineEvidenceResolver(evidence_dir))
         except ConverterError as e:
             out.append(fail(registry.FND_BODY_NOT_CONVERTIBLE, rel, f"{field}: {e}"))
     return out
