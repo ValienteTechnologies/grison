@@ -268,7 +268,7 @@ def parse(
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without writing.")] = False,
 ) -> None:
-    """Turn scanner export(s) into markdown findings in findings/inbox/ (offline)."""
+    """Turn scanner exports into markdown findings in findings/inbox/."""
     missing = [p for p in paths if not p.exists()]
     if missing:
         # "could not run" (a typo'd/missing path), never "ran and found nothing" —
@@ -322,19 +322,17 @@ def parse(
         raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command(help="Show what changed in the workspace since the last sync.")
 @_guarded
 def status(
     remote: Annotated[
         bool,
         typer.Option(
             "--remote",
-            help="Also contact Ghostwriter and BookStack and classify (dry-run, no "
-            "writes) what a sync would do — offline otherwise (index + private "
-            "state + the validator only).",
+            help="Also ask the servers what the next sync would do (writes nothing).",
         ),
     ] = False,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="JSON output.")] = False,
 ) -> None:
     """Whole-workspace overview: per-area counts, only non-clean paths listed.
 
@@ -710,27 +708,22 @@ def _print_offline_non_clean(offline: OfflineStatus, *, area: str) -> None:
         typer.secho(f"  {entry.bucket:8} {entry.path}{detail}", fg=color, dim=color is None)
 
 
-@app.command()
+@app.command(help="Check every document against the workspace format (offline).")
 @_guarded
 def validate(
     paths: Annotated[
         list[Path] | None,
-        typer.Argument(
-            help="Only these files/dirs (plus the cross-file rules they touch) — "
-            "default: the whole workspace."
-        ),
+        typer.Argument(help="Only these files or dirs (default: the whole workspace)."),
     ] = None,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit a stable, machine-readable JSON array instead."),
+        typer.Option("--json", help="JSON output."),
     ] = False,
     deleted_ok: Annotated[
         bool,
         typer.Option(
             "--deleted-ok",
-            help="A given path that no longer exists still validates "
-            "its containing directory's cross-file rules (for a post-edit hook running "
-            "after a delete), instead of failing with 'no such path'.",
+            help="Accept a path that no longer exists (for hooks running after a delete).",
         ),
     ] = False,
 ) -> None:
@@ -783,54 +776,42 @@ def validate(
         raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command(help="Push local edits, pull remote changes, flag anything changed on both sides.")
 @_guarded
 def sync(
     dry_run: Annotated[
         bool,
         typer.Option(
             "--dry-run",
-            help="Contact Ghostwriter/BookStack and preview the sync plan, write nothing "
-            "(unlike `status`, which is offline and findings-only).",
+            help="Preview the sync plan, write nothing.",
         ),
     ] = False,
     force_local: Annotated[
         Path | None,
         typer.Option(
             "--force-local",
-            help="The local side wins for this path: resolve a collision by "
-            "pushing, or — on a record the remote side deleted (including one the "
-            "change guard would otherwise withhold) — recreate it remotely instead "
-            "of deleting it locally.",
+            help="The local side wins for this path.",
         ),
     ] = None,
     force_remote: Annotated[
         Path | None,
         typer.Option(
             "--force-remote",
-            help="The remote side wins for this path: resolve a collision by "
-            "pulling, or — on a record deleted locally (including one the change "
-            "guard would otherwise withhold) — restore it locally instead of "
-            "deleting it remotely.",
+            help="The remote side wins for this path.",
         ),
     ] = None,
     json_output: Annotated[
         bool,
         typer.Option(
             "--json",
-            help="Emit ONE combined JSON document for the whole run: "
-            "{report, findings, wiki, snapshot, exit_code} — each phase's slot is "
-            "null (never ran), {error} (raised before it could run), or "
-            "{events, summary} (see docs/workspace-format.md §9.6).",
+            help="JSON output.",
         ),
     ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
             "--verbose",
-            help="Also show INFO-severity skips (drafts, templates, a "
-            "wysiwyg page grison has never managed) — hidden by default since there is "
-            "nothing to do about them; always present in --json regardless.",
+            help="Also list informational skips (drafts, templates).",
         ),
     ] = False,
 ) -> None:
@@ -1948,7 +1929,7 @@ class _BoundAdapter:
         return str(render(data, path=path))
 
 
-@app.command()
+@app.command(help="Reverse the last sync's remote writes.")
 @_guarded
 def undo(
     snapshot: Annotated[
@@ -2240,18 +2221,14 @@ def _print_parse_summary(summary: ParseSummary, out_dir: Path, *, dry_run: bool)
 # grison/remote/bootstrap.py for where this runs automatically on every sync/parse.
 
 
-@app.command()
+@app.command(help="Regenerate the files grison manages in the workspace.")
 @_guarded
 def scaffold(
     force: Annotated[
         bool,
         typer.Option(
             "--force",
-            help="Recompute the idempotent parts (CLAUDE.md, "
-            ".claude/settings.json, the root .gitignore, the git pre-commit hook) "
-            "from scratch instead of only adding what's missing. Never touches "
-            ".grison/templates/ (an operator may have customized them) or a "
-            "hand-edited CLAUDE.md.",
+            help="Rewrite the managed files from scratch instead of only adding what is missing.",
         ),
     ] = False,
 ) -> None:
@@ -2291,7 +2268,10 @@ hook_app = typer.Typer(help="Hooks grison scaffolds into .claude/settings.json."
 app.add_typer(hook_app, name="hook")
 
 
-@hook_app.command("post-edit")
+@hook_app.command(
+    "post-edit",
+    help="Post-edit hook body: validates only the edited file and prints feedback. Always exits 0.",
+)
 def hook_post_edit() -> None:
     """The PostToolUse hook body (see grison/scaffold/hook.py) — reads the tool-call
     JSON from stdin, validates only the edited file, and prints feedback for the
