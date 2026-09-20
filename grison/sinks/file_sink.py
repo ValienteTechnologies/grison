@@ -1,6 +1,7 @@
 """The file sink — write findings as markdown documents, idempotently.
 
-Filenames are cosmetic (sync matches records by id, not name): ``slug(title).md``,
+Filenames are cosmetic (sync matches records by identity in ``.grison/index.json``
+once a finding is triaged out of the inbox, not by name): ``slug(title).md``,
 disambiguated by a dedupe key when two *different* findings share a slug. Re-writing
 identical content is reported as *unchanged*, never duplicated.
 """
@@ -13,8 +14,9 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from grison.markdown import finding_to_markdown
-from grison.model import Finding
+from grison.formats.finding import FindingDoc
+from grison.formats.finding import dump as finding_to_markdown
+from grison.fsio import atomic_write_text
 
 
 def slugify(text: str) -> str:
@@ -32,7 +34,7 @@ class SinkResult:
     errors: list[str] = field(default_factory=list)
 
 
-def _stems(findings: list[Finding], keys: list[str] | None) -> list[str]:
+def _stems(findings: list[FindingDoc], keys: list[str] | None) -> list[str]:
     """Assign a filename stem per finding, disambiguating slug collisions.
 
     Two passes: first break a slug collision with the dedupe key (or a content
@@ -74,14 +76,14 @@ def _stems(findings: list[Finding], keys: list[str] | None) -> list[str]:
 
 
 class FileSink:
-    """Writes findings to ``out_dir`` as ``<stem>.md`` (implements the Sink port)."""
+    """Writes findings to ``out_dir`` as ``<stem>.md``."""
 
     def __init__(self, out_dir: Path) -> None:
         self.out_dir = out_dir
 
     def write(
         self,
-        findings: list[Finding],
+        findings: list[FindingDoc],
         *,
         keys: list[str] | None = None,
         dry_run: bool = False,
@@ -96,8 +98,7 @@ class FileSink:
                     result.unchanged.append(path)
                     continue
                 if not dry_run:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(content, encoding="utf-8")
+                    atomic_write_text(path, content)
                 result.written.append(path)
             except Exception as e:  # noqa: BLE001 — isolate one finding, keep the batch
                 result.errors.append(f"{path}: {e}")

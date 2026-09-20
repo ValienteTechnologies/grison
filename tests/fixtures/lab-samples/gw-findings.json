@@ -1,0 +1,45 @@
+{
+  "data": {
+    "finding": [
+      {
+        "id": 1,
+        "title": "SQL Injection in Login Form",
+        "severityId": 5,
+        "findingTypeId": 4,
+        "cvssScore": 9.8,
+        "cvssVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "description": "<p>The login form at <code>/login</code> is vulnerable to classic SQL injection via the <code>username</code> parameter.</p><ul><li>Union-based extraction confirmed</li><li>Boolean-blind extraction also works</li></ul><p>See <a href=\"https://owasp.org/www-community/attacks/SQL_Injection\" class=\"external\" rel=\"noopener noreferrer\" target=\"_blank\">OWASP: SQL Injection</a> for background.</p>",
+        "impact": "<p>Full database compromise, including credential theft and data exfiltration.</p>",
+        "mitigation": "<p>Use parameterized queries / an ORM. Apply least-privilege DB accounts.</p>",
+        "references": "",
+        "replication_steps": "<ol><li>Browse to <code>/login</code></li><li>Submit <code>username=admin' OR '1'='1</code></li><li>Observe authentication bypass</li></ol>"
+      },
+      {
+        "id": 2,
+        "title": "Weak TLS Cipher Suites Enabled",
+        "severityId": 4,
+        "findingTypeId": 1,
+        "cvssScore": 7.4,
+        "cvssVector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+        "description": "<p>The host negotiates deprecated cipher suites including <span style=\"color:#b00020\" data-color=\"#b00020\">RC4</span> and 3DES.</p><ol><li>External scan</li><li>Manual <em>openssl s_client</em> verification<ol><li>Confirmed on port 443</li><li>Confirmed on port 8443</li></ol></li></ol>",
+        "impact": "<p>Traffic may be decrypted by a privileged network attacker.</p>",
+        "mitigation": "<p>Disable RC4/3DES; restrict to TLS 1.2+ with modern AEAD ciphers.</p>",
+        "references": "",
+        "replication_steps": "<p><code>nmap --script ssl-enum-ciphers -p 443 web01.example.com</code></p>"
+      },
+      {
+        "id": 3,
+        "title": "Default Credentials on Admin Panel",
+        "severityId": 5,
+        "findingTypeId": 4,
+        "cvssScore": 9.8,
+        "cvssVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "description": "<h3>Overview</h3><p>The admin panel at <code>/admin</code> accepts the vendor default credentials <code>admin:admin</code>.</p>",
+        "impact": "<p>Complete application takeover.</p>",
+        "mitigation": "<p>Force credential rotation on first login; disable default accounts.</p>",
+        "references": "",
+        "replication_steps": "<p>Log in to <code>/admin</code> with <code>admin</code> / <code>admin</code>.</p>"
+      }
+    ]
+  }
+}

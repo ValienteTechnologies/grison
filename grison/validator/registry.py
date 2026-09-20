@@ -1,0 +1,420 @@
+"""The rule registry: every ``grison validate`` failure traces back to exactly one
+entry here, and every entry here has a matching section in ``docs/workspace-format.md``
+(enforced by ``tests/test_spec_coverage.py``). This module ONLY declares rules — it
+never decides whether one fired; that's :mod:`grison.validator.core`.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Rule:
+    id: str
+    summary: str
+    fix: str
+    retired: bool = False
+
+
+@dataclass(frozen=True)
+class Failure:
+    """One validation failure. ``line`` is 1-based when known, else ``None``. ``path``
+    is workspace-relative, POSIX-separated, forward-slashed."""
+
+    rule_id: str
+    path: str
+    line: int | None
+    message: str
+    fix: str
+
+
+RULES: dict[str, Rule] = {}
+
+
+def _r(rule_id: str, summary: str, fix: str) -> str:
+    if rule_id in RULES:  # pragma: no cover — programmer error, caught immediately by import
+        raise AssertionError(f"duplicate rule id {rule_id!r}")
+    RULES[rule_id] = Rule(rule_id, summary, fix)
+    return rule_id
+
+
+def _retire(rule_id: str, why: str) -> str:
+    """Reserve ``rule_id`` permanently without an active check: rule ids stay stable
+    once published (a workspace's own ``.grison/SPEC.md`` copy, external tooling, and
+    the pre-commit hook's log history may all already reference one), so a retracted
+    rule keeps its id — retired, never reassigned, never re-emitted by
+    :mod:`grison.validator.core`. Retired ids are documented (spec-coverage still
+    requires a section) but exempt from the "needs a failing/passing test" checks
+    (nothing calls :func:`fail` with a retired id — there is nothing left to test)."""
+    if rule_id in RULES:  # pragma: no cover — programmer error
+        raise AssertionError(f"duplicate rule id {rule_id!r}")
+    RULES[rule_id] = Rule(rule_id, f"RETIRED: {why}", "", retired=True)
+    return rule_id
+
+
+def fail(rule_id: str, path: str, message: str, *, line: int | None = None) -> Failure:
+    """Build a :class:`Failure`, filling ``fix`` from the registry so every call site
+    only has to say WHAT went wrong, never how the message should end."""
+    rule = RULES[rule_id]
+    return Failure(rule_id=rule_id, path=path, line=line, message=message, fix=rule.fix)
+
+
+# --- WS: workspace layout, hygiene, format version --------------------------------
+
+WS_BAD_NAME = _r(
+    "WS-001",
+    "a file or directory name under findings/ or methodology/ is invalid",
+    "rename it to match [a-z0-9][a-z0-9._-]* (lowercase, start alphanumeric; "
+    "files additionally need the right extension)",
+)
+WS_UNKNOWN_FINDINGS_PATH = _r(
+    "WS-002",
+    "an unrecognized file or directory sits under findings/",
+    "move it to findings/library/, findings/reports/<report>/, or "
+    "findings/inbox/ (local-only, never synced, but still validated), or remove it",
+)
+WS_UNKNOWN_METHODOLOGY_PATH = _r(
+    "WS-003",
+    "an unrecognized file or directory sits under methodology/",
+    "move it to methodology/library/<book>/[<chapter>/], or "
+    "methodology/checklists/<engagement>/[<chapter>/] (local-only, never synced, but "
+    "still validated), or remove it",
+)
+WS_004_RETIRED = _retire(
+    "WS-004",
+    "required a findings/reports/ directory name to look like '<id>-<slug>'. Retracted: "
+    "the brief's own layout rule is that names are stable handles, not derived data — "
+    "'existing v1 names (with their <id>- prefixes) are valid names and are kept', valid, "
+    "not required. A report directory is identified ONLY by its gw.report entry in "
+    ".grison/index.json (IDX-003 already covers 'a document inside an unindexed report "
+    "directory'); a freshly-pulled report directory is named slug(title) with no numeric "
+    "prefix at all, which this rule would have wrongly failed. WS-001 (name charset) and "
+    "IDX-003 are the checks that actually matter here.",
+)
+WS_NEEDS_MIGRATION = _r(
+    "WS-005",
+    "the workspace format is older than this grison supports",
+    "no migration converts it — sync this workspace with the grison version that wrote it",
+)
+WS_TOO_NEW = _r(
+    "WS-006",
+    "the workspace format is newer than this grison supports",
+    "upgrade grison",
+)
+WS_BAD_MANIFEST = _r(
+    "WS-007",
+    ".grison/manifest.yml is missing or malformed",
+    "let grison regenerate it (it is written on every bootstrap); never hand-edit it",
+)
+WS_GIT_HYGIENE = _r(
+    "WS-008",
+    "a private .grison/ path is tracked, or a tracked one is git-ignored",
+    "fix .grison/.gitignore (grison writes it — see the workspace-format spec's "
+    ".gitignore allow-list) so private paths stay ignored and grison's own tracked "
+    ".grison files stay tracked",
+)
+WS_MIRROR_EDITED = _r(
+    "WS-009",
+    "a read-only mirror file's content differs from what grison last generated",
+    "do not edit this file; it is regenerated on every sync — edit the source "
+    "(Ghostwriter/BookStack) instead, or run `git checkout -- <path>` or delete it "
+    "to regenerate",
+)
+WS_MIRROR_MALFORMED = _r(
+    "WS-010",
+    "a read-only mirror file is not valid for its type",
+    "do not hand-author this file; let the next sync regenerate it",
+)
+WS_SCAFFOLD_MISSING = _r(
+    "WS-011",
+    "a grison-scaffolded workspace file (.grison/SPEC.md, a .grison/templates/ file, "
+    "CLAUDE.md, or .claude/settings.json) that grison previously generated is now "
+    "missing",
+    "run `grison scaffold` to regenerate it",
+)
+WS_SCAFFOLD_EDITED = _r(
+    "WS-012",
+    "a grison-scaffolded workspace file's grison-owned content no longer matches "
+    "what grison last generated or merged into it",
+    "run `grison scaffold` (CLAUDE.md/.claude/settings.json: `grison scaffold "
+    "--force` if the plain merge doesn't restore it) — never hand-edit a "
+    "grison-generated file",
+)
+
+# --- FND: finding documents (library + report instances) --------------------------
+
+FND_UNKNOWN_FIELD = _r(
+    "FND-001",
+    "an unrecognized frontmatter field is present on a finding",
+    "remove the field — format v2 findings carry no machine fields "
+    "(severity, finding_type, cvss, cwe, tags, affected_entities only)",
+)
+FND_MISSING_FIELD = _r(
+    "FND-002",
+    "a required frontmatter field is missing on a finding",
+    "add the missing field (severity and finding_type are always required)",
+)
+FND_BAD_SEVERITY = _r(
+    "FND-003",
+    "severity is not one of informational/low/medium/high/critical",
+    "set severity to one of informational, low, medium, high, critical",
+)
+FND_BAD_FINDING_TYPE = _r(
+    "FND-004",
+    "finding_type is not a recognized value",
+    "set finding_type to one of network, physical, wireless, web, mobile, cloud, host",
+)
+FND_BAD_CVSS = _r(
+    "FND-005",
+    "cvss.vector is not a well-formed CVSS 3.0/3.1 base vector",
+    "write a full CVSS:3.0 or CVSS:3.1 base vector, e.g. "
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+)
+FND_BAD_CWE = _r(
+    "FND-006",
+    "a cwe entry is not a known CWE id",
+    "use a CWE id from the embedded MITRE index, e.g. CWE-79 (or '79')",
+)
+FND_BAD_TAGS = _r(
+    "FND-007",
+    "tags is not a list of distinct, non-empty, untrimmed-whitespace strings",
+    "write tags as a list of plain strings with no duplicates (case-insensitive) "
+    "and no leading/trailing whitespace",
+)
+FND_AFFECTED_ENTITIES_ON_LIBRARY = _r(
+    "FND-008",
+    "affected_entities is set on a library finding",
+    "remove affected_entities — it is instance-only (findings/reports/ findings)",
+)
+FND_MISSING_SECTION = _r(
+    "FND-009",
+    "a required '##' section is missing from the finding body",
+    "add the missing '## <Section>' heading (Description, Impact, Mitigation, "
+    "Replication Steps, References — all five, always)",
+)
+FND_UNKNOWN_SECTION = _r(
+    "FND-010",
+    "a '##' heading in the finding body is not a recognized section name",
+    "use exactly one of Description, Impact, Mitigation, Replication Steps, References",
+)
+FND_DUPLICATE_SECTION = _r(
+    "FND-011",
+    "a '##' section heading repeats in the finding body",
+    "keep exactly one of each section heading",
+)
+FND_SECTIONS_OUT_OF_ORDER = _r(
+    "FND-012",
+    "the finding body's sections are not in the fixed order",
+    "reorder the sections to Description, Impact, Mitigation, Replication Steps, References",
+)
+FND_BAD_TITLE = _r(
+    "FND-013",
+    "the finding body has no '# {title}' heading, or it is blank",
+    "start the body with a single non-blank '# {title}' line before any '##' section",
+)
+FND_BODY_NOT_CONVERTIBLE = _r(
+    "FND-014",
+    "a finding section's markdown does not convert to Ghostwriter HTML",
+    "rewrite the section using only the supported markdown vocabulary — see "
+    "docs/workspace-format.md's quoted converter grammar",
+)
+FND_SEVERITY_CVSS_MISMATCH = _r(
+    "FND-015",
+    "severity does not match the CVSS v3 band of cvss.vector's score",
+    "set severity to the band the CVSS score falls in (0.0=informational/low, "
+    "0.1-3.9=low, 4.0-6.9=medium, 7.0-8.9=high, 9.0-10.0=critical), or fix the vector",
+)
+FND_UNEXPECTED_CONTENT = _r(
+    "FND-016",
+    "text sits outside every recognized section in a finding body",
+    "move the text inside a '##' section, or delete it",
+)
+FND_BAD_FRONTMATTER = _r(
+    "FND-017",
+    "the finding document's frontmatter is missing or not valid YAML",
+    "start the file with '---', valid YAML, then a closing '---'",
+)
+
+# --- REP: report-owned files (narrative sections, notes) ---------------------------
+
+REP_BODY_NOT_CONVERTIBLE = _r(
+    "REP-001",
+    "a narrative section's or note's markdown does not convert to Ghostwriter HTML",
+    "rewrite it using only the supported markdown vocabulary (headings allowed here) "
+    "— see docs/workspace-format.md's quoted converter grammar",
+)
+REP_BAD_NOTE = _r(
+    "REP-002",
+    "a notes/ file's frontmatter shape does not match whether it is indexed",
+    "an indexed (mirrored) note may only have 'author'/'timestamp' frontmatter; a new, "
+    "unindexed note must have no frontmatter fence at all",
+)
+REP_UNKNOWN_NARRATIVE_FIELD = _r(
+    "REP-003",
+    "a narrative/<field>.md file's field is not in this report's "
+    "extraFieldSpec (per .report.yml's recorded narrative_order)",
+    "remove the file, rename it to a real field, or (if the field is genuinely new "
+    "in Ghostwriter) run sync once to let .report.yml pick it up first",
+)
+
+# --- WIKI: wiki page documents ------------------------------------------------------
+
+WIKI_UNKNOWN_FIELD = _r(
+    "WIKI-001",
+    "an unrecognized frontmatter field is present on a wiki page",
+    "remove the field — format v2 wiki pages carry only title, priority, tags",
+)
+WIKI_BAD_TITLE = _r(
+    "WIKI-002",
+    "a wiki page's title is missing or blank",
+    "set a non-blank title",
+)
+WIKI_BAD_PRIORITY = _r(
+    "WIKI-003",
+    "a wiki page's priority is not an integer",
+    "set priority to a whole number, or remove the field",
+)
+WIKI_BAD_TAGS = _r(
+    "WIKI-004",
+    "a wiki page's tags is not a list of distinct, non-empty, untrimmed-whitespace strings",
+    "write tags as a list of plain strings with no duplicates and no surrounding whitespace",
+)
+WIKI_RAW_HTML = _r(
+    "WIKI-005",
+    "a wiki page body contains a real HTML tag outside a code span/fence",
+    "remove the HTML tag, or wrap it in backticks/a fenced code block if it's a "
+    "placeholder like <domain> rather than real markup",
+)
+WIKI_BAD_LINK_SCHEME = _r(
+    "WIKI-006",
+    "a wiki page link uses a scheme other than http/https/mailto",
+    "use an http://, https://, or mailto: link (or a relative BookStack path)",
+)
+WIKI_BROKEN_INTERNAL_LINK = _r(
+    "WIKI-007",
+    "a wiki page's internal BookStack link does not resolve",
+    "point the link at a /books/<book>/page/<page> or /books/<book>/chapter/<chapter> "
+    "path that exists in this workspace",
+)
+WIKI_CONTROL_CHAR = _r(
+    "WIKI-008",
+    "a wiki page body contains a zero-width or bidi control character",
+    "remove the invisible character",
+)
+WIKI_CRLF = _r(
+    "WIKI-009",
+    "a wiki page file uses CRLF line endings",
+    "convert the file to LF-only line endings",
+)
+WIKI_TRAILING_WHITESPACE = _r(
+    "WIKI-010",
+    "a wiki page body line has trailing whitespace",
+    "strip trailing spaces/tabs from the line",
+)
+WIKI_BAD_EOF = _r(
+    "WIKI-011",
+    "a wiki page file does not end with exactly one newline",
+    "end the file with exactly one trailing newline",
+)
+WIKI_HEADING_SKIP = _r(
+    "WIKI-012",
+    "a wiki page body skips a heading level (e.g. h1 directly to h3)",
+    "insert the missing intermediate heading level, or lower this heading by one level",
+)
+WIKI_TITLE_REPEATED = _r(
+    "WIKI-013",
+    "a wiki page body's first heading repeats the frontmatter title",
+    "delete the redundant heading — the title is already shown from frontmatter",
+)
+WIKI_BAD_FRONTMATTER = _r(
+    "WIKI-014",
+    "the wiki page document's frontmatter is missing or not valid YAML",
+    "start the file with '---', valid YAML, then a closing '---'",
+)
+
+# --- REF: evidence / wiki-image references (D1/D9) ----------------------------------
+
+REF_BAD_POSITION = _r(
+    "REF-001",
+    "an image is not alone in its own block",
+    "put the image on its own line/paragraph (or its own block inside one list item) "
+    "with nothing else in it",
+)
+REF_UNRESOLVED = _r(
+    "REF-002",
+    "an image or cross-reference path does not resolve to a file",
+    "point the path at a file that exists in this report's evidence/ (or this "
+    "book's images/) folder",
+)
+REF_STEM_COLLISION = _r(
+    "REF-003",
+    "two files in the same evidence/ or images/ folder share a stem",
+    "rename one of the files so their stems (name without extension) differ",
+)
+REF_CAPTION_CONFLICT = _r(
+    "REF-004",
+    "two references to the same file give it different non-empty captions",
+    "make every embed of this file use the same caption, or leave the caption empty on all but one",
+)
+REF_IMAGE_IN_LIBRARY = _r(
+    "REF-005",
+    "a library or inbox finding contains an image line",
+    "neither a library finding nor an inbox (pre-triage) finding has a report to hold "
+    "evidence for — move the finding into a report directory first, or remove the image",
+)
+REF_BAD_CROSS_REFERENCE = _r(
+    "REF-006",
+    "a cross-reference link's target is not a resolvable evidence path",
+    "point the link at 'evidence/<file>' for a file that exists in this report's evidence/ folder",
+)
+REF_BAD_WIKI_IMAGE_PATH = _r(
+    "REF-007",
+    "a wiki image uses the wrong path spelling for its location",
+    "use images/<file> at the book root, or ../images/<file> inside a chapter",
+)
+REF_BAD_FILESET_NAME = _r(
+    "REF-008",
+    "an evidence/ or images/ file's own name is invalid (WS-001's charset rule "
+    "does not apply here — these names are stable handles kept verbatim)",
+    "rename it: no path separator, no leading dot, not a <name>.remote.<ext> "
+    "collision-sidecar shape, valid UTF-8, at most 255 bytes",
+)
+
+# --- TXT: banned text ----------------------------------------------------------------
+
+TXT_BANNED_PHRASE = _r(
+    "TXT-001",
+    "a built-in banned phrase (process narration/tool-internals talk) appears in a document body",
+    "rewrite the sentence in plain engagement-report prose",
+)
+TXT_CONFIDENTIAL_TERM = _r(
+    "TXT-002",
+    "a per-workspace confidential term appears outside its allowed path",
+    "remove the term, or move the content into the report it is scoped to",
+)
+
+# --- IDX: index consistency ------------------------------------------------------------
+
+IDX_BAD_INDEX = _r(
+    "IDX-001",
+    "grison's tracked path-to-identity index is missing required structure or malformed",
+    "let grison regenerate it; never hand-edit grison's tracked index file",
+)
+IDX_KIND_PATH_MISMATCH = _r(
+    "IDX-002",
+    "an indexed entry's kind does not match its path's shape",
+    "fix the index entry's kind, or move the file to match its recorded kind",
+)
+IDX_UNINDEXED_REPORT_DIR = _r(
+    "IDX-003",
+    "a document sits inside a findings/reports/ directory that is not itself indexed as a report",
+    "grison never creates report directories — this directory must correspond to an "
+    "indexed gw.report entry, or the document must move",
+)
+IDX_EVIDENCE_KIND_MISMATCH = _r(
+    "IDX-004",
+    "an indexed evidence/image entry's kind does not match its folder",
+    "an entry under a report's evidence/ must be kind gw.evidence; under a book's "
+    "images/, kind bs.image",
+)

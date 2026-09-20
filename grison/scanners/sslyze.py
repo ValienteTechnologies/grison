@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -47,9 +47,7 @@ _PROTOCOL_VULNS: list[tuple[str, _VulnSpec]] = [
                 "attack (CVE-2014-3566), which allows a man-in-the-middle attacker to "
                 "recover plaintext from encrypted sessions.</p>"
             ),
-            mitigation=(
-                "<p>Disable SSL 3.0. Configure a minimum TLS version of TLS 1.2.</p>"
-            ),
+            mitigation=("<p>Disable SSL 3.0. Configure a minimum TLS version of TLS 1.2.</p>"),
         ),
     ),
     (
@@ -63,9 +61,7 @@ _PROTOCOL_VULNS: list[tuple[str, _VulnSpec]] = [
                 "(CVE-2011-3389) and POODLE-over-TLS. It has been deprecated by RFC 8996 "
                 "and is prohibited by PCI DSS since June 2018.</p>"
             ),
-            mitigation=(
-                "<p>Disable TLS 1.0 and TLS 1.1. Accept only TLS 1.2 and TLS 1.3.</p>"
-            ),
+            mitigation=("<p>Disable TLS 1.0 and TLS 1.1. Accept only TLS 1.2 and TLS 1.3.</p>"),
         ),
     ),
     (
@@ -79,9 +75,7 @@ _PROTOCOL_VULNS: list[tuple[str, _VulnSpec]] = [
                 "RFC 8996. While fewer vulnerabilities exist than TLS 1.0, it is considered "
                 "insecure by current standards.</p>"
             ),
-            mitigation=(
-                "<p>Disable TLS 1.1. Accept only TLS 1.2 and TLS 1.3.</p>"
-            ),
+            mitigation=("<p>Disable TLS 1.1. Accept only TLS 1.2 and TLS 1.3.</p>"),
         ),
     ),
 ]
@@ -91,7 +85,7 @@ class SslyzeScanner(Scanner):
     name = "sslyze"
     label = "SSLyze"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         doc = json.loads(data)
         server_results = doc.get("server_scan_results", [])
 
@@ -116,7 +110,7 @@ class SslyzeScanner(Scanner):
             self._check_certificates(scan_result, host_label, aggregated, opts)
 
         findings = [
-            Finding(
+            ScanFinding(
                 title=spec.title,
                 plugin_id=plugin_id,
                 severity=spec.severity,
@@ -378,9 +372,7 @@ class SslyzeScanner(Scanner):
             public_key = received_chain[0].get("public_key", {}) if received_chain else {}
             pk_type = public_key.get("algorithm", "")
             pk_size = public_key.get("key_size", 9999)
-            weak = (pk_type == "RSA" and pk_size < 2048) or (
-                pk_type == "EC" and pk_size < 256
-            )
+            weak = (pk_type == "RSA" and pk_size < 2048) or (pk_type == "EC" and pk_size < 256)
             if weak:
                 self._add(
                     aggregated,

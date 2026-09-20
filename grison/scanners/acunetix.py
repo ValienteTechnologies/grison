@@ -4,7 +4,7 @@ import html
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -15,6 +15,13 @@ _NUMERIC_SEV: dict[str, Severity] = {
     "3": Severity.HIGH,
     "4": Severity.CRITICAL,
 }
+
+
+def _ref_li(ref: str) -> str:
+    """One reference as a list item; http(s) references become links."""
+    if ref.startswith("http"):
+        return f'<li><a href="{html.escape(ref, quote=True)}">{html.escape(ref)}</a></li>'
+    return f"<li>{html.escape(ref)}</li>"
 
 
 def _parse_severity(raw: str) -> Severity:
@@ -31,7 +38,7 @@ class AcunetixScanner(Scanner):
     name = "acunetix"
     label = "Acunetix"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
 
         scans = root.findall(".//Scan") if root.tag != "Scan" else [root]
@@ -80,12 +87,7 @@ class AcunetixScanner(Scanner):
                             refs.append(ref_text)
 
                     if refs:
-                        refs_html = "<ul>" + "".join(
-                            f'<li><a href="{html.escape(r, quote=True)}">{html.escape(r)}</a></li>'
-                            if r.startswith("http")
-                            else f"<li>{html.escape(r)}</li>"
-                            for r in refs
-                        ) + "</ul>"
+                        refs_html = "<ul>" + "".join(_ref_li(r) for r in refs) + "</ul>"
                     else:
                         refs_html = ""
 
@@ -113,8 +115,8 @@ class AcunetixScanner(Scanner):
                     if component and component not in aggregated[vuln_id]["affected"]:
                         aggregated[vuln_id]["affected"].append(component)
 
-        findings: list[Finding] = [
-            Finding(
+        findings: list[ScanFinding] = [
+            ScanFinding(
                 title=meta["title"],
                 plugin_id=vuln_id,
                 severity=meta["severity"],

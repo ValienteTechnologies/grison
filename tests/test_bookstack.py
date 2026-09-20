@@ -6,16 +6,12 @@ All requests go through ``httpx.MockTransport`` — no live BookStack calls.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import httpx
 import pytest
 
-from grison.remote import snapshot as snapshot_mod
 from grison.remote.bookstack import BookStackClient, BookStackError
 from grison.remote.creds import Creds
-from grison.remote.methodology import sync_methodology
-from grison.state import PageState, StateStore
 
 _CREDS = Creds(
     bs_url="https://wiki.example",
@@ -84,20 +80,20 @@ def _make_transport(captured: list[httpx.Request] | None = None) -> httpx.MockTr
         method = request.method
 
         if method == "GET" and path == "/api/books":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _BOOK_ROWS})
         if method == "GET" and path == "/api/chapters":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _CHAPTER_ROWS})
         if method == "GET" and path == "/api/shelves":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _SHELF_ROWS})
         if method == "GET" and path == "/api/shelves/7":
             return httpx.Response(
                 200, json={**_SHELF_ROWS[0], "books": [{"id": 1, "slug": "methodology"}]}
             )
         if method == "GET" and path == "/api/pages":
-            assert request.url.params.get("count") == "1000"
+            assert request.url.params.get("count") == "500"  # BookStack's per-request cap
             return httpx.Response(200, json={"data": _PAGE_LIST_ROWS})
         if method == "GET" and path == "/api/pages/10":
             return httpx.Response(200, json=_PAGE_DETAIL)
@@ -109,6 +105,24 @@ def _make_transport(captured: list[httpx.Request] | None = None) -> httpx.MockTr
             return httpx.Response(204)
         if method == "GET" and path == "/api/pages/404":
             return httpx.Response(404, text="not found")
+        if method == "GET" and path == "/api/books/1":
+            return httpx.Response(200, json={**_BOOK_ROWS[0], "description": "d"})
+        if method == "POST" and path == "/api/books":
+            return httpx.Response(200, json={"id": 55, "name": "New Book", "slug": "new-book"})
+        if method == "DELETE" and path == "/api/books/1":
+            return httpx.Response(204)
+        if method == "GET" and path == "/api/chapters/4":
+            return httpx.Response(200, json={**_CHAPTER_ROWS[0], "description": "d"})
+        if method == "POST" and path == "/api/chapters":
+            return httpx.Response(
+                200, json={"id": 66, "book_id": 1, "name": "New Chapter", "slug": "new-chapter"}
+            )
+        if method == "DELETE" and path == "/api/chapters/4":
+            return httpx.Response(204)
+        if method == "GET" and path == "/api/recycle-bin":
+            return httpx.Response(
+                200, json={"data": [{"id": 1, "deletable_type": "page", "deletable_id": 10}]}
+            )
 
         raise AssertionError(f"unexpected request: {method} {path}")
 
@@ -219,9 +233,7 @@ def test_list_endpoints_paginate_past_the_count_cap() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/pages"
         offset = int(request.url.params.get("offset", 0))
-        return httpx.Response(
-            200, json={"data": rows[offset : offset + 1000], "total": len(rows)}
-        )
+        return httpx.Response(200, json={"data": rows[offset : offset + 1000], "total": len(rows)})
 
     with BookStackClient(_CREDS, transport=httpx.MockTransport(handler)) as client:
         pages = client.fetch_pages()
@@ -235,234 +247,61 @@ def test_non_2xx_raises_bookstack_error() -> None:
             client.fetch_page(404)
 
 
-# --- methodology sync's delta gate: exercised through the real BookStackClient, so the
-# HTTP call count itself is the assertion (not just the resulting classification). Unlike
-# _make_transport above, PUT/POST payloads here actually mutate stored state and
-# updated_at/revision_count bump on every write — mirrors the real API closely enough to
-# make "did the gate skip the GET" a meaningful question. ---------------------------------
+def test_fetch_book_returns_detail() -> None:
+    with BookStackClient(_CREDS, transport=_make_transport()) as client:
+        book = client.fetch_book(1)
+    assert book["description"] == "d"
 
 
-class _StatefulServer:
-    """A minimal mutable BookStack double. ``handler`` is an ``httpx.MockTransport``
-    callback; ``fetch_page_calls`` counts GET /api/pages/<id> — the call the delta gate
-    exists to avoid."""
-
-    def __init__(self) -> None:
-        self.books = [{"id": 1, "name": "Methodology", "slug": "methodology"}]
-        self.chapters: list[dict] = []
-        self.shelves: list[dict] = []
-        self.pages: dict[int, dict] = {}
-        self.fetch_page_calls = 0
-        self._clock = 0
-        self._next_id = 900
-
-    def touch(self, page: dict) -> None:
-        """Bump updated_at/revision_count as BookStack does on every update_page call —
-        content edit, move, tag change, or an empty PUT — never skipped on a real change."""
-        self._clock += 1
-        page["updated_at"] = f"2026-01-01T00:00:{self._clock:02d}.000000Z"
-        page["revision_count"] = page.get("revision_count", 0) + 1
-
-    def seed(self, pid: int, slug: str, name: str, markdown: str, **extra: object) -> None:
-        rec: dict = {"id": pid, "book_id": 1, "chapter_id": 0, "slug": slug, "name": name,
-                     "markdown": markdown, "editor": "markdown", "tags": []}
-        rec.update(extra)
-        self.touch(rec)
-        self.pages[pid] = rec
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        method, path = request.method, request.url.path
-        if method == "GET" and path == "/api/books":
-            return httpx.Response(200, json={"data": self.books, "total": len(self.books)})
-        if method == "GET" and path == "/api/chapters":
-            return httpx.Response(200, json={"data": self.chapters, "total": len(self.chapters)})
-        if method == "GET" and path == "/api/shelves":
-            return httpx.Response(200, json={"data": self.shelves, "total": len(self.shelves)})
-        if method == "GET" and path == "/api/pages":
-            rows = [
-                {"id": p["id"], "book_id": p["book_id"], "book_slug": "methodology",
-                 "chapter_id": p.get("chapter_id", 0), "slug": p["slug"], "name": p["name"],
-                 "editor": p.get("editor", "markdown"), "updated_at": p["updated_at"],
-                 "revision_count": p["revision_count"]}
-                for p in self.pages.values()
-            ]
-            return httpx.Response(200, json={"data": rows, "total": len(rows)})
-        if method == "GET" and path.startswith("/api/pages/"):
-            self.fetch_page_calls += 1
-            pid = int(path.rsplit("/", 1)[-1])
-            return httpx.Response(200, json=dict(self.pages[pid]))
-        if method == "PUT" and path.startswith("/api/pages/"):
-            pid = int(path.rsplit("/", 1)[-1])
-            body = json.loads(request.content)
-            p = self.pages[pid]
-            if "markdown" in body:
-                p["markdown"] = body["markdown"]
-            if "name" in body:
-                p["name"] = body["name"]
-            if "priority" in body:
-                p["priority"] = body["priority"]
-            if "tags" in body:
-                p["tags"] = body["tags"]
-            if "book_id" in body:  # re-parent to book root — real API semantics
-                p["book_id"], p["chapter_id"] = body["book_id"], 0
-            if "chapter_id" in body:
-                p["chapter_id"] = body["chapter_id"]
-            self.touch(p)
-            return httpx.Response(200, json=dict(p))
-        if method == "POST" and path == "/api/pages":
-            body = json.loads(request.content)
-            pid = self._next_id
-            self._next_id += 1
-            rec = {"id": pid, "book_id": body.get("book_id", 1),
-                   "chapter_id": body.get("chapter_id") or 0, "name": body["name"],
-                   "slug": body["name"].lower().replace(" ", "-"),
-                   "markdown": body["markdown"], "editor": "markdown",
-                   "tags": body.get("tags", [])}
-            if "priority" in body:
-                rec["priority"] = body["priority"]
-            self.touch(rec)
-            self.pages[pid] = rec
-            return httpx.Response(200, json=dict(rec))
-        raise AssertionError(f"unexpected request: {method} {path}")
+def test_create_book_posts_name_and_description() -> None:
+    captured: list[httpx.Request] = []
+    with BookStackClient(_CREDS, transport=_make_transport(captured)) as client:
+        rec = client.create_book(name="New Book", description="desc")
+    assert rec["id"] == 55
+    body = json.loads(
+        [r for r in captured if r.method == "POST" and r.url.path == "/api/books"][0].content
+    )
+    assert body == {"name": "New Book", "description": "desc"}
 
 
-@pytest.fixture(autouse=True)
-def _snap_to_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(snapshot_mod, "SNAPSHOT_ROOT", tmp_path / "snapshots")
+def test_create_book_omits_empty_description() -> None:
+    captured: list[httpx.Request] = []
+    with BookStackClient(_CREDS, transport=_make_transport(captured)) as client:
+        client.create_book(name="New Book")
+    body = json.loads(
+        [r for r in captured if r.method == "POST" and r.url.path == "/api/books"][0].content
+    )
+    assert body == {"name": "New Book"}
 
 
-def _page_path(tmp_path: Path) -> Path:
-    return tmp_path / "methodology" / "library" / "methodology" / "recon.md"
+def test_delete_book_sends_delete() -> None:
+    with BookStackClient(_CREDS, transport=_make_transport()) as client:
+        assert client.delete_book(1) is None
 
 
-def test_noop_sync_skips_detail_fetch_entirely(tmp_path: Path) -> None:
-    server = _StatefulServer()
-    server.seed(10, "recon", "Recon", "# Recon\n\nnmap etc.")
-    with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
-        r1 = sync_methodology(tmp_path, client)
-        assert server.fetch_page_calls == 1  # first sync: one fetch to seed the markers
-
-        server.fetch_page_calls = 0
-        r2 = sync_methodology(tmp_path, client)
-    page = _page_path(tmp_path)
-    assert page in r1.pulled
-    assert server.fetch_page_calls == 0  # (1) no-op sync makes ZERO fetch_page calls
-    assert page in r2.unchanged and not r2.pushed and not r2.pulled
+def test_fetch_chapter_returns_detail() -> None:
+    with BookStackClient(_CREDS, transport=_make_transport()) as client:
+        chapter = client.fetch_chapter(4)
+    assert chapter["description"] == "d"
 
 
-def test_page_file_carries_no_volatile_state_store_backs_the_skip_gate(tmp_path: Path) -> None:
-    """SSOT guard: after a pull, the tracked file is content + identity only — no
-    synced/remote-marker/book-chapter-id lines — while the merge base and BookStack's
-    change markers land in the state store. A re-scan+hydrate sourced from that store
-    alone still hits the skip-detail-fetch fast path, proving the store (not the file)
-    backs the gate."""
-    server = _StatefulServer()
-    server.seed(10, "recon", "Recon", "# Recon\n\nnmap etc.")
-    with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
-        sync_methodology(tmp_path, client)
-        page = _page_path(tmp_path)
-        text = page.read_text()
-        for leaked in ("synced", "hash:", "remote_updated_at", "remote_revision_count",
-                       "book_id", "chapter_id"):
-            assert leaked not in text
-
-        store = StateStore(tmp_path)
-        st = store.get_page(10)
-        assert st is not None and st.base.hash
-        assert st.remote_updated_at is not None and st.remote_revision_count is not None
-
-        server.fetch_page_calls = 0
-        r = sync_methodology(tmp_path, client)
-    assert server.fetch_page_calls == 0  # the store alone backs the skip-detail-fetch gate
-    assert page in r.unchanged
+def test_create_chapter_posts_book_id_and_name() -> None:
+    captured: list[httpx.Request] = []
+    with BookStackClient(_CREDS, transport=_make_transport(captured)) as client:
+        rec = client.create_chapter(book_id=1, name="New Chapter")
+    assert rec["id"] == 66
+    body = json.loads(
+        [r for r in captured if r.method == "POST" and r.url.path == "/api/chapters"][0].content
+    )
+    assert body == {"book_id": 1, "name": "New Chapter"}
 
 
-def test_bumped_revision_count_forces_fetch_and_reconverges_clean(tmp_path: Path) -> None:
-    """A marker bump with no actual content change (a no-op remote write) forces one
-    detail fetch, classifies clean with no churn, and picks up the fresh markers so the
-    NEXT sync is back on the zero-fetch fast path."""
-    server = _StatefulServer()
-    server.seed(10, "recon", "Recon", "# Recon\n\nnmap etc.")
-    with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
-        sync_methodology(tmp_path, client)
-        page = _page_path(tmp_path)
-        store = StateStore(tmp_path)
-        before = store.get_page(10)
-
-        server.touch(server.pages[10])  # e.g. an empty PUT: markers bump, content doesn't
-        server.fetch_page_calls = 0
-        r = sync_methodology(tmp_path, client)
-        assert server.fetch_page_calls == 1  # (2) bumped marker -> must fetch to find out
-        assert page in r.unchanged
-        assert not r.pushed and not r.pulled and not r.repaired and not r.collisions
-        after = store.get_page(10)
-        assert after.remote_revision_count == before.remote_revision_count + 1
-
-        server.fetch_page_calls = 0
-        r2 = sync_methodology(tmp_path, client)
-    assert server.fetch_page_calls == 0  # converged: fresh markers now match the list row
-    assert page in r2.unchanged
+def test_delete_chapter_sends_delete() -> None:
+    with BookStackClient(_CREDS, transport=_make_transport()) as client:
+        assert client.delete_chapter(4) is None
 
 
-def test_locally_dirty_page_fetches_and_pushes_stamping_fresh_markers(tmp_path: Path) -> None:
-    server = _StatefulServer()
-    server.seed(10, "recon", "Recon", "original")
-    with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
-        sync_methodology(tmp_path, client)
-        page = _page_path(tmp_path)
-        store = StateStore(tmp_path)
-        before = store.get_page(10)
-        page.write_text(page.read_text().replace("original", "edited body"))
-
-        server.fetch_page_calls = 0
-        r = sync_methodology(tmp_path, client)
-    # (3) locally dirty -> always fetches detail: one in the classification loop (to
-    # build the remote counterpart), one more in _apply's own concurrent-edit pre-image
-    # fetch — both pre-date this change and are untouched by the delta gate.
-    assert server.fetch_page_calls == 2
-    assert page in r.pushed
-    assert server.pages[10]["markdown"] == "edited body"
-    after = store.get_page(10)
-    # the push response stamped fresh markers, not the ones from before the push
-    assert after.remote_revision_count == before.remote_revision_count + 1
-    assert after.remote_updated_at != before.remote_updated_at
-
-
-def test_legacy_state_without_markers_still_syncs_and_gains_markers(tmp_path: Path) -> None:
-    """A store entry recorded before remote markers were tracked (base known, markers
-    never populated) still forces one detail fetch to learn them — same "markers
-    missing" path as a never-synced page — and gains fresh markers afterward."""
-    server = _StatefulServer()
-    server.seed(10, "recon", "Recon", "steps")
-    with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
-        sync_methodology(tmp_path, client)
-        page = _page_path(tmp_path)
-        store = StateStore(tmp_path)
-        st = store.get_page(10)
-        store.put_page(10, PageState(base=st.base, book_id=st.book_id, chapter_id=st.chapter_id))
-
-        server.fetch_page_calls = 0
-        r = sync_methodology(tmp_path, client)
-    assert server.fetch_page_calls == 1  # (4) markers missing -> fetches detail
-    assert page in r.unchanged
-    after = store.get_page(10)
-    assert after.remote_updated_at is not None and after.remote_revision_count is not None
-
-
-def test_base64_body_push_is_skipped_with_note(tmp_path: Path) -> None:
-    server = _StatefulServer()
-    server.seed(10, "recon", "Recon", "original")
-    with BookStackClient(_CREDS, transport=httpx.MockTransport(server.handler)) as client:
-        sync_methodology(tmp_path, client)
-        page = _page_path(tmp_path)
-        page.write_text(
-            page.read_text().replace(
-                "original",
-                "edited ![x](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA)",
-            )
-        )
-        r = sync_methodology(tmp_path, client)
-    # (5) refused, not pushed — BookStack would rewrite the stored markdown on save
-    assert page not in r.pushed
-    assert server.pages[10]["markdown"] == "original"
-    assert any("base64" in note for _p, note in r.skipped)
+def test_fetch_recycle_bin_paginates_like_other_lists() -> None:
+    with BookStackClient(_CREDS, transport=_make_transport()) as client:
+        rows = client.fetch_recycle_bin()
+    assert rows == [{"id": 1, "deletable_type": "page", "deletable_id": 10}]

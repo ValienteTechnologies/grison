@@ -281,10 +281,12 @@ def test_update_reported_finding_sends_mutation() -> None:
 
 
 def test_upload_evidence_sends_mutation_and_returns_id() -> None:
+    """D1: evidence belongs to a REPORT, never a finding — the real >= 7.2 schema's
+    ``uploadEvidence`` has a ``report`` argument, no ``finding`` argument at all."""
     transport, captured = _single_mutation_transport(
         expected_query_marker="uploadEvidence",
         expected_variables={
-            "finding": 183,
+            "report": 183,
             "file_base64": "ZmZk",
             "filename": "shell.jpeg",
             "caption": "Reverse shell",
@@ -295,7 +297,7 @@ def test_upload_evidence_sends_mutation_and_returns_id() -> None:
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
         evidence_id = client.upload_evidence(
-            finding_id=183,
+            report_id=183,
             filename="shell.jpeg",
             caption="Reverse shell",
             friendly_name="reverse-shell",
@@ -309,7 +311,7 @@ def test_upload_evidence_sends_description_when_given() -> None:
     transport, captured = _single_mutation_transport(
         expected_query_marker="uploadEvidence",
         expected_variables={
-            "finding": 183,
+            "report": 183,
             "file_base64": "ZmZk",
             "filename": "shell.jpeg",
             "caption": "Reverse shell",
@@ -320,7 +322,7 @@ def test_upload_evidence_sends_description_when_given() -> None:
     )
     with GhostwriterClient(_CREDS, transport=transport) as client:
         client.upload_evidence(
-            finding_id=183,
+            report_id=183,
             filename="shell.jpeg",
             caption="Reverse shell",
             friendly_name="reverse-shell",
@@ -463,8 +465,15 @@ def test_fetch_reports_query_includes_project_context_fields() -> None:
         client.fetch_reports()
     query = json.loads(captured[0].content)["query"]
     for marker in (
-        "codename", "collab_note", "scopes {", "objectives {", "targets {",
-        "whitecards {", "comments {", "objectiveStatus {", "objectivePriority {",
+        "codename",
+        "collab_note",
+        "scopes {",
+        "objectives {",
+        "targets {",
+        "whitecards {",
+        "comments {",
+        "objectiveStatus {",
+        "objectivePriority {",
     ):
         assert marker in query
 

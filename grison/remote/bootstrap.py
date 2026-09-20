@@ -9,11 +9,14 @@ everywhere. ``parse`` is fully offline; ``sync`` additionally requires the creds
 
 from __future__ import annotations
 
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from grison import manifest as manifest_mod
+from grison.fsio import atomic_write_text, ensure_private_dir
+from grison.index import Index
 from grison.remote.creds import load_settings
+from grison.scaffold import ScaffoldResult, scaffold_workspace
 from grison.workspace import bootstrap_tree
 
 _ENV_TEMPLATE = """\
@@ -40,67 +43,6 @@ GRISON_CF_CLIENT_SECRET=
 # GRISON_CLAUDE_MD=off  # skip scaffolding CLAUDE.md operator notes on first bootstrap (default: on)
 """
 
-_CLAUDE_MD_TEMPLATE = """\
-# grison workspace — operator notes
-
-This is a grison workspace: a plain-markdown mirror of Ghostwriter findings/reports
-and BookStack methodology. Editing the markdown here IS how you change the remote
-data — grison only validates and syncs, it has no AI subsystem of its own. You (the
-agent) are the transform layer.
-
-## Layout
-
-- `findings/inbox/` — `grison parse` output, local-only. Triage here: read, edit,
-  then `cp`/`mv` the keepers into `findings/library/` or a report dir. Never synced.
-- `findings/library/` — reusable finding templates. Syncs to Ghostwriter's finding
-  library.
-- `findings/reports/<id>-<slug>/` — one dir per *existing* Ghostwriter report.
-  grison never creates reports. Findings placed directly here sync as that report's
-  reported findings.
-- `findings/reports/<id>-<slug>/narrative/` — one markdown file per report
-  narrative section (exec summary, methodology, …). Edit freely; 3-way merged
-  per section.
-- `methodology/library/<book>/<chapter>/` — BookStack pages, markdown-native,
-  mirrored verbatim both ways.
-- `methodology/checklists/<engagement>/` — per-engagement working copies (`cp -r`
-  from library). Local-only, never synced.
-
-## Frontmatter contract
-
-Every finding/page has a `grison:` block in its YAML frontmatter (ids, hashes, sync
-state). **Never hand-edit anything inside `grison:`** — it's machine-owned and is the
-3-way merge base. Everything else (title, severity, body prose, tags, CVSS, …) is
-yours to edit normally.
-
-## `.grison/`
-
-grison's private state directory — creds, sync state, snapshots. Never read or write
-anything under here; it isn't part of the workspace data model.
-
-## Report dirs — what's read-only
-
-- `.report.yml` and `project.md` are regenerated every sync — read-only mirrors of
-  Ghostwriter project metadata. Read `project.md` for engagement context (scope,
-  objectives, white cards) before writing narrative — don't edit it.
-- `notes/<id>.md` files (with a `grison:` id in frontmatter) are read-only mirrors
-  of Ghostwriter project notes. To share a new note with the team, create
-  `notes/<name>.md` **without** frontmatter — grison pushes it as a new note on the
-  next sync.
-
-## Commands
-
-- `grison parse <file>` — scanner export → `findings/inbox/*.md` (offline).
-- `grison status <path…>` — validity report (offline, no writes).
-- `grison sync` / `grison sync --dry-run` — reconcile with Ghostwriter + BookStack;
-  dry-run previews the plan without writing anything.
-
-## Scope discipline
-
-Work only within the scope entries listed in each report's `project.md`. Entries
-marked `EXCLUDED` are off-limits — do not create findings, evidence, or narrative
-referencing them.
-"""
-
 
 @dataclass
 class BootstrapResult:
@@ -108,45 +50,73 @@ class BootstrapResult:
     env_created: bool  # True if a fresh (unfilled) env template was just written
     env_path: Path
     claude_md_created: bool  # True if a fresh CLAUDE.md scaffold was just written
+    scaffold: ScaffoldResult  # every other scaffolded file (SPEC.md, templates/,
+    # terms.txt, .claude/settings.json, root .gitignore, the git pre-commit hook) —
+    # see grison.scaffold.orchestrate.scaffold_workspace
 
 
 def bootstrap_workspace(root: Path) -> BootstrapResult:
-    """Scaffold the workspace tree, ``.grison/`` (+ env template), ``.gitignore``, and
-    (unless disabled) a ``CLAUDE.md`` operator-notes scaffold."""
+    """Scaffold the workspace tree, ``.grison/`` (+ env template), and every
+    self-contained-workspace artifact :mod:`grison.scaffold` owns — ``.grison/SPEC.md``,
+    ``.grison/templates/``, ``.grison/terms.txt``, ``CLAUDE.md``,
+    ``.claude/settings.json``, the root ``.gitignore``'s collision-sidecar entry, and
+    (when this is a git repo) the ``pre-commit`` hook — so a first ``grison sync``/
+    ``grison parse`` in an empty directory yields a complete, valid, self-contained
+    workspace (brief D11)."""
     created_dirs = bootstrap_tree(root)
 
     grison_dir = root / ".grison"
-    grison_dir.mkdir(parents=True, exist_ok=True)
+    # recursive=True: tighten permissions of files/dirs that ALREADY exist under
+    # .grison/ on every run too (a hand-created .grison/env with a wide mode, or a
+    # .grison/ copied/extracted from elsewhere, must not stay wide just because
+    # bootstrap only ever chmod'd the directory itself before).
+    ensure_private_dir(grison_dir, recursive=True)
 
     env_path = grison_dir / "env"
     env_created = False
     if not env_path.exists():
-        env_path.write_text(_ENV_TEMPLATE, encoding="utf-8")
-        env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600 — creds are secret
+        atomic_write_text(env_path, _ENV_TEMPLATE, private=True)  # creds are secret
         env_created = True
 
-    _ensure_gitignored(root, ".grison/")
+    # A brand-new workspace (never had v1 content) starts at the CURRENT format —
+    # manifest.read() would otherwise read it as v1 the moment .grison/env exists
+    # (v1 predates manifest.yml entirely; see manifest.py's own docstring), sending
+    # a workspace that never had any v1 data through the "refused, wrong format"
+    # path on its very first sync. This isn't only the freshly-generated-env case: a
+    # workspace whose .grison/env was created by hand or copied in (a scripted
+    # deployment, a credential rotation, this very repo's own lab proof) never sets
+    # env_created either, so the real signal is "is there any actual v1 CONTENT
+    # anywhere" (findings/ or methodology/ has at least one real file already) —
+    # only THAT means a real pre-v2 workspace, which D13 refuses outright (no
+    # migration converts it) rather than this bootstrap writing a v2 manifest over
+    # it. Format v2's own .gitignore rule (D13/"Workspace format v2"):
+    # .grison/.gitignore is the private-file allow-list; the workspace root's OWN
+    # .gitignore must NOT blanket-ignore .grison/ (that was the v1 scaffold's
+    # shape) since manifest.yml/index.json must stay tracked.
+    manifest_path = root / ".grison" / "manifest.yml"
+    has_v1_content = manifest_mod.has_v1_content(root)
+    if not manifest_path.exists() and not has_v1_content:
+        manifest_mod.write(root)
+        manifest_mod.write_gitignore(root)
+        index_path = root / ".grison" / "index.json"
+        if not index_path.exists():
+            Index(root=root).save()
 
     settings = load_settings(root)
-    claude_md_path = root / "CLAUDE.md"
-    claude_md_created = False
-    if settings.claude_md_enabled and not claude_md_path.exists():
-        claude_md_path.write_text(_CLAUDE_MD_TEMPLATE, encoding="utf-8")
-        claude_md_created = True
+    # A real v1 workspace (has_v1_content, no manifest.yml written above) must not
+    # get v2-shaped scaffolding — CLAUDE.md's frontmatter rules, .grison/SPEC.md,
+    # and the rest all describe format v2, which this workspace is permanently
+    # refused for (D13: no migration converts it). `manifest_path` now exists
+    # exactly when this IS (or just became, in the block above) a v2 workspace.
+    if manifest_path.exists():
+        scaffold = scaffold_workspace(root, settings=settings)
+    else:
+        scaffold = ScaffoldResult()
 
     return BootstrapResult(
         created_dirs=created_dirs,
         env_created=env_created,
         env_path=env_path,
-        claude_md_created=claude_md_created,
+        claude_md_created=scaffold.claude_md_status == "created",
+        scaffold=scaffold,
     )
-
-
-def _ensure_gitignored(root: Path, entry: str) -> None:
-    gitignore = root / ".gitignore"
-    lines = gitignore.read_text(encoding="utf-8").splitlines() if gitignore.exists() else []
-    if entry not in [ln.strip() for ln in lines]:
-        with gitignore.open("a", encoding="utf-8") as fh:
-            if lines and lines[-1].strip():
-                fh.write("\n")
-            fh.write(f"{entry}\n")

@@ -5,7 +5,7 @@ import re
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -14,11 +14,11 @@ class BurpScanner(Scanner):
     name = "burp"
     label = "Burp Suite"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
         issues = root.findall(".//issue")
 
-        findings: list[Finding] = []
+        findings: list[ScanFinding] = []
         grouped: dict[str, list[dict]] = {}  # type_id -> raw issue dicts
 
         for issue in issues:
@@ -54,7 +54,7 @@ class BurpScanner(Scanner):
 
         return self.sort_by_severity(findings)
 
-    def _merge_group(self, group: list[dict]) -> Finding | None:
+    def _merge_group(self, group: list[dict]) -> ScanFinding | None:
         if not group:
             return None
 
@@ -84,7 +84,7 @@ class BurpScanner(Scanner):
             "<ul>"
             + "".join(
                 f'<li><a href="{html.escape(u, quote=True)}">'
-                f'{html.escape(text.strip() or u)}</a></li>'
+                f"{html.escape(text.strip() or u)}</a></li>"
                 for u, text in ref_links
             )
             + "</ul>"
@@ -99,7 +99,7 @@ class BurpScanner(Scanner):
             filter(None, [base.get("remediationBackground", ""), base.get("remediationDetail", "")])
         )
 
-        return Finding(
+        return ScanFinding(
             title=title,
             plugin_id=type_id,
             severity=severity,

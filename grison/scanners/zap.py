@@ -5,7 +5,7 @@ import json
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import Finding, Severity
+from grison.scanners.ir import ScanFinding, Severity
 
 from .base import ImportOptions, Scanner
 
@@ -33,14 +33,14 @@ class ZapScanner(Scanner):
     name = "zap"
     label = "OWASP ZAP"
 
-    def parse(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         # Auto-detect format: try JSON first, fall back to XML
         text = data.decode("utf-8", errors="replace").lstrip()
         if text.startswith("{") or text.startswith("["):
             return self._parse_json(data, opts)
         return self._parse_xml(data, opts)
 
-    def _parse_json(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def _parse_json(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         doc = json.loads(data)
         sites = doc if isinstance(doc, list) else doc.get("site", [])
         if isinstance(sites, dict):
@@ -54,7 +54,7 @@ class ZapScanner(Scanner):
 
         return self._to_findings(aggregated)
 
-    def _parse_xml(self, data: bytes, opts: ImportOptions) -> list[Finding]:
+    def _parse_xml(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
         aggregated: dict[str, dict] = {}
 
@@ -63,10 +63,7 @@ class ZapScanner(Scanner):
             for child in alert_el:
                 if child.tag == "instances":
                     alert["instances"] = [
-                        {
-                            gc.tag: (gc.text or "").strip()
-                            for gc in instance
-                        }
+                        {gc.tag: (gc.text or "").strip() for gc in instance}
                         for instance in child.findall("instance")
                     ]
                 else:
@@ -75,9 +72,7 @@ class ZapScanner(Scanner):
 
         return self._to_findings(aggregated)
 
-    def _aggregate(
-        self, alert: dict, aggregated: dict[str, dict], opts: ImportOptions
-    ) -> None:
+    def _aggregate(self, alert: dict, aggregated: dict[str, dict], opts: ImportOptions) -> None:
         alert_ref = alert.get("alertRef") or alert.get("pluginid") or alert.get("id", "")
         severity = self._severity_for(alert)
 
@@ -148,9 +143,9 @@ class ZapScanner(Scanner):
         )
         return f"<ul>{items}</ul>" if items else ""
 
-    def _to_findings(self, aggregated: dict[str, dict]) -> list[Finding]:
+    def _to_findings(self, aggregated: dict[str, dict]) -> list[ScanFinding]:
         findings = [
-            Finding(
+            ScanFinding(
                 title=meta["title"],
                 plugin_id=alert_ref,
                 severity=meta["severity"],

@@ -16,7 +16,13 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-# field name -> env var / .grison/env key
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from grison.errors import GrisonError
+
+# field name -> env var / .grison/env key — only used to render the "missing" message;
+# pydantic-settings' own env_prefix does the field<->env-var mapping for loading.
 _KEYS: dict[str, str] = {
     "gw_url": "GRISON_GW_URL",
     "gw_token": "GRISON_GW_TOKEN",
@@ -34,26 +40,39 @@ _SETTING_KEYS: dict[str, str] = {
 }
 
 
-class MissingCreds(RuntimeError):
+class MissingCreds(GrisonError, RuntimeError):
     """Required credentials are absent — the message tells the user what to fill."""
 
 
-@dataclass(frozen=True)
-class Creds:
+class Creds(BaseSettings):
+    """Ghostwriter/BookStack/CF-Access credentials — loaded via pydantic-settings so
+    ``GRISON_*`` env vars and the workspace's ``.grison/env`` dotenv file share one
+    precedence stack (env wins) instead of grison hand-rolling it; see :func:`load`."""
+
+    model_config = SettingsConfigDict(env_prefix="GRISON_", extra="ignore", frozen=True)
+
     gw_url: str = ""
-    gw_token: str = ""
+    # The four secret fields (item 7, fix-fin1): SecretStr so `repr(creds)`/
+    # `str(creds)` (a stray debug log, an uncaught-exception traceback frame, a
+    # pytest assertion failure printing the whole object) show ``**********``
+    # instead of the real bearer token/API secret. `gw_url`/`bs_url`/
+    # `cf_client_id` stay plain ``str`` — a URL is never secret, and a Cloudflare
+    # Access service token's CLIENT ID is a public-ish identifier (paired with,
+    # but not itself, the secret half of that credential), same distinction as
+    # BookStack's own token id vs. token secret below.
+    gw_token: SecretStr = SecretStr("")
     bs_url: str = ""
-    bs_token_id: str = ""
-    bs_token_secret: str = ""
+    bs_token_id: SecretStr = SecretStr("")
+    bs_token_secret: SecretStr = SecretStr("")
     cf_client_id: str = ""
-    cf_client_secret: str = ""
+    cf_client_secret: SecretStr = SecretStr("")
 
     def cf_headers(self) -> dict[str, str]:
         if not (self.cf_client_id and self.cf_client_secret):
             return {}
         return {
             "CF-Access-Client-Id": self.cf_client_id,
-            "CF-Access-Client-Secret": self.cf_client_secret,
+            "CF-Access-Client-Secret": self.cf_client_secret.get_secret_value(),
         }
 
     def require_ghostwriter(self) -> None:
@@ -124,9 +143,11 @@ def _resolve(keys: dict[str, str], file_vals: dict[str, str]) -> dict[str, str]:
 
 
 def load(root: Path) -> Creds:
-    """Load creds for a workspace: ``.grison/env`` values, overlaid by ``GRISON_*`` env vars."""
-    file_vals = _parse_env_file(root / ".grison" / "env")
-    return Creds(**_resolve(_KEYS, file_vals))
+    """Load creds for a workspace: ``.grison/env`` values, overlaid by ``GRISON_*`` env
+    vars (pydantic-settings' default source precedence — init args, then env vars,
+    then the dotenv file — already puts env above the file; we pass no init args)."""
+    env_path = root / ".grison" / "env"
+    return Creds(_env_file=env_path if env_path.exists() else None)  # type: ignore[call-arg]
 
 
 def load_settings(root: Path) -> Settings:

@@ -1,5 +1,5 @@
-"""Map the vendored scanner IR (:mod:`grison.scanners.ir`) to the house schema
-(:class:`grison.model.Finding`).
+"""Map the vendored scanner IR (:mod:`grison.scanners.ir`) to a format-v2 inbox
+finding (:class:`grison.formats.finding.FindingDoc`, tier ``inbox``).
 
 Settled rules (shape.md §Phase 4):
 - scanner severity (INFO…CRITICAL) → :class:`~grison.model.Severity` 1:1.
@@ -11,7 +11,10 @@ Settled rules (shape.md §Phase 4):
 - ``finding_type`` isn't emitted by scanners → supplied by the caller (a per-scanner
   default, overridable by the CLI).
 
-Parsed findings are unlinked proto-instances: ``tier: instance``, ``gw.id: null``.
+``grison parse`` output carries no machine fields at all (engine step 3 item E) — an
+inbox finding is a plain :class:`~grison.formats.finding.FindingDoc`, triaged by hand
+into ``findings/library/`` or a report directory; identity is established later, by
+the sync engine's index, not by anything stamped into the document.
 """
 
 from __future__ import annotations
@@ -19,13 +22,16 @@ from __future__ import annotations
 import html as _html
 from dataclasses import dataclass
 from html.parser import HTMLParser
-
-from pydantic import ValidationError
+from typing import TYPE_CHECKING
 
 from grison.markdown.converter import ConverterError, html_to_md
-from grison.model import Cvss, Finding, FindingType, Severity
+from grison.model.cvss import CvssError, parse_cvss
 from grison.model.cwe import is_known_cwe, normalize_cwe
-from grison.scanners.ir import Finding as IRFinding
+from grison.model.enums import FindingType, Severity
+
+if TYPE_CHECKING:
+    from grison.formats.finding import FindingDoc
+from grison.scanners.ir import ScanFinding
 
 # Scanners don't emit a finding type; pick a sensible default by tool.
 _DEFAULT_FINDING_TYPE: dict[str, FindingType] = {
@@ -46,7 +52,7 @@ def default_finding_type(scanner_name: str) -> FindingType:
 
 @dataclass
 class MappingResult:
-    finding: Finding
+    finding: FindingDoc
     warnings: list[str]
 
 
@@ -95,19 +101,32 @@ def _prose_to_md(html: str, field: str, warnings: list[str]) -> str:
 
 
 def ir_to_finding(
-    ir: IRFinding,
+    ir: ScanFinding,
     *,
     finding_type: FindingType,
-    tier: str = "instance",
+    tier: str = "inbox",
 ) -> MappingResult:
-    """Convert one scanner IR finding into a validated house Finding + any warnings."""
+    """Convert one scanner IR finding into a validated format-v2 finding + warnings.
+
+    ``tier`` defaults to ``"inbox"`` — every real ``grison parse`` call writes to
+    ``findings/inbox/`` (BRIEF workspace layout); it's a parameter only so a caller
+    validating a standalone finding against a different tier's rules (tests) can ask
+    for one directly rather than round-tripping through a file path."""
+    # Imported here, not at module level: grison.formats.finding pulls in
+    # grison.markdown.frontmatter, which (via this package's __init__) would import
+    # this very module back — a real cycle only at *module load* time, not at call
+    # time, once everything has finished initializing.
+    from grison.formats.finding import FindingCvss, FindingDoc
+
     warnings: list[str] = []
 
     cvss = None
     if ir.cvss_vector.strip():
+        vector = ir.cvss_vector.strip()
         try:
-            cvss = Cvss(vector=ir.cvss_vector.strip())
-        except ValidationError:
+            parse_cvss(vector)
+            cvss = FindingCvss(vector=vector)
+        except CvssError:
             warnings.append(f"dropped invalid CVSS vector {ir.cvss_vector!r}")
 
     cwe_list: list[str] = []
@@ -121,10 +140,9 @@ def ir_to_finding(
     affected = "\n".join(ir.affected_components) if ir.affected_components else None
 
     data = {
-        "grison": {"tier": tier, "gw": {"id": None}},
         "severity": Severity(ir.severity.value),
         "finding_type": finding_type,
-        "cvss": cvss.model_dump() if cvss else None,
+        "cvss": cvss,
         "cwe": cwe_list,
         "tags": list(ir.tags),
         "affected_entities": affected,
@@ -135,4 +153,5 @@ def ir_to_finding(
         "replication_steps": _prose_to_md(ir.replication_steps, "replication_steps", warnings),
         "references": _prose_to_md(ir.references, "references", warnings),
     }
-    return MappingResult(finding=Finding.model_validate(data), warnings=warnings)
+    finding = FindingDoc.model_validate(data, context={"tier": tier})
+    return MappingResult(finding=finding, warnings=warnings)
