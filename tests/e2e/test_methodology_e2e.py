@@ -504,6 +504,48 @@ def test_force_local_on_a_withheld_deletion_recreates_it_not_deletes_it_locally(
         assert bs_server.store.page(pg["id"]) is None  # still gone remotely — withheld, no undo
 
 
+def test_force_local_recreate_of_a_moved_and_edited_page_drops_the_old_index_entry(
+    run_grison, bs_server
+):
+    """A MOVE_EDIT (renamed AND edited locally) whose remote record vanishes
+    between classification and the pre-write re-fetch, pushed with
+    ``--force-local``: the recreate branch re-points the NEW path at the new id
+    and must also drop the OLD path's entry, which still named the dead id.
+    Before the fix the old entry lingered, so the next sync reported a phantom
+    record at the old path and forgot it one cycle late."""
+    book = bs_server.store.seed_book(name="Playbook")
+    page = bs_server.store.seed_page(book_id=book["id"], name="Notes", markdown="Notes body.")
+    run_grison("sync")
+    old_path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
+    new_path = Path.cwd() / "methodology" / "library" / "playbook" / "field-notes.md"
+    old_path.rename(new_path)
+    new_path.write_text(
+        new_path.read_text(encoding="utf-8").replace("Notes body.", "Notes body, edited."),
+        encoding="utf-8",
+    )
+
+    def delete_on_bookstack() -> None:
+        bs_server.store.pages.remove(bs_server.store.page(page["id"]))  # gone, not recycled
+
+    # GET 1 is the identity-pairing re-fetch (the page still exists, so the rename
+    # pairs as a MOVE_EDIT); the page vanishes right before GET 2, the pre-write
+    # re-fetch, which is what sends apply down the "re-create remotely" branch.
+    bs_server.on_request("GET", r"/api/pages/\d+", delete_on_bookstack, call_number=2)
+
+    result = run_grison("sync", "--force-local", str(new_path))
+
+    assert "re-created remotely" in result.output
+    index = Index.load(Path.cwd())
+    assert index.get("methodology/library/playbook/notes.md") is None
+    new_rec = index.get("methodology/library/playbook/field-notes.md")
+    assert new_rec is not None and new_rec.id != page["id"]
+    assert "Notes body, edited." in bs_server.store.page(new_rec.id)["markdown"]
+
+    second = run_grison("sync")
+    assert "wiki (bs.page): clean 1" in second.output
+    assert "forget" not in second.output
+
+
 def test_wysiwyg_page_is_skipped_not_mirrored(run_grison, bs_server):
     """A wysiwyg page grison has never managed is an INFO-severity veto (nothing
     lost, nothing to do) — hidden from plain text output by default (tests changed

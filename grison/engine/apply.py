@@ -202,7 +202,10 @@ def _pairing_plans(  # noqa: PLR0913
             fresh = adapter.refetch(ctx, rid)
             if fresh is not None:
                 remote_records[rid] = fresh
-                remote = fresh
+            # a None refetch means the record vanished between the bulk fetch and
+            # now: pair against nothing rather than against the placeholder's stub
+            # data, which is not real content.
+            remote = fresh
         remote_text = adapter.render_local(remote.data, path=p) if remote is not None else None
         missing.append(
             Missing(path=p, id=rid, base_hash=st.base if st else None, remote_content=remote_text)
@@ -596,6 +599,11 @@ def _apply_update(  # noqa: PLR0913
         # that no longer exists.
         rec = adapter.create(ctx, p.local.doc)
         old_id = p.id
+        if p.move_from is not None:
+            # a MOVE_EDIT whose old id is gone: the old path's entry still names
+            # that dead id — drop it, or the next run reports a phantom record at
+            # the old path and FORGETs it one cycle late.
+            index.remove(str(p.move_from))
         index.set(str(p.path), IndexKind(adapter.kind), rec.id)
         state.forget(adapter.kind, old_id)
         snapshot.record(
