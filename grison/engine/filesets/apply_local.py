@@ -6,10 +6,9 @@ from typing import Any
 from grison.engine.model import Event, Plan
 from grison.engine.state import StateStore
 from grison.fsio import atomic_write_bytes
-from grison.hashing import digest
 from grison.index import Index, IndexKind
 
-from .model import FileSetAdapter, _canonical, _event, _hash_bytes
+from .model import FileSetAdapter, _event, _hash_bytes, _record_base
 
 
 def _apply_delete_local(
@@ -56,17 +55,14 @@ def _apply_pull(
     atomic_write_bytes(root / path, body)
     index.set(str(path), IndexKind(adapter.kind), row.id)
     body_hash = _hash_bytes(body)
-    state.put(
+    _record_base(
+        state,
         adapter.kind,
         row.id,
-        base=digest(
-            _canonical(
-                body_hash=body_hash,
-                caption=row.data.get("caption", ""),
-                description=row.data.get("description", ""),
-                supports_caption=adapter.supports_caption,
-            )
-        ),
-        witness={**row.witness, "body_hash": body_hash},
+        body_hash=body_hash,
+        caption=row.data.get("caption", ""),
+        description=row.data.get("description", ""),
+        supports_caption=adapter.supports_caption,
+        witness=row.witness,
     )
     events.append(_event("pull", path=path, label=label if is_new else None))

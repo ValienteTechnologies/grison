@@ -94,9 +94,9 @@ def _pairing_plans(
 def _wrap_remote(row: RemoteRecord | None, canon_hash: str | None) -> RemoteRecord | None:
     """Carry classification's own canonical hash on the ``Plan.remote`` it hands to
     ``_apply_*`` — ``cached_hash`` is exactly the field
-    :func:`grison.engine.apply.refetch_guard` (via this module's own ``_refetch_guard``
+    :func:`grison.engine.common.refetch_guard` (via this module's own ``_refetch_guard``
     below) compares a fresh re-fetch against, the same idiom
-    :func:`grison.engine.apply._remote_hash` uses for a document adapter's
+    :func:`grison.engine.documents.model._remote_hash` uses for a document adapter's
     skip-detail-fetch placeholder."""
     if row is None:
         return None

@@ -6,14 +6,13 @@ from typing import Any
 from grison.engine.model import Event, Outcome, Plan
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
-from grison.hashing import digest
 from grison.index import Index
 
 from .apply_local import _apply_delete_local, _apply_pull
 from .apply_remote import _apply_caption_push, _apply_create, _apply_delete_remote, _apply_reupload
 from .captions import ReferenceCaption
 from .guards import _write_collision_sidecar
-from .model import FileSetAdapter, RunOptions, _canonical, _event, _hash_bytes
+from .model import FileSetAdapter, RunOptions, _event, _hash_bytes, _record_base
 
 
 def _apply_one(  # noqa: PLR0913
@@ -66,7 +65,7 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
         return
     if p.outcome is Outcome.INVALID:
         # The validation gate (item 2, fix-findings — ENGINE.md 'Apply loop'
-        # item 1, mirrored from grison.engine.apply._dispatch): a file
+        # item 1, mirrored from grison.engine.documents.dispatch._dispatch): a file
         # `sync_fileset`'s own caller already found `grison validate` failures
         # for is never uploaded — surfaced naming the rule id(s), never
         # silently dropped.
@@ -90,18 +89,15 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
             if body is not None:
                 body_hash = _hash_bytes(body)
                 st = state.get(kind, p.id)
-                state.put(
+                _record_base(
+                    state,
                     kind,
                     p.id,
-                    base=digest(
-                        _canonical(
-                            body_hash=body_hash,
-                            caption=p.remote.data.get("caption", ""),
-                            description=p.remote.data.get("description", ""),
-                            supports_caption=adapter.supports_caption,
-                        )
-                    ),
-                    witness={**(st.witness if st else {}), "body_hash": body_hash},
+                    body_hash=body_hash,
+                    caption=p.remote.data.get("caption", ""),
+                    description=p.remote.data.get("description", ""),
+                    supports_caption=adapter.supports_caption,
+                    witness=st.witness if st else {},
                 )
         events.append(_event("repair", path=p.path))
         return
@@ -144,9 +140,10 @@ def _dispatch(  # noqa: PLR0911, PLR0912, PLR0913
         return
     if p.outcome is Outcome.COLLISION:
         # ENGINE.md §8: a COLLISION writes the remote version next to the file —
-        # gated on `dry` (mirrors `grison.engine.apply._apply_collision`, the
-        # equivalent classify-time-collision branch for documents): dry run
-        # reports the same event but performs no write of any kind (ENGINE.md §9).
+        # gated on `dry` (mirrors grison.engine.documents.dispatch._dispatch's own
+        # COLLISION branch, the equivalent classify-time-collision branch for
+        # documents): dry run reports the same event but performs no write of any
+        # kind (ENGINE.md §9).
         if not dry:
             _write_collision_sidecar(root, ctx, adapter, p.path, p.remote)
         events.append(_event("collision", path=p.path, dry_run=dry))
