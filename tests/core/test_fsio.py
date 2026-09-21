@@ -216,7 +216,7 @@ def test_no_direct_file_writes_outside_fsio() -> None:
     """Every plain ``.write_text(``/``.write_bytes(``/``open(..., "w")`` write site
     in grison/ must go through this module instead — the audit's proof that the
     duplication it found is actually gone, not just given an alternative."""
-    root = Path(__file__).resolve().parent.parent / "grison"
+    root = Path(__file__).resolve().parent.parent.parent / "grison"
     pattern = re.compile(r"\.write_text\(|\.write_bytes\(|open\([^)]*[\"']w[\"']")
     offenders: list[str] = []
     for path in sorted(root.rglob("*.py")):

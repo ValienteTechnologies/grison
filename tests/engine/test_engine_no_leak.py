@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-ENGINE_DIR = Path(__file__).resolve().parents[1] / "grison" / "engine"
+ENGINE_DIR = Path(__file__).resolve().parents[2] / "grison" / "engine"
 
 _FORBIDDEN = re.compile(r"bookstack|ghostwriter|\bpage\b|\bfinding\b", re.IGNORECASE)
 

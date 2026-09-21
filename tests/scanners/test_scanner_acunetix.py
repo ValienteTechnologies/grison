@@ -9,7 +9,7 @@ import pytest
 from grison.scanners import AcunetixScanner, ImportOptions
 from grison.scanners.ir import Severity
 
-FIXTURES = Path(__file__).parent / "fixtures" / "scanners"
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "scanners"
 
 
 def load(name: str) -> bytes:

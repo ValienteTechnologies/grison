@@ -28,9 +28,9 @@ _RULE_ID_RE = re.compile(r"\b(?:WS|FND|REP|WIKI|REF|TXT|IDX)-\d{3}\b")
 _APPENDIX_HEADING = "## Appendix: full rule table"
 _APPENDIX_ROW_RE = re.compile(r"^\| ([A-Z]+-\d+) \|", re.MULTILINE)
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SPEC_PATH = _REPO_ROOT / "docs" / "workspace-format.md"
-_TESTS_DIR = Path(__file__).resolve().parent
+_TESTS_DIR = Path(__file__).resolve().parent.parent
 
 
 def _spec_ids(text: str) -> set[str]:
