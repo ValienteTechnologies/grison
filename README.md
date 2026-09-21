@@ -179,7 +179,10 @@ grison escapes it correctly on the way to Ghostwriter.
 Every record must pass `grison validate` before it's pushed, created, or deleted — the
 validation gate blocks pushes, never pulls. A mass, sudden change (many records
 looking edited/deleted at once, more than the change guard's threshold) withholds the
-writes for that run instead of applying them, reported as `withheld`.
+writes for that run instead of applying them, reported as `withheld`. When the bulk
+change is deliberate (a first import, a whole report's worth of new findings), run
+`grison sync --allow-mass-change` once: the guard steps aside for that run only, and
+every write still lands in the undo snapshot.
 
 Every remote write in one `grison sync` run — findings, report, and wiki phases alike
 — shares one undo snapshot (see `grison undo` below).
@@ -214,7 +217,7 @@ couldn't run":
   `.grison/`, like `git`). Without `PATHS`, checks everything. One line per failure:
   `path:line: RULE-ID message — fix`.
 
-- **`grison sync [--dry-run] [--force-local PATH] [--force-remote PATH] [--json] [--verbose]`**
+- **`grison sync [--dry-run] [--force-local PATH] [--force-remote PATH] [--allow-mass-change] [--json] [--verbose]`**
   — reconcile with Ghostwriter and (if configured) BookStack. Bootstraps on first run.
 
 - **`grison undo [SNAPSHOT] [--list]`** — reverse a whole sync run's remote writes,

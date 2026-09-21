@@ -678,6 +678,15 @@ def _merge_offline(statuses: list[OfflineStatus]) -> OfflineStatus:
     return OfflineStatus(entries=entries, collision_sidecars=sidecars)
 
 
+def _format_reasons(reasons: tuple[str, ...]) -> str:
+    """``WIKI-010 x38, WIKI-012`` — one entry per distinct rule, with a count when
+    it fired more than once, instead of the rule id repeated per failure line."""
+    counts: dict[str, int] = {}
+    for r in reasons:
+        counts[r] = counts.get(r, 0) + 1
+    return ", ".join(f"{r} x{n}" if n > 1 else r for r, n in counts.items())
+
+
 def _print_collision_sidecars(sidecars: list[PurePosixPath], *, area: str) -> None:
     """The one collision-sidecar text block — shared by every area that has one
     (`report`/`methodology` via :func:`_print_offline_non_clean`, and `findings`
@@ -700,7 +709,7 @@ def _print_offline_non_clean(offline: OfflineStatus, *, area: str) -> None:
         color = typer.colors.RED if entry.bucket in ("invalid", "unknown") else None
         detail = ""
         if entry.bucket == "invalid":
-            detail = f" ({', '.join(entry.reasons)})"
+            detail = f" ({_format_reasons(entry.reasons)})"
         elif entry.bucket == "moved":
             detail = f" (from {entry.moved_from})"
         elif entry.bucket == "unknown":
@@ -812,6 +821,13 @@ def sync(
         typer.Option(
             "--verbose",
             help="Also list informational skips (drafts, templates).",
+        ),
+    ] = False,
+    allow_mass_change: Annotated[
+        bool,
+        typer.Option(
+            "--allow-mass-change",
+            help="Let this run through the mass-change guard (bulk imports).",
         ),
     ] = False,
 ) -> None:
@@ -937,6 +953,7 @@ def sync(
                     dry_run=dry_run,
                     force_local=fl,
                     force_remote=fr,
+                    allow_mass_change=allow_mass_change,
                     snapshot=snapshot,
                     quiet=json_output,
                 ),
@@ -954,6 +971,7 @@ def sync(
                     dry_run=dry_run,
                     force_local=fl,
                     force_remote=fr,
+                    allow_mass_change=allow_mass_change,
                     evidence_by_report=evidence_by_report,
                     snapshot=snapshot,
                 ),
@@ -978,6 +996,7 @@ def sync(
                         dry_run=dry_run,
                         force_local=fl,
                         force_remote=fr,
+                        allow_mass_change=allow_mass_change,
                         snapshot=snapshot,
                         quiet=json_output,
                     )
@@ -1241,6 +1260,7 @@ def _run_findings_phase(
     dry_run: bool,
     force_local: set[Path],
     force_remote: set[Path],
+    allow_mass_change: bool = False,
     evidence_by_report: dict[int, dict[int, dict[str, Any]]],
     snapshot: Snapshot,
 ) -> FindingsPhaseResult:
@@ -1273,7 +1293,9 @@ def _run_findings_phase(
 
     fl = _findings_relative_force_set(root, force_local)
     fr = _findings_relative_force_set(root, force_remote)
-    options = RunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
+    options = RunOptions(
+        dry_run=dry_run, force_local=fl, force_remote=fr, allow_mass_change=allow_mass_change
+    )
 
     events: list[Event] = []
     summaries: dict[str, KindSummary] = {}
@@ -1387,6 +1409,7 @@ def _run_wiki_phase(
     dry_run: bool,
     force_local: set[Path],
     force_remote: set[Path],
+    allow_mass_change: bool = False,
     snapshot: Snapshot,
     quiet: bool = False,
 ) -> WikiPhaseResult:
@@ -1435,11 +1458,13 @@ def _run_wiki_phase(
         dry_run=dry_run,
         force_local=_wiki_relative_force_set(root, force_local),
         force_remote=_wiki_relative_force_set(root, force_remote),
+        allow_mass_change=allow_mass_change,
     )
     fs_options = FilesetRunOptions(
         dry_run=dry_run,
         force_local=_wiki_relative_force_set(root, force_local),
         force_remote=_wiki_relative_force_set(root, force_remote),
+        allow_mass_change=allow_mass_change,
     )
 
     # D9/BRIEF task C: each book's images/ folder BEFORE its pages, so a fresh
@@ -1653,6 +1678,7 @@ def _run_reports_phase(
     dry_run: bool,
     force_local: set[Path],
     force_remote: set[Path],
+    allow_mass_change: bool = False,
     snapshot: Snapshot,
     quiet: bool = False,
 ) -> tuple[ReportsPhaseResult, dict[int, dict[int, dict[str, Any]]]]:
@@ -1711,8 +1737,12 @@ def _run_reports_phase(
 
     fl = _reports_relative_force_set(root, force_local)
     fr = _reports_relative_force_set(root, force_remote)
-    options = RunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
-    fs_options = FilesetRunOptions(dry_run=dry_run, force_local=fl, force_remote=fr)
+    options = RunOptions(
+        dry_run=dry_run, force_local=fl, force_remote=fr, allow_mass_change=allow_mass_change
+    )
+    fs_options = FilesetRunOptions(
+        dry_run=dry_run, force_local=fl, force_remote=fr, allow_mass_change=allow_mass_change
+    )
 
     plans: list[Plan] = []
     events: list[Event] = []

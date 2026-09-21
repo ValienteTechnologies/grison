@@ -72,6 +72,10 @@ class RunOptions:
     force_local: frozenset[PurePosixPath] = frozenset()
     force_remote: frozenset[PurePosixPath] = frozenset()
     mass_change_ratio: float = MASS_CHANGE_RATIO
+    #: ``grison sync --allow-mass-change``: this run's writes are deliberate in bulk
+    #: (a first import, a whole report's worth of new findings) — the guard steps
+    #: aside for the run; every write is still undo-snapshotted as usual.
+    allow_mass_change: bool = False
 
 
 def run(  # noqa: PLR0913
@@ -322,6 +326,8 @@ def change_guard(plans: list[Plan], options: Any) -> None:
     engine's own, differently-shaped options dataclass) satisfy that by duck typing,
     which is how :mod:`grison.engine.filesets` shares this one implementation
     instead of re-declaring its own copy (item 5, fix-fin1)."""
+    if getattr(options, "allow_mass_change", False):
+        return
     total = max(len(plans), 1)
 
     def _weight(p: Plan) -> int:

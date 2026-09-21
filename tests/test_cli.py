@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from grison.cli import FindingsPhaseResult, app
+from grison.cli import FindingsPhaseResult, _format_reasons, app
 from grison.engine.model import Event, KindSummary, Outcome, Plan
 
 _FIX = Path(__file__).parent / "fixtures" / "scanners"
@@ -242,6 +242,7 @@ def test_sync_exit_code_reflects_result_errors(
         dry_run=False,
         force_local=None,
         force_remote=None,
+        allow_mass_change=False,
         evidence_by_report=None,
         snapshot=None,
     ):
@@ -263,6 +264,7 @@ def test_sync_exit_code_reflects_result_errors(
         dry_run=False,
         force_local=None,
         force_remote=None,
+        allow_mass_change=False,
         snapshot=None,
         quiet=False,
     ):
@@ -303,6 +305,7 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
         dry_run=False,
         force_local=None,
         force_remote=None,
+        allow_mass_change=False,
         evidence_by_report=None,
         snapshot=None,
     ):
@@ -330,6 +333,7 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
         dry_run=False,
         force_local=None,
         force_remote=None,
+        allow_mass_change=False,
         snapshot=None,
         quiet=False,
     ):
@@ -380,6 +384,7 @@ def test_sync_git_driving_commits_checkpoint_and_summary(
         dry_run=False,
         force_local=None,
         force_remote=None,
+        allow_mass_change=False,
         evidence_by_report=None,
         snapshot=None,
     ):
@@ -418,6 +423,7 @@ def test_sync_git_driving_notes_failures_in_message(
         dry_run=False,
         force_local=None,
         force_remote=None,
+        allow_mass_change=False,
         evidence_by_report=None,
         snapshot=None,
     ):
@@ -697,3 +703,8 @@ def test_hook_post_edit_reports_invalid_file(
     r = _runner.invoke(app, ["hook", "post-edit"], input=payload)
     assert r.exit_code == 0  # PostToolUse can never fail the command
     assert "FND-003" in r.output
+
+
+def test_status_reasons_are_deduplicated_with_counts() -> None:
+    assert _format_reasons(("WIKI-010",) * 38 + ("WIKI-012",)) == "WIKI-010 x38, WIKI-012"
+    assert _format_reasons(("FND-015",)) == "FND-015"
