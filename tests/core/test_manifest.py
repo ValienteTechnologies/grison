@@ -216,3 +216,17 @@ def test_check_git_hygiene_flags_a_wrongly_ignored_tracked_file(tmp_path: Path) 
     (root / ".grison" / "manifest.yml").write_text("format: 2\n")
     problems = m.check_git_hygiene(root)
     assert any(".grison/manifest.yml" in p and "must be tracked" in p for p in problems)
+
+
+def test_is_bootstrapped_refuses_a_directory_at_the_manifest_path(tmp_path: Path) -> None:
+    (tmp_path / ".grison" / "manifest.yml").mkdir(parents=True)
+    with pytest.raises(m.ManifestError, match="not a file"):
+        m.is_bootstrapped(tmp_path)
+
+
+def test_is_bootstrapped_is_false_for_a_hand_placed_env_only(tmp_path: Path) -> None:
+    (tmp_path / ".grison").mkdir()
+    (tmp_path / ".grison" / "env").write_text("GRISON_GW_URL=https://gw.test\n")
+    assert m.is_bootstrapped(tmp_path) is False
+    m.write(tmp_path)
+    assert m.is_bootstrapped(tmp_path) is True

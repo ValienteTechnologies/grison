@@ -112,6 +112,13 @@ def is_bootstrapped(root: Path) -> bool:
     (already-bootstrapped v2) case: ``manifest.yml`` existing short-circuits
     before ``has_v1_content``'s own ``rglob`` ever runs."""
     manifest_path = root / MANIFEST_RELATIVE_PATH
+    if manifest_path.exists() and not manifest_path.is_file():
+        # a directory (or socket, …) at the manifest's path is neither a v2
+        # workspace nor a fresh one: say so plainly instead of letting bootstrap
+        # try to write a file over it and fail with a traceback.
+        raise ManifestError(
+            f"{MANIFEST_RELATIVE_PATH} exists but is not a file — remove it, then run again"
+        )
     return manifest_path.is_file() or has_v1_content(root)
 
 
