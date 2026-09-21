@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-09-21
+
+### Fixed
+
+- A record pulled from Ghostwriter whose title has surrounding whitespace or is
+  empty, or whose field HTML ends in empty paragraphs/headings, no longer classifies
+  as `edited` right after a clean pull (and so no longer push-loops): the remote
+  canonical form now strips titles and prose exactly like the local parsers do,
+  for findings, narrative sections and project notes alike. An empty remote title
+  is `Untitled` on both sides and the file is `untitled.md`.
+- `grison status` prints each rule id once per invalid file, with a count
+  (`WIKI-010 x38, WIKI-012`), instead of once per failure line.
+- Every command's `--help` is one plain sentence.
+
+### Added
+
+- `grison sync --allow-mass-change`: lets a deliberate bulk change (a first import,
+  a whole report's worth of new findings) through the mass-change guard for that
+  run only; every write is still undo-snapshotted.
+
 ## [0.4.0] - 2026-09-20
 
 Workspace format 2. This is a **clean break, not a migration**: a workspace on
