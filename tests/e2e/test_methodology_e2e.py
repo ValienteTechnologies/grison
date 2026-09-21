@@ -743,8 +743,8 @@ def test_valued_tags_pull_from_remote(run_grison, bs_server):
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     fm, _ = _read_fm(path)
     # v2 tags are plain strings (no name/value structure in the frontmatter model) —
-    # a valued BookStack tag round-trips as "name:value" (bs_pages.py's own
-    # documented convention).
+    # a valued BookStack tag round-trips as "name:value" (bs_pages/normalize.py's
+    # own documented convention).
     assert fm["tags"] == ["owasp:A01"]
 
 
@@ -1388,4 +1388,25 @@ def test_internal_link_to_a_pulled_page_resolves_offline(run_grison, bs_server):
 
     result = run_grison("validate")
 
+    assert result.exit_code == 0, result.output
+
+
+def test_mixed_case_bookstack_collision_slug_lands_lower_case_and_still_resolves(
+    run_grison, bs_server
+):
+    """BookStack de-duplicates a slug with a random mixed-case suffix
+    (`uygulama-aciklamasi-jJr` on the real wiki). File names are lower-case only
+    (WS-001), so the file takes the lower-cased slug, and an internal link written
+    with the original casing still resolves (WIKI-007 compares lower-cased)."""
+    book = bs_server.store.seed_book(name="Kılavuzlar")
+    bs_server.store.seed_page(book_id=book["id"], name="Notlar", slug="notlar-jJr", markdown="A.")
+    bs_server.store.seed_page(
+        book_id=book["id"],
+        name="Giriş",
+        markdown="Bkz. [Notlar](/books/kilavuzlar/page/notlar-jJr).",
+    )
+    run_grison("sync")
+
+    assert (Path.cwd() / "methodology" / "library" / "kilavuzlar" / "notlar-jjr.md").is_file()
+    result = run_grison("validate")
     assert result.exit_code == 0, result.output

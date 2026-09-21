@@ -27,6 +27,8 @@ from typing import Any
 
 import httpx
 
+from grison.adapters._slug import FOLD
+
 _LIST_COUNT_MAX = 500  # BookStack's own documented per-request cap
 
 
@@ -77,7 +79,7 @@ def _slugify(name: str) -> str:
     """BookStack's slugger (Laravel ``Str::slug``) transliterates to ASCII before
     hyphenating — ``Tanımlar`` is ``tanimlar`` on a real instance, never
     ``tan-mlar`` — so this fake does too."""
-    folded = unicodedata.normalize("NFKD", name.lower().replace("ı", "i"))
+    folded = unicodedata.normalize("NFKD", name.lower()).translate(FOLD)
     ascii_text = "".join(c for c in folded if not unicodedata.combining(c))
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")
     return slug or "page"

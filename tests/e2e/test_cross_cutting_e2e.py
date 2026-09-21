@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from tests.conftest import tree_snapshot
+
 REPORT_SCOPES = [
     {
         "name": "Internal range",
@@ -363,13 +365,13 @@ def test_sync_refuses_when_a_canonical_deny_rule_is_hand_removed(
     settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     gw_before, bs_before = len(gw_server.request_log), len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_gw_client", _no_remote_client)
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_gw_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("sync")
 
@@ -401,12 +403,12 @@ def test_undo_refuses_when_a_canonical_deny_rule_is_hand_removed(
     settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     bs_before = len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("undo")
 
@@ -460,13 +462,13 @@ def test_sync_refuses_a_format_1_manifest(
     _write_format_1_manifest(workspace)
     before = sorted(p.relative_to(workspace) for p in workspace.rglob("*") if p.is_file())
     gw_before, bs_before = len(gw_server.request_log), len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_gw_client", _no_remote_client)
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_gw_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("sync")
 
@@ -505,12 +507,12 @@ def test_undo_refuses_a_format_1_manifest(
 
     _write_format_1_manifest(workspace)
     bs_before = len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("undo")
 
@@ -592,13 +594,16 @@ def test_sync_json_wiki_slot_is_null_when_bookstack_is_not_configured(
     bootstrap_workspace(tmp_path)
 
     import grison.cli as cli_mod
+    import grison.cli.commands.sync as sync_mod
+    import grison.cli.phases.findings as findings_phase_mod
+    import grison.cli.phases.reports as reports_phase_mod
 
-    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(sync_mod, "check_ghostwriter_compatibility", lambda client, root: None)
     monkeypatch.setattr(
-        cli_mod, "_run_findings_phase", lambda *a, **k: cli_mod.FindingsPhaseResult()
+        findings_phase_mod, "_run_findings_phase", lambda *a, **k: cli_mod.FindingsPhaseResult()
     )
     monkeypatch.setattr(
-        cli_mod, "_run_reports_phase", lambda *a, **k: (cli_mod.ReportsPhaseResult(), {})
+        reports_phase_mod, "_run_reports_phase", lambda *a, **k: (cli_mod.ReportsPhaseResult(), {})
     )
 
     result = CliRunner().invoke(cli_mod.app, ["sync", "--json"])
@@ -606,3 +611,41 @@ def test_sync_json_wiki_slot_is_null_when_bookstack_is_not_configured(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["wiki"] is None
+
+
+def _strip_to_env_only(workspace: Path) -> None:
+    """Leave only the hand-placed ``.grison/env`` behind, inside a git repo: the
+    real-workspace shape of 'copy the credentials into a fresh clone, run sync'."""
+    for name in ("manifest.yml", ".gitignore", "index.json"):
+        (workspace / ".grison" / name).unlink()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+
+
+def test_first_sync_bootstraps_a_git_repo_holding_only_a_hand_placed_env(
+    run_grison, gw_server, workspace
+):
+    """2026-09-21 real-workspace defect: `.grison/env` copied into a fresh `git init`
+    directory, then `grison sync` — refused with WS-008 ('.grison/env must be
+    git-ignored') before bootstrap could write the very `.grison/.gitignore` the
+    rule wants. A hand-placed env is not a bootstrapped workspace."""
+    gw_server.store.seed_finding(id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4)
+    _strip_to_env_only(workspace)
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 0, result.output
+    assert "WS-008" not in result.output
+    assert (workspace / ".grison" / "manifest.yml").is_file()
+    assert (workspace / ".grison" / ".gitignore").is_file()
+    assert (workspace / "findings" / "library" / "weak-tls-ciphers.md").is_file()
+
+
+def test_dry_run_on_a_git_repo_holding_only_a_hand_placed_env_writes_nothing(run_grison, workspace):
+    _strip_to_env_only(workspace)
+    before = tree_snapshot(workspace)
+
+    result = run_grison("sync", "--dry-run")
+
+    assert result.exit_code == 2, result.output
+    assert "would create" in result.output
+    assert tree_snapshot(workspace) == before

@@ -165,7 +165,7 @@ def test_a_later_phase_crashing_still_leaves_an_undoable_snapshot_of_the_earlier
     report phase has pushed a narrative section: the report phase's write must
     still be on disk in a snapshot, and a single ``grison undo`` must still reverse
     it, even though the sync that made the write never finished."""
-    import grison.cli as cli_mod
+    import grison.cli.phases.wiki as wiki_phase_mod
 
     gw_server.store.extra_field_specs.clear()  # crisp counts — just this one field
     gw_server.store.seed_report_extra_field_specs(["executive_summary"])
@@ -188,7 +188,7 @@ def test_a_later_phase_crashing_still_leaves_an_undoable_snapshot_of_the_earlier
     def _boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(cli_mod, "_run_wiki_phase", _boom)
+    monkeypatch.setattr(wiki_phase_mod, "_run_wiki_phase", _boom)
 
     result = run_grison("sync")
 

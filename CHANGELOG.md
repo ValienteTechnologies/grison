@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] - 2026-09-21
+
+### Changed
+
+- Internal layout: the five oversized modules (`cli`, `markdown/converter`,
+  `validator/core`, `engine/apply`, `engine/filesets`) and the Ghostwriter client
+  and the `gw_findings`, `gw_report` and `bs_pages` adapters are packages now, one
+  file per responsibility, with what the two engines and the three sync phases
+  repeated collapsed into one place each. Public import paths are unchanged. Tests
+  mirror the source tree. One behaviour change: a failure syncing one book's
+  `images/` no longer aborts the other books' images and pages (report evidence
+  already had that isolation).
+
+### Fixed
+
+- A first `grison sync` in a fresh `git init` directory holding only a hand-placed
+  `.grison/env` was refused with WS-008 before bootstrap could write the
+  `.grison/.gitignore` the rule asks for. A hand-placed env no longer counts as a
+  bootstrapped workspace; the run bootstraps, then the workspace rules gate it.
+
 ## [0.4.2] - 2026-09-21
 
 ### Fixed

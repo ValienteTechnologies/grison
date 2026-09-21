@@ -1,19 +1,18 @@
 """Collision-sidecar naming (ENGINE.md §8) — the one convention, kept in its own
 leaf module (no dependency on anything else in ``grison`` beyond the record-type-
 agnostic ``grison.engine.model``/``grison.fsio``) so it can be reached from both
-directions of an otherwise-circular import: :mod:`grison.engine.apply`
+directions of an otherwise-circular import: :mod:`grison.engine.common`
 (which pulls in :mod:`grison.validator.registry`, and therefore the whole
 ``grison.validator`` package's ``__init__``, via ``Failure``) and
 :mod:`grison.validator.core` (item 5: excluding a live sidecar from the
 evidence/images directory scans needs the exact same rule ``grison status``'s
 sidecar-aware counts and :mod:`grison.engine.filesets`'s local scan already use).
-``grison.engine.apply`` re-exports :func:`sidecar_path` (existing callers —
-:mod:`grison.engine.offline_status` — keep importing it from there); every other
-caller of either function (:mod:`grison.engine.filesets`, :mod:`grison.cli`,
-:mod:`grison.validator.core`) imports straight from this module.
+Every caller (:mod:`grison.engine.documents`, :mod:`grison.engine.filesets`,
+:mod:`grison.engine.offline_status`, :mod:`grison.cli`, :mod:`grison.validator.core`)
+imports :func:`sidecar_path` straight from this module.
 
 :func:`write_sidecar`/:func:`clear_stale_sidecars` are the ONE collision-sidecar
-write/clear (ENGINE.md §8), shared by :mod:`grison.engine.apply` and
+write/clear (ENGINE.md §8), shared by :mod:`grison.engine.documents` and
 :mod:`grison.engine.filesets` — the two record shapes (a document's text vs. a
 file set's raw bytes) differ only in how the remote version's bytes are produced,
 never in the write-atomically-or-not-at-all/clear-when-no-longer-colliding

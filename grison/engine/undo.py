@@ -16,7 +16,7 @@ uploaded evidence (report phase) and pushed a library finding (findings phase) l
 two snapshot directories and a single ``grison undo`` only reversed the newer one.
 
 Undo is for REMOTE writes. A snapshot only ever holds ops for PUSH/MOVE_EDIT/CREATE/
-DELETE_REMOTE (the outcomes in ``grison.engine.apply._REMOTE_WRITE_OUTCOMES``) — never
+DELETE_REMOTE (the outcomes in ``grison.engine.common.REMOTE_WRITE_OUTCOMES``) — never
 PULL/PULL_NEW/DELETE_LOCAL/a pure MOVE, which touch only the local, git-tracked tree
 and have nothing for grison's own undo to add over `git checkout`/`git mv`. This
 matters operationally, not just conceptually: with prune-to-10, a workspace that
@@ -39,6 +39,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from grison.engine.adapter import CreateUndoAdapter, PushUndoAdapter, RestorableUndoAdapter
+from grison.engine.common import refetch_guard
 from grison.engine.events import verb_for_outcome
 from grison.engine.state import StateStore
 from grison.fsio import atomic_write_bytes, atomic_write_text, ensure_private_dir
@@ -97,7 +98,7 @@ class UndoOp:
     forward apply loop stamps as the new ``state`` base — ENGINE.md §6's
     canonicalisation-after-push, reused here) — what ``_replay_one`` compares a
     fresh re-fetch against before restoring ``remote_preimage`` over it, via the
-    same :func:`grison.engine.apply.refetch_guard` the forward loop uses for its
+    same :func:`grison.engine.common.refetch_guard` the forward loop uses for its
     own pre-write guard, so a record edited again since this run's write is
     reported instead of clobbered. ``None`` only for an older snapshot recorded
     before this field existed, or an op this guard doesn't apply to
@@ -327,11 +328,7 @@ def _replay_one(  # noqa: PLR0912
         # edited again since the write this op undoes must be reported, not
         # silently overwritten with the older `remote_preimage` — this is the
         # gap the module docstring calls out ("unlike the create and
-        # delete_remote branches"). Local import: `grison.engine.apply` imports
-        # this module (`Snapshot`/`UndoOp`) at its own top level, so importing it
-        # back from here at module scope would be circular.
-        from grison.engine.apply import refetch_guard
-
+        # delete_remote branches").
         rid = op.id
         _fresh, drifted = refetch_guard(
             refetch=lambda: adapter.refetch(ctx, rid),

@@ -462,7 +462,7 @@ def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
     file for ONE of them — the other kept its post-push content (including the
     now-dangling evidence reference), producing a spurious collision on the
     very next sync. Fixed: every push/move_edit op's own local pre-image is
-    restored (``grison.engine.apply``'s ``UndoOp.local_preimage``, previously
+    restored (``grison.engine.undo``'s ``UndoOp.local_preimage``, previously
     only ever captured for a ``create`` op), and the "restored" message is only
     printed once that write has actually happened."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
@@ -715,12 +715,12 @@ def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
     """BRIEF task 2 (ENGINE.md §5 per-record isolation): before this fix, an
     unexpected exception out of one report's ``engine_sync_fileset`` call
     propagated straight out of ``_run_findings_phase`` — caught only at the
-    WHOLE-PHASE level by ``grison.cli._run_phase`` ("findings sync failed: ..."),
+    WHOLE-PHASE level by ``grison.cli.phases.common._run_phase`` ("findings sync failed: ..."),
     discarding the entire findings phase's result: library findings, and every
     OTHER report's findings, along with it. The fix wraps each report's evidence
     file-set sync in its own try/except, so one report's failure becomes that
     report's own `failed` record and every other report/finding still syncs."""
-    import grison.cli as cli_mod
+    import grison.cli.phases.common as phase_common_mod
 
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_report(id=8, title="Report B", project={"scopes": REPORT_SCOPES})
@@ -740,18 +740,18 @@ def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
         encoding="utf-8",
     )
 
-    real_sync_fileset = cli_mod.engine_sync_fileset
+    real_sync_fileset = phase_common_mod.engine_sync_fileset
 
     def _fake_sync_fileset(root, ctx, adapter, folder, **kwargs):
         if str(folder) == "findings/reports/report-b/evidence":
             raise RuntimeError("boom")
         return real_sync_fileset(root, ctx, adapter, folder, **kwargs)
 
-    monkeypatch.setattr(cli_mod, "engine_sync_fileset", _fake_sync_fileset)
+    monkeypatch.setattr(phase_common_mod, "engine_sync_fileset", _fake_sync_fileset)
 
     result = run_grison("sync")
 
-    # the phase-level "findings sync failed" message (grison.cli._run_phase) must
+    # the phase-level "findings sync failed" message (grison.cli.phases.common._run_phase) must
     # NEVER fire for this — the failure is report-b's evidence set's alone.
     assert "findings sync failed" not in result.output, result.output
     assert "gw.evidence[findings/reports/report-b]): failed 1" in result.output, result.output
@@ -776,8 +776,8 @@ def test_cross_report_move_with_identical_content_reparents(run_grison, gw_serve
     include ``book``/``chapter`` — moving a finding FILE to another report
     directory with byte-identical content must still write the new ``reportId``
     to Ghostwriter, and a third sync must come back clean. BEFORE the fix,
-    ``apply.py::_apply_move``'s ``needs_write`` compared the two canonical
-    payloads equal (report membership was invisible to both), so the finding
+    ``grison.engine.documents.apply_remote``'s ``_apply_move``'s ``needs_write`` compared
+    the two canonical payloads equal (report membership was invisible to both), so the finding
     kept its OLD ``reportId`` on Ghostwriter forever, silently."""
     report_a = gw_server.store.seed_report(
         id=7, title="Report A", project={"scopes": REPORT_SCOPES}
