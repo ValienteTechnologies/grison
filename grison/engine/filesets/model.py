@@ -6,17 +6,18 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
-from grison.engine.apply import MASS_CHANGE_RATIO
+from grison.engine.common import MASS_CHANGE_RATIO
 from grison.engine.model import Event, KindSummary, Plan, RemoteRecord, VetoSeverity
 from grison.engine.sidecar import is_sidecar_name
 from grison.engine.state import StateStore
+from grison.hashing import digest
 
 # One change guard, one pre-write re-fetch guard, one collision-sidecar
 # write/clear for every record type (ENGINE.md) — file sets included. Imported
-# from grison.engine.apply/grison.engine.sidecar (item 5, fix-fin1) rather than
-# re-declared: this module used to carry its own literal copies of the
-# threshold/outcome-set constants and the change-guard/sidecar functions, which
-# could silently drift from apply.py's if either was edited alone.
+# from grison.engine.common/grison.engine.sidecar rather than re-declared: this
+# module used to carry its own literal copies of the threshold/outcome-set
+# constants and the change-guard/sidecar functions, which could silently drift
+# from the document engine's if either was edited alone.
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class RunOptions:
     force_local: frozenset[PurePosixPath] = frozenset()
     force_remote: frozenset[PurePosixPath] = frozenset()
     mass_change_ratio: float = MASS_CHANGE_RATIO
-    allow_mass_change: bool = False  # see grison.engine.apply.RunOptions
+    allow_mass_change: bool = False  # see grison.engine.documents.RunOptions
 
 
 # --- the file-set adapter protocol + sync loop ------------------------------
@@ -131,6 +132,38 @@ def caption_only_canonical(data: Mapping[str, Any]) -> dict[str, Any]:
     never be what drifted — comparing it here would only force an unnecessary
     re-download at undo time for a dimension that could never have changed."""
     return {"caption": data.get("caption") or "", "description": data.get("description") or ""}
+
+
+def _record_base(
+    state: StateStore,
+    kind: str,
+    id: int,
+    *,
+    body_hash: str,
+    caption: str,
+    description: str,
+    supports_caption: bool,
+    witness: Mapping[str, Any],
+) -> None:
+    """The ONE post-write state bookkeeping call (REPAIR's restamp, a pull, a
+    create, a re-upload, a caption push — item 1, dedup round 2, this used to be
+    copied five times verbatim): stamp ``base`` to the canonical (body+caption+
+    description) hash both sides now agree on, and cache the body hash in
+    ``witness`` so the next sync's classify never has to re-download bytes D1
+    guarantees are immutable for this id."""
+    state.put(
+        kind,
+        id,
+        base=digest(
+            _canonical(
+                body_hash=body_hash,
+                caption=caption,
+                description=description,
+                supports_caption=supports_caption,
+            )
+        ),
+        witness={**witness, "body_hash": body_hash},
+    )
 
 
 def _event(

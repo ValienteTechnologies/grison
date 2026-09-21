@@ -8,14 +8,14 @@ the change guard, the pre-write re-fetch guard, undo capture, bookkeeping — is
 code path.
 
 Why this is not just another :class:`grison.engine.adapter.Adapter` run through
-:mod:`grison.engine.apply`: that engine's :class:`~grison.engine.model.LocalDoc`
+:mod:`grison.engine.documents`: that engine's :class:`~grison.engine.model.LocalDoc`
 carries ``raw_text: str`` (decoded text) and ``apply.py`` always writes a pulled/
 created record with :func:`grison.fsio.atomic_write_text` — both assume a
 document. A file-set record's body is arbitrary bytes (an image is not always
 UTF-8-decodable), so this module re-implements the same shape of loop (classify,
 change guard, pre-write re-fetch, undo, bookkeeping) directly against bytes,
 reusing every other primitive verbatim: :func:`grison.engine.classify.classify`,
-:func:`grison.engine.identity.pair`, :func:`grison.engine.apply.refetch_guard` (the
+:func:`grison.engine.identity.pair`, :func:`grison.engine.common.refetch_guard` (the
 pre-write re-fetch guard itself — same drift-is-a-collision semantics, same event
 wording, just handed this module's own bytes-aware refetch/hash functions instead
 of an :class:`~grison.engine.adapter.Adapter`'s), :class:`grison.engine.state.

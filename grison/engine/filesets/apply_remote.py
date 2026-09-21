@@ -3,20 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from grison.engine.model import Event, Outcome, Plan
+from grison.engine.model import Event, Plan
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot, UndoOp
 from grison.hashing import digest
 from grison.index import Index, IndexKind
 
 from .captions import ReferenceCaption
-from .guards import _preimage, _refetch_guard, _write_collision_sidecar
+from .guards import _collide, _preimage, _refetch_guard
 from .model import (
     FileSetAdapter,
     RunOptions,
-    _canonical,
     _event,
     _hash_bytes,
+    _record_base,
     caption_only_canonical,
 )
 
@@ -54,18 +54,15 @@ def _apply_create(  # noqa: PLR0913
         state.forget(adapter.kind, old_id)
     snapshot.record(UndoOp(kind=adapter.kind, outcome="create", path=str(p.path), id=row.id))
     body_hash = _hash_bytes(body)
-    state.put(
+    _record_base(
+        state,
         adapter.kind,
         row.id,
-        base=digest(
-            _canonical(
-                body_hash=body_hash,
-                caption=row.data.get("caption", ""),
-                description=row.data.get("description", ""),
-                supports_caption=adapter.supports_caption,
-            )
-        ),
-        witness={**row.witness, "body_hash": body_hash},
+        body_hash=body_hash,
+        caption=row.data.get("caption", ""),
+        description=row.data.get("description", ""),
+        supports_caption=adapter.supports_caption,
+        witness=row.witness,
     )
     p.remote = row  # so _rows_after()'s caption-rewrite pass sees this newly-created row too
     events.append(_event("create", path=p.path))
@@ -100,12 +97,7 @@ def _apply_reupload(  # noqa: PLR0913
     dry = options.dry_run
     fresh, drifted = _refetch_guard(ctx, adapter, p, state, options)
     if drifted:
-        p.outcome = Outcome.COLLISION
-        if not dry:
-            _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
-        events.append(
-            _event("collision", path=p.path, detail="changed on the server since classification")
-        )
+        _collide(root, ctx, adapter, p, fresh, events, dry)
         return
     if dry:
         events.append(
@@ -138,18 +130,15 @@ def _apply_reupload(  # noqa: PLR0913
     index.set(str(p.path), IndexKind(adapter.kind), new_row.id)
     state.forget(adapter.kind, old_id)
     body_hash = _hash_bytes(body)
-    state.put(
+    _record_base(
+        state,
         adapter.kind,
         new_row.id,
-        base=digest(
-            _canonical(
-                body_hash=body_hash,
-                caption=caption,
-                description=description,
-                supports_caption=adapter.supports_caption,
-            )
-        ),
-        witness={**new_row.witness, "body_hash": body_hash},
+        body_hash=body_hash,
+        caption=caption,
+        description=description,
+        supports_caption=adapter.supports_caption,
+        witness=new_row.witness,
     )
     p.remote = new_row  # so _rows_after()/the caller's caption-rewrite pass sees the new row
     events.append(_event("push", path=p.path, detail="bytes changed — new remote row"))
@@ -180,12 +169,7 @@ def _apply_caption_push(  # noqa: PLR0913
         # row that's now gone entirely (refetch_guard's own "not forced" rule) — a
         # caption push has no "recreate" fallback the way a reupload/delete-remote
         # does (there is nothing to attach the caption to), so it collides too.
-        p.outcome = Outcome.COLLISION
-        if not dry:
-            _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
-        events.append(
-            _event("collision", path=p.path, detail="changed on the server since classification")
-        )
+        _collide(root, ctx, adapter, p, fresh, events, dry)
         return
     if dry:
         events.append(_event("push", path=p.path, detail="caption/description", dry_run=True))
@@ -223,18 +207,15 @@ def _apply_caption_push(  # noqa: PLR0913
     body_hash = (
         cached_hash if isinstance(cached_hash, str) else _hash_bytes(adapter.fetch_body(ctx, p.id))
     )
-    state.put(
+    _record_base(
+        state,
         adapter.kind,
         p.id,
-        base=digest(
-            _canonical(
-                body_hash=body_hash,
-                caption=updated.data.get("caption", ""),
-                description=updated.data.get("description", ""),
-                supports_caption=True,
-            )
-        ),
-        witness={**updated.witness, "body_hash": body_hash},
+        body_hash=body_hash,
+        caption=updated.data.get("caption", ""),
+        description=updated.data.get("description", ""),
+        supports_caption=True,
+        witness=updated.witness,
     )
     p.remote = updated
     events.append(_event("push", path=p.path, detail="caption/description"))
@@ -259,12 +240,7 @@ def _apply_delete_remote(
     dry = options.dry_run
     fresh, drifted = _refetch_guard(ctx, adapter, p, state, options)
     if drifted:
-        p.outcome = Outcome.COLLISION
-        if not dry:
-            _write_collision_sidecar(root, ctx, adapter, p.path, fresh)
-        events.append(
-            _event("collision", path=p.path, detail="changed on the server since classification")
-        )
+        _collide(root, ctx, adapter, p, fresh, events, dry)
         return
     if dry:
         events.append(_event("delete-remote", path=p.path, dry_run=True))

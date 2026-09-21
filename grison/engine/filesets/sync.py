@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from grison.engine.apply import REMOTE_WRITE_OUTCOMES
-from grison.engine.apply import change_guard as _apply_change_guard
+from grison.engine.common import change_guard as _apply_change_guard
+from grison.engine.common import indexed_for_kind, partition_present, run_apply_loop
+from grison.engine.common import validation_gate as _validation_gate
 from grison.engine.model import Event, KindSummary, Outcome, Plan
 from grison.engine.sidecar import clear_stale_sidecars as _clear_stale_sidecars
 from grison.engine.state import StateStore
@@ -51,7 +52,6 @@ def sync_fileset(  # noqa: PLR0913
     list just means nothing failed)."""
     options = options or RunOptions()
     failures = failures or []
-    invalid_paths = {f.path for f in failures}
     kind = adapter.kind
     events: list[Event] = []
     summary = KindSummary(kind=kind)
@@ -62,17 +62,13 @@ def sync_fileset(  # noqa: PLR0913
         collect_captions(doc_bodies or {}, folder=folder) if adapter.supports_caption else ({}, [])
     )
 
-    indexed = {
-        PurePosixPath(p): rec.id
-        for p, rec in index.records.items()
-        if rec.kind.value == kind and PurePosixPath(p).parent == folder
-    }
+    indexed = indexed_for_kind(index, kind, under=folder)
     indexed_ids = set(indexed.values())
     name_by_id = {v: k.name for k, v in indexed.items()}
 
-    present_names = set(local_files) & set(name_by_id.values())
-    missing_names = set(name_by_id.values()) - set(local_files)
-    unindexed_names = set(local_files) - set(name_by_id.values())
+    present_names, missing_names, unindexed_names = partition_present(
+        local_files, name_by_id.values()
+    )
     remote_unindexed = set(remote_rows) - indexed_ids
 
     plans, paired_missing_names, paired_unindexed_names = _pairing_plans(
@@ -136,30 +132,27 @@ def sync_fileset(  # noqa: PLR0913
         claimed_names.add(path.name)
         plans.append(Plan(kind=kind, outcome=Outcome.PULL_NEW, id=rid, remote=row, path=path))
 
-    # The validation gate (ENGINE.md 'Apply loop' item 1), mirrored verbatim
-    # from grison.engine.apply.run: only ever turns a remote-write outcome into
-    # INVALID — a pull/delete-local proceeds regardless, exactly like a
+    # The validation gate (ENGINE.md 'Apply loop' item 1), shared with the document
+    # engine (grison.engine.common.validation_gate): only ever turns a remote-write
+    # outcome into INVALID — a pull/delete-local proceeds regardless, exactly like a
     # document's own gate.
-    for p in plans:
-        if p.outcome in REMOTE_WRITE_OUTCOMES and p.path is not None:
-            if str(p.path) in invalid_paths:
-                p.rule_ids = tuple(f.rule_id for f in failures if f.path == str(p.path))
-                p.outcome = Outcome.INVALID
+    _validation_gate(plans, failures)
 
     _apply_change_guard(plans, options)
 
-    for p in plans:
+    def _apply(p: Plan) -> None:
         _apply_one(
             root, ctx, adapter, p, index, state, snapshot, events, options, local_files, captions
         )
-        summary.bump(p.outcome)
-        if p.is_problem:
-            label = (
-                str(p.path)
-                if p.path is not None
-                else adapter.remote_label(p.remote.data if p.remote is not None else {})
-            )
-            summary.problem_paths.append(label)
+
+    def _label(p: Plan) -> str:
+        return (
+            str(p.path)
+            if p.path is not None
+            else adapter.remote_label(p.remote.data if p.remote is not None else {})
+        )
+
+    run_apply_loop(plans, summary, _apply, _label)
 
     if not options.dry_run:
         _clear_stale_sidecars(root, plans)
