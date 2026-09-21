@@ -168,9 +168,15 @@ def test_on_loss_silent_for_ol_without_type_attr() -> None:
 # --- fail loud ---------------------------------------------------------------
 
 
-def test_md_to_html_raises_on_table() -> None:
-    with pytest.raises(ConverterError):
-        md_to_html("a | b\n---|---\nc | d")
+def test_md_to_html_supports_table() -> None:
+    # grammar widened 2026-09-21: GFM pipe tables are now supported (see the
+    # package docstring's whitelist) — no <thead>, header cells are plain <th>
+    # inside the same <tbody> as every other row, matching plain
+    # @tiptap/extension-table's own shape.
+    assert md_to_html("a | b\n---|---\nc | d") == (
+        "<table><tbody><tr><th><p>a</p></th><th><p>b</p></th></tr>"
+        "<tr><td><p>c</p></td><td><p>d</p></td></tr></tbody></table>"
+    )
 
 
 def test_md_to_html_raises_on_image() -> None:
@@ -183,9 +189,14 @@ def test_md_to_html_raises_on_heading() -> None:
         md_to_html("# Heading")
 
 
-def test_md_to_html_raises_on_blockquote() -> None:
+def test_md_to_html_supports_blockquote() -> None:
+    # grammar widened 2026-09-21 (see the package docstring's whitelist).
+    assert md_to_html("> quoted text") == "<blockquote><p>quoted text</p></blockquote>"
+
+
+def test_md_to_html_raises_on_nested_blockquote() -> None:
     with pytest.raises(ConverterError):
-        md_to_html("> quoted text")
+        md_to_html("> > nested")
 
 
 def test_md_to_html_raises_on_thematic_break() -> None:
@@ -198,14 +209,16 @@ def test_md_to_html_raises_on_setext_heading() -> None:
         md_to_html("Title\n===")
 
 
-def test_md_to_html_raises_on_backtick_fence() -> None:
-    with pytest.raises(ConverterError):
-        md_to_html("```\ncode\n```")
+def test_md_to_html_supports_backtick_fence() -> None:
+    # grammar widened 2026-09-21 (see the package docstring's whitelist).
+    assert md_to_html("```\ncode\n```") == '<pre spellcheck="false"><code>code\n</code></pre>'
 
 
-def test_md_to_html_raises_on_tilde_fence() -> None:
-    with pytest.raises(ConverterError):
-        md_to_html("~~~\ncode\n~~~")
+def test_md_to_html_supports_tilde_fence() -> None:
+    # CommonMark treats a tilde fence identically to a backtick fence (same
+    # "fence" node) — grison accepts either marker on authoring, always
+    # re-canonicalizing to a backtick fence on the html->markdown side.
+    assert md_to_html("~~~\ncode\n~~~") == '<pre spellcheck="false"><code>code\n</code></pre>'
 
 
 def test_md_to_html_raises_on_indented_code_block() -> None:
@@ -385,9 +398,11 @@ def test_ol_renumbered_output_is_itself_a_fixed_point() -> None:
     assert html_to_md(md_to_html(once)) == once
 
 
-def test_html_to_md_raises_on_table() -> None:
-    with pytest.raises(ConverterError):
-        html_to_md("<table><tr><td>x</td></tr></table>")
+def test_html_to_md_supports_table() -> None:
+    # grammar widened 2026-09-21 — a lone <tr> with no <thead>/<th> at all still
+    # gets a header: the FIRST row is always treated as the header, whichever
+    # cell tag it uses (GFM itself requires a header row).
+    assert html_to_md("<table><tr><td>x</td></tr></table>") == "| x |\n| --- |"
 
 
 def test_html_to_md_raises_on_image() -> None:

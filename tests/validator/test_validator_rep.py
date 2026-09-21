@@ -17,10 +17,13 @@ _MIRRORED_NOTE = "findings/reports/14-acme-corp/notes/8-client-note.md"
 @pytest.mark.rule("REP-001")
 def test_rep001_narrative_body_not_convertible(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
+    # A GFM table is no longer unconvertible (grammar widened 2026-09-21) — an
+    # indented code block stays outside the whitelist in both directions (only
+    # a FENCED code block is supported).
     edit(
         root / _NARRATIVE,
         "One critical and one high finding were identified, both related to input validation.",
-        "| a | b |\n| --- | --- |\n| 1 | 2 |",
+        "    an indented code block",
     )
     assert "REP-001" in rule_ids(validate_workspace(root))
 

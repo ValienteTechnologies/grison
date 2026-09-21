@@ -77,9 +77,12 @@ def test_mapped_finding_serializes_and_roundtrips() -> None:
     assert "grison:" not in md  # no machine field on grison parse output (engine step 3 item E)
 
 
-def test_table_fallback_keeps_cells_separated() -> None:
-    """The whitelist-degrade path must not run table cells together — an nmap port
-    table previously collapsed to '22/tcpsshOpenSSH 8.9'."""
+def test_nmap_table_converts_to_real_markdown_table() -> None:
+    """The converter now supports GFM tables (grammar widened 2026-09-21), so an
+    nmap port table (real shape: ``nmap.py``'s own ``<thead>``/``<tbody>``, no
+    ``<p>`` in cells) converts cleanly via ``html_to_md`` — no more falling back
+    to the whitelist-degrade ``_TagStripper`` path (which used to run cells
+    together: '22/tcpsshOpenSSH 8.9')."""
     from grison.markdown.mapping import _prose_to_md
 
     html = (
@@ -89,7 +92,10 @@ def test_table_fallback_keeps_cells_separated() -> None:
     )
     warnings: list[str] = []
     out = _prose_to_md(html, "description", warnings)
-    assert warnings  # still surfaced as degraded
-    assert "Port | Service | Product" in out
-    assert "22/tcp | ssh | OpenSSH 8.9" in out
-    assert "80/tcp | http | Apache 2.4" in out
+    assert warnings == []  # clean conversion, no degrade
+    assert out == (
+        "| Port | Service | Product |\n"
+        "| --- | --- | --- |\n"
+        "| 22/tcp | ssh | OpenSSH 8.9 |\n"
+        "| 80/tcp | http | Apache 2.4 |"
+    )

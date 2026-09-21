@@ -9,7 +9,22 @@ from __future__ import annotations
 
 import re
 
-_BLOCK_TAGS = {"p", "ul", "ol", "li", "div"}
+_BLOCK_TAGS = {
+    "p",
+    "ul",
+    "ol",
+    "li",
+    "div",
+    "pre",
+    "blockquote",
+    "table",
+    "thead",
+    "tbody",
+    "tfoot",
+    "tr",
+    "th",
+    "td",
+}
 _INLINE_TAGS = {"strong", "code", "em", "a", "br"}
 _UNWRAP_TAGS = {"span"}
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
@@ -89,4 +104,17 @@ _KEEP_ATTRS: dict[str, tuple[str, ...]] = {
     "span": ("data-color", "style", _GW_REF_ENCODED_ATTR, "data-gw-ref"),
     "ol": ("start", "type"),
     "div": ("class", _EVIDENCE_ID_ATTR),
+    # ``spellcheck``/``class`` on <pre> and ``class`` on <code> are the two
+    # cosmetic/informational attributes the canonical fenced-code push shape
+    # carries (see module docstring, "Special forms"/fence) — kept (never
+    # reported as dropped) rather than run through the generic per-attribute
+    # on_loss path, same reasoning as the canonical link rel/target values
+    # above: they're EXPECTED shape, not a loss. ``class`` on <code> is where
+    # the ``language-<info>`` token lives; a stray ``class`` on some other,
+    # non-fence <code> element (never emitted by a real TipTap editor) is
+    # simply ignored rather than reported — a narrower cost than the
+    # complexity of threading parent context through the tree builder just to
+    # keep this special-cased to fenced code alone.
+    "pre": ("class", "spellcheck"),
+    "code": ("class",),
 }

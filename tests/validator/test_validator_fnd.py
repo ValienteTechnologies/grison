@@ -122,12 +122,29 @@ def test_fnd013_missing_title(tmp_path: Path) -> None:
 @pytest.mark.rule("FND-014")
 def test_fnd014_body_not_convertible(tmp_path: Path) -> None:
     root = copy_fixture(tmp_path)
+    # A GFM table is no longer unconvertible (grammar widened 2026-09-21) — raw
+    # HTML stays outside the whitelist in both directions.
     edit(
         root / _LIB,
         "Traffic may be susceptible to downgrade and cryptographic attacks.",
-        "| a | b |\n| --- | --- |\n| 1 | 2 |",
+        "<div>raw html not allowed</div>",
     )
     assert "FND-014" in rule_ids(validate_workspace(root))
+
+
+@pytest.mark.rule("FND-014")
+def test_fnd014_fence_inside_list_item_is_convertible(tmp_path: Path) -> None:
+    """Regression (grammar widened 2026-09-21): a fenced code block as its own
+    block inside a list item — the "step text, then a fence" replication-steps
+    shape real report authors hit constantly — must validate clean, not raise
+    FND-014."""
+    root = copy_fixture(tmp_path)
+    edit(
+        root / _LIB,
+        "Traffic may be susceptible to downgrade and cryptographic attacks.",
+        "- Run the scanner\n\n  ```bash\n  nmap -sV target\n  ```\n- Review the output",
+    )
+    assert "FND-014" not in rule_ids(validate_workspace(root))
 
 
 def test_fnd014_heading_in_body_is_not_flagged_not_convertible(tmp_path: Path) -> None:

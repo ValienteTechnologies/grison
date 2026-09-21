@@ -2,15 +2,21 @@
 fields accept, plus the three special reference/template forms grison layers on top.
 
 Ghostwriter finding fields render a small, fixed subset of HTML (paragraphs,
-lists, bold/code/em/links/hard-breaks, plus TinyMCE's cosmetic ``<span>`` highlight
-wrapper). grison round-trips those fields against local markdown: anything outside
-the whitelist below must fail loudly (:class:`ConverterError`, naming the construct)
-rather than degrade silently or get dropped on the floor.
+lists, fenced code blocks, blockquotes, tables, bold/code/em/links/hard-breaks,
+plus TinyMCE's cosmetic ``<span>`` highlight wrapper). grison round-trips those
+fields against local markdown: anything outside the whitelist below must fail
+loudly (:class:`ConverterError`, naming the construct) rather than degrade
+silently or get dropped on the floor.
 
 Whitelist (both directions):
   block:  ``<p>`` <-> paragraph, ``<ul><li>`` <-> ``- `` list item,
           ``<ol><li>`` <-> ``1. `` list item (numbered sequentially on emit;
-          ``<ol start="N">`` <-> the first item's literal number)
+          ``<ol start="N">`` <-> the first item's literal number),
+          ``<pre><code>`` <-> a fenced code block (own block, top-level or
+          inside a list item — see "Fenced code blocks" below),
+          ``<blockquote>`` <-> a blockquote (top-level only — see
+          "Blockquotes" below), ``<table>`` <-> a GFM pipe table (top-level
+          only — see "Tables" below)
   inline: ``<strong>`` <-> ``**bold**``/``__bold__``, ``<code>`` <-> `` `code` ``
           (a longer backtick fence is used when the code text itself contains a
           run of backticks), ``<em>`` <-> ``*em*``/``_em_``,
@@ -44,6 +50,88 @@ An item with exactly one paragraph (with or without a nested list) still renders
 bare, with no ``<p>`` wrapping, as before. This multi-block support is one level
 only — a nested (2nd-level) list item with multiple blocks of its own is outside
 this vocabulary.
+
+Fenced code blocks, blockquotes, and GFM tables (added 2026-09-21 — the grammar
+was widened to these three constructs specifically because real report authors
+hit them constantly; 52 of 57 real findings in the rework's own corpus failed
+conversion on the fence-inside-a-list-item shape alone):
+
+  **Fenced code blocks.** A ``` ``` ``` fence (or ``~~~``, accepted on input —
+  CommonMark treats either marker as the same "fence" construct — always
+  re-canonicalized to backticks on push) <-> ``<pre spellcheck="false">
+  <code>escaped text</code></pre>``, the canonical shape; the info string
+  becomes ``class="language-<info>"`` on ``<code>`` when present (only its
+  first word — GW/TipTap's own language picker only ever produces one bare
+  word). A fence is allowed as a top-level block AND as its own block inside a
+  list item (the "step text, then a fence" replication-steps pattern) — a list
+  item that's "paragraph, then fence" renders as the SAME multi-block loose
+  item shape documented above for paragraph-then-embed. Fence content is never
+  inline-parsed: it round-trips character-for-character (CommonMark's own
+  ``preserveWhitespace: "full"`` promise), HTML-escaped and, like any other
+  ``<code>`` content, D10-escaped if requested (see "Active template
+  expressions" below — Jinja's lexer scans the whole HTML string as one
+  template regardless of what tag a substring sits inside). ``html_to_md``
+  accepts ``<pre>`` with or without an inner ``<code>``, any ``class``/
+  ``spellcheck`` attribute (never reported as dropped — see the canonical
+  shape above), and marks (``<strong>``/``<em>``/``<code>``/``<span>``) nested
+  inside — flattened to plain text (a fence has no inline markup at all),
+  reported via ``on_loss`` since real visual formatting is lost. The chosen
+  closing fence is always at least 3 backticks and one longer than the
+  longest backtick run already in the content, so no content line can ever be
+  mistaken for (or collide with) the fence itself.
+
+  **Blockquotes.** ``> `` <-> ``<blockquote>`` wrapping its rendered block
+  children — paragraphs and lists only, top-level use only (GW's real
+  ``Blockquote`` node, StarterKit's defaults: ``<blockquote><p>…</p>
+  </blockquote>``). A nested blockquote — or any other block (a fence, a
+  table, a heading) inside one — is outside this vocabulary and raises the
+  same "unsupported markdown: <construct> inside a blockquote" error any
+  other disallowed list-item content does, in both directions; there is no
+  "collapse to one level" precedent to reuse the way nested lists have one.
+  ``html_to_md`` renders each ``> ``-prefixed physical line; a blank line
+  inside the quote is a bare ``>`` (every line the quote owns carries the
+  marker — CommonMark's blockquote marker gets no lazy-continuation
+  exemption the way a plain paragraph's hard-break continuation does).
+
+  **Tables.** A GFM pipe table (header row required — a table with no header
+  row isn't valid GFM to begin with, so markdown-it's own ``table`` rule
+  (re-enabled specifically for this — see ``mdparse.py``; the ``commonmark``
+  preset disables it) never even hands one to the renderer) <->
+  ``<table><tbody><tr><th><p>…</p></th>…</tr><tr><td><p>…</p></td>…</tr>…
+  </tbody></table>`` — no ``<thead>``; header cells are just ``<th>`` sitting
+  in the same ``<tbody>`` as every other row, matching plain
+  ``@tiptap/extension-table``'s own Table/TableRow/TableHeader/GwTableCell
+  shape. Top-level use only; one level (no nested blocks in a cell — a cell
+  holds inline content only, optionally wrapped in one ``<p>``); inline marks
+  (bold/code/links/etc.) are allowed in cells; a literal ``|`` inside a cell
+  is backslash-escaped on the html->markdown side (markdown-it's own table
+  cell splitter doesn't treat a code span specially, so an un-escaped pipe
+  ANYWHERE in a cell — even inside `` `code` `` — would misparse as a column
+  separator). GFM column alignment (a ``:---:``/``:--``/``--:`` separator) has
+  no representation in this shape and is dropped outright on push — never
+  emitted as a style attribute or anything else, since Ghostwriter's real
+  table editor has no per-column alignment concept to receive it anyway.
+
+  ``html_to_md`` accepts every real shape variant: with or without ``<thead>``/
+  ``<tbody>``, ``<th>`` OR a bare first-row ``<td>`` for the header (the FIRST
+  row is always treated as the header, whichever cell tag it uses), and cells
+  with or without a wrapping ``<p>``. A cell containing more than one block, or
+  a nested table, has no GFM representation at all and raises the same
+  "unsupported" error any other disallowed construct does. A cell's
+  ``colspan``/``rowspan`` (and any other attribute on ``<table>``/``<thead>``/
+  ``<tbody>``/``<tr>``/``<th>``/``<td>`` — none of these tags keep ANY
+  attribute) is dropped and reported via the ordinary generic ``on_loss``
+  attribute-drop path, flattened to an ordinary single cell holding just its
+  own content — GFM has no way to make a cell visually span more than one
+  row/column, and a slightly ragged resulting table (GFM tolerates a row with
+  fewer/more cells than the header) is the closest a plain pipe table can get.
+  TipTap's ``TableWithCaption`` extension wraps a real table in
+  ``<div class="collab-table-wrapper"><table>…</table><p
+  class="collab-table-caption"><span class="collab-table-caption-content">…
+  </span></p></div>``; ``html_to_md`` accepts this wrapper too, rendering the
+  caption as a PLAIN PARAGRAPH directly after the table — GFM has no caption
+  construct, so the caption node itself is never round-tripped as a caption,
+  only its visible text (reported via ``on_loss``).
 
 Special forms (on top of the plain-prose whitelist above), all needing a
 :class:`~grison.markdown.refs.RefResolver` passed as ``refs=``; without one, any
@@ -212,8 +300,10 @@ of them raises ``ConverterError`` naming what to do instead (pass ``refs=``):
 Loss visibility: every construct dropped or canonicalized on the HTML->markdown
 side — TinyMCE ``data-color``/``style`` highlight spans, non-canonical link
 ``rel``/``target`` values, an ``<ol type>`` numbering style, class/style/other
-cosmetic attributes on any allowed tag, and unresolved references (above) — goes
-through the optional ``on_loss`` callback, once per dropped/canonicalized
+cosmetic attributes on any allowed tag, unresolved references (above), marks
+flattened inside a fenced code block, a table's dropped ``colspan``/
+``rowspan``/other cell attributes, and a table-wrapper's dropped caption —
+goes through the optional ``on_loss`` callback, once per dropped/canonicalized
 construct, with a human-readable message. It never changes the output, only
 makes the drop visible to the caller instead of silent.
 

@@ -1,34 +1,32 @@
 """markdown->html: :func:`md_to_html` itself, plus block-level parsing/
 validation (paragraphs, ATX headings, ``bullet_list``/``ordered_list``/list
-items) against grison's own renderer — never markdown-it's HTML renderer — so
-the output stays byte-for-byte in Ghostwriter's canonical shape.
+items, fenced code blocks, blockquotes, GFM tables) against grison's own
+renderer — never markdown-it's HTML renderer — so the output stays
+byte-for-byte in Ghostwriter's canonical shape.
 
 The WHOLE document is parsed once with markdown-it-py's real CommonMark block
-parser (nothing disabled, no plugin enabled) into a SyntaxTreeNode tree, which
-is walked and validated against grison's allow-list — every block/inline node
-type not on it raises ConverterError naming the construct and its source line
-(from the token's ``.map``) — then rendered with grison's OWN renderer. The
-only thing CommonMark itself has no concept of at all (no table extension is
-enabled) is a pipe table's separator row, which just becomes ordinary
-paragraph text to the parser — that ONE construct is still checked against the
-paragraph's raw source lines directly (see ``_check_not_table``), since no
-tree node exists to check instead.
+parser (the ``table`` rule re-enabled — see ``mdparse.py`` — everything else
+left at the ``commonmark`` preset's defaults) into a SyntaxTreeNode tree,
+which is walked and validated against grison's allow-list — every block/
+inline node type not on it raises ConverterError naming the construct and its
+source line (from the token's ``.map``) — then rendered with grison's OWN
+renderer.
 """
 
 from __future__ import annotations
-
-import re
 
 from markdown_it.tree import SyntaxTreeNode
 
 from grison.markdown.converter.errors import ConverterError
 from grison.markdown.converter.grammar import _MAX_NESTED_LIST_DEPTH, _UNRESOLVED_RE
 from grison.markdown.converter.mdparse import _MD
+from grison.markdown.converter.to_html.common import _inline_children, _node_line
 from grison.markdown.converter.to_html.evidence import _push_embed_ref, _render_unresolved_marker
+from grison.markdown.converter.to_html.fence import _render_fence_node
 from grison.markdown.converter.to_html.inline import _render_inline_nodes
+from grison.markdown.converter.to_html.table import _render_table_node
 from grison.markdown.refs import RefResolver
 
-_TABLE_SEP_RE = re.compile(r"\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?")
 _ATX_MARKUP = frozenset({"#", "##", "###", "####", "#####", "######"})
 
 
@@ -59,31 +57,13 @@ def md_to_html(
         name = next(iter(env["references"]))
         raise ConverterError(f"unsupported markdown: link reference definition ({name!r})")
     tree = SyntaxTreeNode(tokens)
-    lines = normalized.split("\n")
     blocks = [
         _render_block_node(
-            child, headings=headings, refs=refs, jinja_escape=jinja_escape, lines=lines, nesting=0
+            child, headings=headings, refs=refs, jinja_escape=jinja_escape, nesting=0
         )
         for child in tree.children
     ]
     return "\n\n".join(b for b in blocks if b)
-
-
-def _node_line(node: SyntaxTreeNode) -> int:
-    """1-based source line for an error message, from the token's own ``.map``."""
-    return (node.map[0] + 1) if node.map else 0
-
-
-def _check_not_table(node: SyntaxTreeNode, lines: list[str]) -> None:
-    if not node.map:
-        return
-    for line in lines[node.map[0] : node.map[1]]:
-        if _TABLE_SEP_RE.fullmatch(line.strip()):
-            raise ConverterError(f"unsupported markdown: table (line {_node_line(node)}: {line!r})")
-
-
-def _inline_children(node: SyntaxTreeNode) -> list[SyntaxTreeNode]:
-    return node.children[0].children if node.children else []
 
 
 def _render_block_node(
@@ -92,11 +72,9 @@ def _render_block_node(
     headings: bool,
     refs: RefResolver | None,
     jinja_escape: bool,
-    lines: list[str],
     nesting: int,
 ) -> str:
     if node.type == "paragraph":
-        _check_not_table(node, lines)
         return _render_paragraph_node(node, refs=refs, jinja_escape=jinja_escape)
     if node.type == "heading":
         if not headings:
@@ -112,21 +90,22 @@ def _render_block_node(
         return f"<h{level}>{inner}</h{level}>"
     if node.type in ("bullet_list", "ordered_list"):
         return _render_md_list_node(
-            node,
-            headings=headings,
-            refs=refs,
-            jinja_escape=jinja_escape,
-            lines=lines,
-            nesting=nesting,
+            node, headings=headings, refs=refs, jinja_escape=jinja_escape, nesting=nesting
         )
+    if node.type == "fence":
+        return _render_fence_node(node, jinja_escape=jinja_escape)
+    if node.type == "blockquote":
+        return _render_blockquote_node(
+            node, headings=headings, refs=refs, jinja_escape=jinja_escape
+        )
+    if node.type == "table":
+        return _render_table_node(node, refs=refs, jinja_escape=jinja_escape)
     name = _BLOCK_TYPE_NAMES.get(node.type, node.type)
     raise ConverterError(f"unsupported markdown: {name} (line {_node_line(node)})")
 
 
 _BLOCK_TYPE_NAMES = {
     "hr": "thematic break",
-    "blockquote": "blockquote",
-    "fence": "fenced code block",
     "code_block": "indented code block",
     "html_block": "raw HTML block",
 }
@@ -159,13 +138,42 @@ def _render_paragraph_node(
     return f"<p>{_render_inline_nodes(inline_children, refs, jinja_escape, line=line)}</p>"
 
 
+def _render_blockquote_node(
+    node: SyntaxTreeNode, *, headings: bool, refs: RefResolver | None, jinja_escape: bool
+) -> str:
+    """Render a ``blockquote`` node's block children — paragraphs and lists only
+    (module docstring, "Special forms"/blockquote): a fence, table, heading, or
+    nested blockquote inside one is outside this vocabulary and raises the same
+    "unsupported markdown: <type> inside a blockquote" ``ConverterError`` any
+    other disallowed list-item child does, rather than silently degrading or
+    (for a nested blockquote) collapsing levels the way lists do — GW's real
+    ``Blockquote`` node (StarterKit defaults) nests directly under a top-level
+    field with no analogous "one level, then collapse" precedent to reuse."""
+    children_html = []
+    for child in node.children:
+        if child.type == "paragraph":
+            children_html.append(
+                _render_paragraph_node(child, refs=refs, jinja_escape=jinja_escape)
+            )
+        elif child.type in ("bullet_list", "ordered_list"):
+            children_html.append(
+                _render_md_list_node(
+                    child, headings=headings, refs=refs, jinja_escape=jinja_escape, nesting=0
+                )
+            )
+        else:
+            raise ConverterError(
+                f"unsupported markdown: {child.type} inside a blockquote (line {_node_line(child)})"
+            )
+    return f"<blockquote>{''.join(children_html)}</blockquote>"
+
+
 def _render_md_list_node(
     node: SyntaxTreeNode,
     *,
     headings: bool,
     refs: RefResolver | None,
     jinja_escape: bool,
-    lines: list[str],
     nesting: int,
 ) -> str:
     """Render a ``bullet_list``/``ordered_list`` node. ``_MAX_NESTED_LIST_DEPTH``
@@ -183,12 +191,7 @@ def _render_md_list_node(
     attr = f' start="{start}"' if is_ol and start not in (None, 1) else ""
     items = [
         _render_list_item_node(
-            li,
-            headings=headings,
-            refs=refs,
-            jinja_escape=jinja_escape,
-            lines=lines,
-            nesting=nesting,
+            li, headings=headings, refs=refs, jinja_escape=jinja_escape, nesting=nesting
         )
         for li in node.children
     ]
@@ -201,9 +204,20 @@ def _render_list_item_node(
     headings: bool,
     refs: RefResolver | None,
     jinja_escape: bool,
-    lines: list[str],
     nesting: int,
 ) -> str:
+    """An item's own block children: a nested list renders inside its ``<li>``
+    (subject to the one-level nesting limit); a paragraph renders ``<p>``-
+    wrapped (or as its own embed/marker block — see ``_render_paragraph_node``);
+    a fence renders as its own ``<pre>`` block — the "step text, then a fence"
+    replication-steps pattern real report authors hit constantly (module
+    docstring, "Special forms"/fence) — simply appended after the paragraph's
+    HTML, exactly like the existing paragraph-then-embed multi-block shape:
+    Ghostwriter's real ``ListItem`` schema (``content: 'paragraph block*'``)
+    already allows any further block after the first, so no special "loose
+    item" HTML shape is needed here (that distinction only matters on the
+    HTML->markdown side, rendering back to CommonMark's own loose-list-item
+    indentation — see ``_render_li`` in ``from_html/blocks.py``)."""
     blocks_html: list[str] = []
     nested_html = ""
     for child in li.children:
@@ -214,16 +228,12 @@ def _render_list_item_node(
                     f"(line {_node_line(child)})"
                 )
             nested_html += _render_md_list_node(
-                child,
-                headings=headings,
-                refs=refs,
-                jinja_escape=jinja_escape,
-                lines=lines,
-                nesting=nesting + 1,
+                child, headings=headings, refs=refs, jinja_escape=jinja_escape, nesting=nesting + 1
             )
         elif child.type == "paragraph":
-            _check_not_table(child, lines)
             blocks_html.append(_render_paragraph_node(child, refs=refs, jinja_escape=jinja_escape))
+        elif child.type == "fence":
+            blocks_html.append(_render_fence_node(child, jinja_escape=jinja_escape))
         else:
             raise ConverterError(
                 f"unsupported markdown: {child.type} inside a list item (line {_node_line(child)})"

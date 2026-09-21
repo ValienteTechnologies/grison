@@ -103,6 +103,21 @@ FIXPOINT_CASES: list[tuple[str, str, bool]] = [
     ("code_adjacent_bold", "`code`**bold**`more code`", True),
     ("empty_string", "", True),
     ("whitespace_only", "   \n  \n  ", False),
+    # --- grammar widened 2026-09-21: fence/blockquote/table ------------------
+    ("fence_basic", "```bash\necho hi\n```", True),
+    ("fence_no_lang", "```\ncode line\n```", True),
+    ("fence_triple_backtick_inside", "````\ncontains ``` triple\n````", True),
+    ("fence_in_list_item", "- step one\n\n  ```bash\n  echo hi\n  ```\n- step two", True),
+    ("blockquote_simple", "> quoted text", True),
+    ("blockquote_multi_paragraph", "> line one\n>\n> line two", True),
+    ("blockquote_with_list", "> intro\n>\n> - item a\n> - item b", True),
+    ("table_basic", "| A | B |\n| --- | --- |\n| 1 | 2 |", True),
+    ("table_pipe_in_cell", "| Name | Cmd |\n| --- | --- |\n| x | a \\| b |", True),
+    (
+        "table_inline_marks",
+        "| Name |\n| --- |\n| **bold** `code` [link](http://x.com) |",
+        True,
+    ),
 ]
 
 
@@ -119,8 +134,11 @@ def test_synthetic_fixpoint(name: str, md: str, expect_identity: bool) -> None:
 
 REJECTED_CASES = [
     ("heading", "# Heading"),
-    ("table", "| A | B |\n| - | - |\n| 1 | 2 |"),
     ("image", "![alt](http://example.com/x.png)"),
+    # CHANGED: fences/blockquotes/tables are supported since the 2026-09-21
+    # grammar widening — a nested blockquote and a headerless/no-separator
+    # table stay rejected, still exercised in ``test_md_to_html_raises_on_*``
+    # in ``test_converter.py``.
     # CHANGED (real CommonMark, brief follow-up item 1): "****" (4+ of the same
     # delimiter char alone on a line) is a genuine thematic break under real
     # CommonMark, not inert literal text — the old hand-rolled tokenizer didn't
