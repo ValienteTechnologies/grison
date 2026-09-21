@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.4.3] - 2026-09-21
 
+### Added
+
+- The converter grammar accepts fenced code blocks (at top level and as their
+  own block inside a list item), blockquotes and GFM tables, the three constructs
+  Ghostwriter's editor supports and real reports use. Canonical HTML follows
+  TipTap; Ghostwriter's own variants are accepted on pull. Column alignment,
+  `colspan`/`rowspan` and the table caption node are dropped with loss reporting.
+  A malformed table, an unmatched backtick in a cell, a nested blockquote, or a
+  table/blockquote inside a list item are refused with a plain message. Proven
+  against the lab Ghostwriter (`proofs/converter-grammar-lab.md`).
+
 ### Changed
 
 - Internal layout: the five oversized modules (`cli`, `markdown/converter`,
