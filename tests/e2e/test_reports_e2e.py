@@ -1237,3 +1237,21 @@ def test_trailing_empty_blocks_in_sections_and_notes_are_clean_after_a_pull(run_
     assert "reports (gw.reportSection): clean 1" in result.output, result.output
     assert "reports (gw.projectNote): clean 1" in result.output, result.output
     assert gw_server.operation_log == []
+
+
+def test_report_directory_slug_is_transliterated(run_grison, gw_server):
+    """`slug(title)` (spec §1.3) transliterates: a Turkish report title gets
+    `sizma-testi-raporu`, never the `s-zma-testi-raporu` the ASCII-only rule
+    produced on the real workspace."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7,
+        title="Sızma Testi Raporu",
+        extraFields={"executive_summary": "<p>Özet.</p>"},
+        project={"scopes": REPORT_SCOPES},
+    )
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 0, result.output
+    assert (Path.cwd() / "findings" / "reports" / "sizma-testi-raporu" / "project.md").is_file()

@@ -197,6 +197,7 @@ def _normalize(
     return {
         "id": detail["id"],
         "name": detail["name"],
+        "slug": detail.get("slug") or "",
         "book_id": book_id,
         "book_slug": books_by_id.get(book_id, {}).get("slug", "book"),
         "chapter_id": chapter_id or None,
@@ -428,7 +429,11 @@ class BsPageAdapter:
         parts = ["methodology", "library", data["book_slug"]]
         if data.get("chapter_slug"):
             parts.append(data["chapter_slug"])
-        parts.append(f"{slugify(data['name'])}.md")
+        # BookStack's OWN page slug, exactly like book/chapter directories use the
+        # remote slug: it is what every internal link (`/books/<b>/page/<slug>`,
+        # WIKI-007) and every wiki URL already names, so the file resolves them by
+        # construction. slugify(name) is only the fallback for a row without one.
+        parts.append(f"{data.get('slug') or slugify(data['name'])}.md")
         return PurePosixPath(*parts)
 
     def relocated_path(self, data: dict[str, Any], *, current: PurePosixPath) -> PurePosixPath:

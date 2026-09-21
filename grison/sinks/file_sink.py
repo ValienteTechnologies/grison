@@ -9,22 +9,19 @@ identical content is reported as *unchanged*, never duplicated.
 from __future__ import annotations
 
 import hashlib
-import re
-import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from grison.adapters._slug import slugify as _slugify
 from grison.formats.finding import FindingDoc
 from grison.formats.finding import dump as finding_to_markdown
 from grison.fsio import atomic_write_text
 
 
 def slugify(text: str) -> str:
-    """Filesystem-friendly slug: ascii-fold, lowercase, non-alnum → ``-``."""
-    folded = unicodedata.normalize("NFKD", text)
-    folded = "".join(c for c in folded if not unicodedata.combining(c))
-    slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
-    return slug or "finding"
+    """Inbox file stem for a scanner finding — the ONE shared slugify
+    (:mod:`grison.adapters._slug`), with this sink's own empty-input fallback."""
+    return _slugify(text, fallback="finding")
 
 
 @dataclass

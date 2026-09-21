@@ -104,7 +104,9 @@ inside `findings/` or `methodology/` that isn't `library/`, `reports/`, `inbox/`
 A `findings/reports/` entry's directory name is a stable handle, not derived data
 (same rule as any other file/directory name, §1.1) — it carries **no required id
 prefix**. grison names a freshly-pulled report directory `slug(title)` with no id at
-all (e.g. `findings/reports/acme-corp/`); an existing v1 `<id>-<slug>` name (e.g.
+all (e.g. `findings/reports/acme-corp/`), where `slug` lower-cases, transliterates to
+ASCII (`Sızma Testi Raporu` → `sizma-testi-raporu`) and collapses everything else to
+`-` — the same folding BookStack's own slugger applies; an existing v1 `<id>-<slug>` name (e.g.
 `findings/reports/14-acme-corp/`) is equally valid and is never renamed afterward. A
 report directory's identity comes ONLY from its `gw.report` entry in
 `.grison/index.json` — a document sitting inside a report directory that isn't
@@ -573,7 +575,9 @@ written. The validator therefore enforces the following directly (all offline, v
   (or, when the workspace's BookStack host is known from `.grison/env`, an absolute
   URL to that same host with one of those paths) must name a book directory that
   exists in this workspace, and — for a page/chapter link — a page/chapter whose
-  current local file/directory name matches. **Known limitation**: grison names a page
+  current local file/directory name matches. A pulled page file is named by
+  BookStack's **own** slug for the page (like book and chapter directories), so a link
+  written in BookStack resolves against it by construction. **Known limitation**: grison names a page
   file by its slug *only at pull time* and never renames it afterward (D4's "stable
   handle" rule), so after the page is renamed in BookStack, an internal link using its
   new slug cannot be resolved offline — the validator only knows the slug as of the

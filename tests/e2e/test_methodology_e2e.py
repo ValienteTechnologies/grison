@@ -1352,3 +1352,40 @@ def test_second_read_only_sync_does_not_evict_the_one_real_snapshot(run_grison, 
 
     assert len(run_grison("undo", "--list").output.strip().splitlines()) == 1
     del page
+
+
+def test_pulled_page_file_is_named_by_bookstacks_own_slug(run_grison, bs_server):
+    """A page's file name is BookStack's slug for it — exactly what internal links
+    (`/books/<b>/page/<slug>`, WIKI-007) and wiki URLs already name — not grison's
+    own slugify of the title. Seeded with a slug that no title-slugging would
+    produce (BookStack appends a random suffix on a collision) to prove the source."""
+    book = bs_server.store.seed_book(name="Kılavuzlar")
+    bs_server.store.seed_page(
+        book_id=book["id"], name="Tanımlar", slug="tanimlar-3fk2", markdown="Terimler."
+    )
+    bs_server.store.seed_page(book_id=book["id"], name="Açıklamalar", markdown="Metin.")
+
+    result = run_grison("sync")
+
+    assert result.exit_code == 0, result.output
+    book_dir = Path.cwd() / "methodology" / "library" / "kilavuzlar"
+    assert (book_dir / "tanimlar-3fk2.md").is_file()
+    assert (book_dir / "aciklamalar.md").is_file()  # the fake transliterates like BookStack
+
+
+def test_internal_link_to_a_pulled_page_resolves_offline(run_grison, bs_server):
+    """WIKI-007 end to end: a link to `/books/<book>/page/<slug>` written in
+    BookStack resolves against the pulled file, because the file carries that
+    exact slug (the real-workspace defect: `tan-mlar.md` vs `/page/tanimlar`)."""
+    book = bs_server.store.seed_book(name="Kılavuzlar")
+    bs_server.store.seed_page(book_id=book["id"], name="Tanımlar", markdown="Terimler.")
+    bs_server.store.seed_page(
+        book_id=book["id"],
+        name="Açıklamalar",
+        markdown="Bkz. [Tanımlar](/books/kilavuzlar/page/tanimlar).",
+    )
+    run_grison("sync")
+
+    result = run_grison("validate")
+
+    assert result.exit_code == 0, result.output

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email import message_from_bytes
@@ -73,7 +74,12 @@ def _now() -> str:
 
 
 def _slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    """BookStack's slugger (Laravel ``Str::slug``) transliterates to ASCII before
+    hyphenating — ``Tanımlar`` is ``tanimlar`` on a real instance, never
+    ``tan-mlar`` — so this fake does too."""
+    folded = unicodedata.normalize("NFKD", name.lower().replace("ı", "i"))
+    ascii_text = "".join(c for c in folded if not unicodedata.combining(c))
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")
     return slug or "page"
 
 
