@@ -160,7 +160,8 @@ def _title_of(data: dict[str, Any]) -> str:
     form must carry: the local parser strips the ``# title`` line and refuses an
     empty one, so a remote title with surrounding whitespace (Ghostwriter never
     trims) or no title at all must normalise the same way on both sides."""
-    return (data.get("title") or "").strip() or "Untitled"
+    title = data.get("title")
+    return (title.strip() if isinstance(title, str) else "") or "Untitled"
 
 
 def _remote_plain_canonical(data: dict[str, Any], tags: list[str]) -> dict[str, Any]:

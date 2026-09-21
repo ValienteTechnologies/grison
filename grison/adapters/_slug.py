@@ -19,8 +19,9 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 # Letters with no Unicode decomposition (NFKD leaves them alone), folded the way
 # BookStack's slugger (Laravel ``Str::slug`` -> ``Str::ascii``) folds them, so a
-# title slugged here lands on the same slug BookStack would give it.
-_FOLD = str.maketrans(
+# title slugged here lands on the same slug BookStack would give it. Public so
+# the test fake of BookStack folds with the SAME table (one table, one truth).
+FOLD = str.maketrans(
     {
         "ı": "i",
         "ß": "ss",
@@ -47,7 +48,7 @@ def slugify(name: str, *, fallback: str) -> str:
     collapsed to one ``-``. ``fallback`` is returned when ``name`` slugifies to
     nothing (e.g. empty or all-punctuation). ``"Sızma Testi Raporu"`` ->
     ``"sizma-testi-raporu"``, never ``"s-zma-testi-raporu"``."""
-    folded = unicodedata.normalize("NFKD", name.strip().lower()).translate(_FOLD)
+    folded = unicodedata.normalize("NFKD", name.strip().lower()).translate(FOLD)
     ascii_text = "".join(c for c in folded if not unicodedata.combining(c))
     slug = _SLUG_RE.sub("-", ascii_text).strip("-")
     return slug or fallback
