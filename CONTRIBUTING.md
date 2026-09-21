@@ -42,7 +42,6 @@ internal callers import from the module that owns a name, never through a shim.
 | `grison/scaffold/` | Everything grison writes into a workspace besides synced content: spec copy, templates, CLAUDE.md, agent settings, hooks |
 | `grison/scanners/`, `grison/sinks/` | Scanner export parsers and the inbox writer behind `grison parse` |
 | `grison/model/` | CVSS and CWE data |
-| `grison/migrate/` | One-time wiki cleanup used by the v1 -> v2 move; deleted once that migration is done |
 
 Top-level modules (`index.py`, `manifest.py`, `hashing.py`, `fsio.py`, `gitdrive.py`, `workspace.py`, `errors.py`) are the small cross-cutting pieces every package uses.
 

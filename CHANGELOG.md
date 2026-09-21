@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   table/blockquote inside a list item are refused with a plain message. Proven
   against the lab Ghostwriter (`proofs/converter-grammar-lab.md`).
 
+### Removed
+
+- `grison/migrate/` (the one-time wiki cleanup used for the v1 -> v2 move): the
+  migration is done; the code and its tests are gone.
+
 ### Changed
 
 - Internal layout: the five oversized modules (`cli`, `markdown/converter`,
