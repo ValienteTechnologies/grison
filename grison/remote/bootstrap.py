@@ -55,14 +55,20 @@ class BootstrapResult:
     # see grison.scaffold.orchestrate.scaffold_workspace
 
 
-def bootstrap_workspace(root: Path) -> BootstrapResult:
+def bootstrap_workspace(root: Path, *, bootstrapped: bool | None = None) -> BootstrapResult:
     """Scaffold the workspace tree, ``.grison/`` (+ env template), and every
     self-contained-workspace artifact :mod:`grison.scaffold` owns — ``.grison/SPEC.md``,
     ``.grison/templates/``, ``.grison/terms.txt``, ``CLAUDE.md``,
     ``.claude/settings.json``, the root ``.gitignore``'s collision-sidecar entry, and
     (when this is a git repo) the ``pre-commit`` hook — so a first ``grison sync``/
     ``grison parse`` in an empty directory yields a complete, valid, self-contained
-    workspace (brief D11)."""
+    workspace (brief D11).
+
+    ``bootstrapped``: pass the caller's own already-computed
+    :func:`grison.manifest.is_bootstrapped` result to skip recomputing it here —
+    see :func:`grison.cli.guards._refuse_if_format_mismatch`'s docstring for why
+    (its ``has_v1_content`` half walks findings/methodology with an ``rglob``).
+    Left ``None``, it's computed fresh."""
     created_dirs = bootstrap_tree(root)
 
     grison_dir = root / ".grison"
@@ -94,8 +100,9 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
     # .gitignore must NOT blanket-ignore .grison/ (that was the v1 scaffold's
     # shape) since manifest.yml/index.json must stay tracked.
     manifest_path = root / ".grison" / "manifest.yml"
-    has_v1_content = manifest_mod.has_v1_content(root)
-    if not manifest_path.exists() and not has_v1_content:
+    if bootstrapped is None:
+        bootstrapped = manifest_mod.is_bootstrapped(root)
+    if not bootstrapped:
         manifest_mod.write(root)
         manifest_mod.write_gitignore(root)
         index_path = root / ".grison" / "index.json"

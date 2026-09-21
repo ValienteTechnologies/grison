@@ -215,7 +215,8 @@ couldn't run":
 - **`grison validate [PATHS…] [--json] [--deleted-ok]`** — the format checker, offline,
   no credentials, no network. Runs from anywhere inside the workspace (walks up to
   `.grison/`, like `git`). Without `PATHS`, checks everything. One line per failure:
-  `path:line: RULE-ID message — fix`.
+  `path:line: RULE-ID message — fix`. A `PATHS` entry that matches nothing exits `2`
+  (could not run), never a silent `0`.
 
 - **`grison sync [--dry-run] [--force-local PATH] [--force-remote PATH] [--allow-mass-change] [--json] [--verbose]`**
   — reconcile with Ghostwriter and (if configured) BookStack. Bootstraps on first run.

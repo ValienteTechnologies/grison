@@ -44,30 +44,17 @@ def status(
     ] = False,
     json_output: Annotated[bool, typer.Option("--json", help="JSON output.")] = False,
 ) -> None:
-    """Whole-workspace overview: per-area counts, only non-clean paths listed.
+    """Dev notes (user-facing behavior is in ``--help``/README's ``## Commands``):
 
-    Offline by default — the index, private state, and ``grison validate``'s own
-    checks, no credentials, no network: ``methodology/``, ``findings/reports/`` and
-    ``findings/library`` (all on the sync engine) get a real per-record breakdown
-    (clean/edited/new/deleted/moved/invalid/unknown, plus any live collision sidecar)
-    computed from the index and state alone, the same way ``grison sync`` would
-    classify locally. ``--remote`` additionally contacts Ghostwriter and BookStack
-    and runs the SAME dry-run phase functions ``grison sync`` itself uses — report
-    (report dirs/mirrors + evidence file sets), narrative sections + project notes,
-    findings (library + reported), then wiki (structure + images + pages) — writing
-    nothing (no remote write, no file, no index, no state, no snapshot, no
-    sidecars), so the report shows what the next ``grison sync`` would actually do
-    everywhere (will-push, will-pull, collision, remote-deleted, …), per record kind.
+    ``--remote`` reuses the SAME dry-run phase functions ``grison sync`` itself
+    calls (report, findings, then wiki) — never a second classification
+    implementation — so it can never drift from what a real sync would do.
 
-    "last sync" is read per PHASE from ``.grison/state/last-sync.json`` (each phase —
-    findings/report/wiki — records its own outcome there, including a failure), so
-    a phase that has never run, or last failed, is never reported as if it were fine.
-
-    Exit code: 0 clean, 1 something needs attention — an invalid record, an unknown
-    one (no recorded base to compare against), or a live collision sidecar; an
-    ordinary pending edit/new/deleted/moved record is not itself a problem (matches
-    ``grison validate``'s own policy — see ``grison sync``'s result/exit-code policy
-    in ENGINE.md §10) — 2 could not run (no workspace).
+    Exit code: 0 clean, 1 something needs attention — an invalid record, an
+    unknown one (no recorded base to compare against), or a live collision
+    sidecar; an ordinary pending edit/new/deleted/moved record is not itself a
+    problem (matches ``grison validate``'s own policy — ENGINE.md §10) — 2 could
+    not run (no workspace).
     """
     try:
         root = find_workspace_root(Path.cwd())

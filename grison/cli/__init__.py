@@ -58,15 +58,16 @@ def _root(
 
 # Import every command module for its side effect: each one's `@app.command()` (and,
 # for `scaffold`, `@hook_app.command()`) decorator registers it onto `app` above.
-# Order among them doesn't matter — Typer just accumulates registrations — but this
-# must come after `app`/`_root` are defined, since every command module does
+# Typer lists `grison --help`'s commands in REGISTRATION order, so this import
+# order is significant (parse, status, validate, sync, undo, scaffold, hook) —
+# it must come after `app`/`_root` are defined, since every command module does
 # `from grison.cli import app`.
 from grison.cli.commands import parse  # noqa: E402,F401,I001
-from grison.cli.commands import scaffold  # noqa: E402,F401
 from grison.cli.commands import status  # noqa: E402,F401
+from grison.cli.commands import validate  # noqa: E402,F401
 from grison.cli.commands import sync  # noqa: E402,F401
 from grison.cli.commands import undo  # noqa: E402,F401
-from grison.cli.commands import validate  # noqa: E402,F401
+from grison.cli.commands import scaffold  # noqa: E402,F401
 from grison.cli.commands.scaffold import hook_app  # noqa: E402
 
 

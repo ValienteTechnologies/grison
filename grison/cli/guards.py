@@ -56,18 +56,18 @@ def _guarded(fn: Callable[..., _T2]) -> Callable[..., _T2]:
 def _is_bootstrapped(root: Path) -> bool:
     """Whether ``root`` has already been through a bootstrap (of any format,
     including a v1 workspace this grison refuses to sync — see
-    :func:`_refuse_if_format_mismatch`): a v2 manifest exists, or real v1 content
-    does. A directory holding nothing but a hand-placed ``.grison/env`` (a scripted
-    deployment, a credential file copied into a fresh clone — the exact case
-    :func:`grison.remote.bootstrap.bootstrap_workspace` documents) is NOT
-    bootstrapped: gating it on the WS-* rules first (item 1) refused every first
-    sync in a git repo with WS-008, because the ``.grison/.gitignore`` that rule
-    wants is one of the files bootstrap has not written yet."""
-    manifest_path = root / manifest_mod.MANIFEST_RELATIVE_PATH
-    return manifest_path.is_file() or manifest_mod.has_v1_content(root)
+    :func:`_refuse_if_format_mismatch`) — see :func:`grison.manifest.
+    is_bootstrapped`'s own docstring. A directory holding nothing but a
+    hand-placed ``.grison/env`` (a scripted deployment, a credential file copied
+    into a fresh clone — the exact case :func:`grison.remote.bootstrap.
+    bootstrap_workspace` documents) is NOT bootstrapped: gating it on the WS-*
+    rules first (item 1) refused every first sync in a git repo with WS-008,
+    because the ``.grison/.gitignore`` that rule wants is one of the files
+    bootstrap has not written yet."""
+    return manifest_mod.is_bootstrapped(root)
 
 
-def _refuse_if_format_mismatch(root: Path) -> None:
+def _refuse_if_format_mismatch(root: Path, *, bootstrapped: bool | None = None) -> None:
     """D13 (item 10, fix-fin1): every command that reads an EXISTING workspace
     refuses a format mismatch outright — exit 2, before any work (no bootstrap
     self-heal, no remote call, no validator run) — never silently proceeding as if
@@ -78,15 +78,25 @@ def _refuse_if_format_mismatch(root: Path) -> None:
 
     A no-op when there is nothing to check yet: a genuinely fresh directory (no
     ``manifest.yml`` AND no real v1 content — :func:`grison.manifest.
-    has_v1_content`, the SAME precise signal ``bootstrap_workspace`` itself uses)
+    is_bootstrapped`, the SAME precise signal ``bootstrap_workspace`` itself uses)
     bootstraps normally at ``CURRENT_FORMAT``. Checking ``.grison/`` existence
     alone would be wrong here — a directory whose ``.grison/env`` exists but has
     no ``manifest.yml`` and no real content yet (freshly written, hand-created, or
     copied in) is NOT a v1 workspace either, exactly the gap ``bootstrap_
     workspace``'s own docstring calls out; only a real ``manifest.yml`` on record,
-    or real pre-v2 content, means there is an actual format to check."""
-    manifest_path = root / manifest_mod.MANIFEST_RELATIVE_PATH
-    if not manifest_path.is_file() and not manifest_mod.has_v1_content(root):
+    or real pre-v2 content, means there is an actual format to check.
+
+    ``bootstrapped``: pass the caller's own already-computed ``is_bootstrapped``
+    result to skip recomputing it — its ``has_v1_content`` half walks
+    ``findings/``/``methodology/`` with an ``rglob`` when neither has a manifest
+    yet. ``grison sync`` computes it once and reuses it here (this used to be a
+    second, independent ``rglob`` walk of the same fresh-workspace tree); every
+    other caller leaves this ``None`` and it's computed fresh here instead —
+    cheap in the common already-bootstrapped case, since a v2 manifest short-
+    circuits before ``has_v1_content`` ever runs."""
+    if bootstrapped is None:
+        bootstrapped = manifest_mod.is_bootstrapped(root)
+    if not bootstrapped:
         return
     try:
         manifest_mod.check(root)

@@ -15,17 +15,12 @@ from grison.adapters._gw_common import build_context as build_gw_context
 from grison.adapters.gw_evidence import GwEvidenceAdapter
 from grison.adapters.gw_notes import ReportNoteAdapter
 from grison.adapters.gw_report import NarrativeSectionAdapter
+from grison.cli.phases.common import FilesetItem, PhaseCtx, PhaseSpec, run_phase, scoped_failures
 from grison.cli.phases.findings import _apply_caption_rewrites, _report_finding_bodies
-from grison.engine.apply import RunOptions
-from grison.engine.apply import run as engine_run
-from grison.engine.filesets import RunOptions as FilesetRunOptions
-from grison.engine.filesets import sync_fileset as engine_sync_fileset
-from grison.engine.model import Event, KindSummary, Outcome, Plan
-from grison.engine.state import StateStore
+from grison.engine.model import Event, KindSummary, Plan
 from grison.engine.undo import Snapshot
 from grison.index import Index, IndexKind
 from grison.remote.ghostwriter import GhostwriterClient
-from grison.validator import validate_workspace
 
 
 @dataclass
@@ -60,18 +55,6 @@ class ReportsPhaseResult:
         return 0
 
 
-def _reports_relative_force_set(root: Path, paths: set[Path]) -> frozenset[PurePosixPath]:
-    out: set[PurePosixPath] = set()
-    for p in paths:
-        try:
-            rel = p.relative_to(root)
-        except ValueError:
-            continue
-        if rel.parts[:2] == ("findings", "reports"):
-            out.add(PurePosixPath(rel.as_posix()))
-    return frozenset(out)
-
-
 def _run_reports_phase(
     root: Path,
     client: GhostwriterClient,
@@ -96,10 +79,17 @@ def _run_reports_phase(
     established (``evidence_by_report``, returned alongside the result — the
     findings phase's ``GwReportedFindingAdapter`` needs the exact same rows, built
     only ONCE here and shared rather than re-fetched, per the coordinator's
-    instruction). The validation gate is scoped to ``findings/reports`` — this
-    phase only pushes/pulls report-owned records (narrative sections, notes);
-    a reported/library finding document's own gate is the findings phase's
-    ``findings/``-scoped one instead (:func:`_run_findings_phase`).
+    instruction).
+
+    Unlike the wiki phase, ``methodology/`` validation runs BEFORE its structure
+    pass — this phase's own ``structure`` hook (below) re-validates ``findings/
+    reports`` AFTER ``sync_report_dirs``/``_refresh_report_dirs`` run, so a report
+    directory or mirror this very run just created/materialized is already
+    reflected in the failures that gate its own evidence/narrative/notes sync,
+    instead of only being checked on the NEXT sync. The validation gate is scoped
+    to ``findings/reports`` — this phase only pushes/pulls report-owned records
+    (narrative sections, notes); a reported/library finding document's own gate is
+    the findings phase's ``findings/``-scoped one instead.
 
     Evidence's own plans/summaries/events land in THIS phase's result (a deliberate
     choice — the alternative, folding them into ``FindingsPhaseResult`` instead, was
@@ -115,131 +105,99 @@ def _run_reports_phase(
     snapshot per sync run, not one per phase — see :mod:`grison.engine.undo`'s
     module docstring).
 
-    ``quiet`` (item 8, fix-fin1): see :func:`_run_wiki_phase`'s own docstring —
-    same reason (suppress the dir-mirror pass's raw ``typer.secho`` progress
-    lines under ``--json``, never valid JSON on their own)."""
-    index = Index.load(root)
-    state = StateStore(root)
-    ctx = build_gw_context(client, index)
+    ``quiet`` (item 8, fix-fin1): see :func:`grison.cli.phases.wiki._run_wiki_phase`'s
+    own docstring — same reason (suppress the dir-mirror pass's raw ``typer.secho``
+    progress lines under ``--json``, never valid JSON on their own)."""
 
-    dirs = gw_report.sync_report_dirs(
-        root,
-        ctx,
-        index,
-        state,
-        snapshot,
-        dry_run=dry_run,
-        on_event=None if quiet else lambda msg: typer.secho(msg, dim=True),
-    )
-    _refresh_report_dirs(ctx, index)
+    def build_ctx(pctx: PhaseCtx) -> None:
+        pctx.extra["ctx"] = build_gw_context(client, pctx.index)
 
-    all_failures = validate_workspace(root, paths=[root / "findings" / "reports"])
-    report_failures = [f for f in all_failures if f.path.startswith("findings/reports")]
-
-    fl = _reports_relative_force_set(root, force_local)
-    fr = _reports_relative_force_set(root, force_remote)
-    options = RunOptions(
-        dry_run=dry_run, force_local=fl, force_remote=fr, allow_mass_change=allow_mass_change
-    )
-    fs_options = FilesetRunOptions(
-        dry_run=dry_run, force_local=fl, force_remote=fr, allow_mass_change=allow_mass_change
-    )
-
-    plans: list[Plan] = []
-    events: list[Event] = []
-    summaries: dict[str, KindSummary] = {}
-
-    # --- evidence file sets, one per indexed report (D1 — see docstring above) ---
-    evidence_ctx = GWContext.build(client, index)
-    for report_dir in sorted(evidence_ctx.report_dirs):
-        report_id = evidence_ctx.report_dirs[report_dir]
-        evidence_adapter = GwEvidenceAdapter(report_id=report_id)
-        doc_bodies = _report_finding_bodies(root, report_dir)
-        evidence_dir = report_dir / "evidence"
-        try:
-            fs_result = engine_sync_fileset(
-                root,
-                evidence_ctx,
-                evidence_adapter,
-                evidence_dir,
-                index=index,
-                state=state,
-                snapshot=snapshot,
-                doc_bodies=doc_bodies,
-                options=fs_options,
-                failures=report_failures,
-            )
-        except Exception as e:  # noqa: BLE001 — per-record isolation (ENGINE.md §5):
-            # one report's evidence file set blowing up must not abort every other
-            # report/section in this phase, any more than one record's own apply
-            # step does inside grison.engine.filesets/apply themselves.
-            reason = f"{type(e).__name__}: {e}"
-            events.append(Event(verb="failed", path=str(evidence_dir), detail=reason))
-            plans.append(
-                Plan(
-                    kind=evidence_adapter.kind,
-                    outcome=Outcome.FAILED,
-                    path=evidence_dir,
-                    reason=reason,
-                )
-            )
-            summaries[f"gw.evidence[{report_dir}]"] = KindSummary(
-                kind=evidence_adapter.kind,
-                counts={"failed": 1},
-                problem_paths=[str(evidence_dir)],
-            )
-            continue
-        # a fileset's own problems (collision/failed/withheld evidence) must count
-        # toward THIS phase's exit code exactly like a section's would — folded
-        # into the SAME plans list ReportsPhaseResult.exit_code reads, not just
-        # reported as text/JSON events that a bad run's exit code would then miss.
-        plans.extend(fs_result.plans)
-        events.extend(fs_result.events)
-        summaries[f"gw.evidence[{report_dir}]"] = fs_result.summary
-        if not dry_run and fs_result.resolved_captions:
-            _apply_caption_rewrites(
-                root, doc_bodies, fs_result.resolved_captions, folder_name="evidence"
-            )
-
-    # Evidence rows, re-fetched fresh (post-write) for every report, so the
-    # narrative/findings adapters' RefResolvers see ids/captions/friendly-names as
-    # they actually are right now, not as of the start of this sync — built ONCE
-    # here and returned for the findings phase to reuse (never a second org-wide
-    # fetch for the same data).
-    evidence_by_report: dict[int, dict[int, dict[str, Any]]] = {}
-    for report_id in evidence_ctx.report_dirs.values():
-        rows = GwEvidenceAdapter(report_id=report_id).list_remote(evidence_ctx)
-        evidence_by_report[report_id] = {i: r.data for i, r in rows.items()}
-
-    # --- narrative sections + project notes ---------------------------------
-    for adapter in (
-        NarrativeSectionAdapter(evidence_by_report=evidence_by_report),
-        ReportNoteAdapter(),
-    ):
-        p, adapter_events, s = engine_run(
-            root,
-            ctx,
-            adapter,
-            index=index,
-            state=state,
-            snapshot=snapshot,
-            failures=report_failures,
-            options=options,
+    def structure(pctx: PhaseCtx) -> None:
+        pctx.extra["dirs"] = gw_report.sync_report_dirs(
+            pctx.root,
+            pctx.extra["ctx"],
+            pctx.index,
+            pctx.state,
+            pctx.snapshot,
+            dry_run=pctx.dry_run,
+            on_event=None if pctx.quiet else lambda msg: typer.secho(msg, dim=True),
         )
-        plans.extend(p)
-        events.extend(adapter_events)
-        summaries[adapter.kind] = s
+        _refresh_report_dirs(pctx.extra["ctx"], pctx.index)
+        pctx.failures = scoped_failures(pctx.root, "findings/reports")
 
-    if not dry_run:
-        index.save()
+    def fileset_items(pctx: PhaseCtx) -> list[FilesetItem]:
+        evidence_ctx = GWContext.build(client, pctx.index)
+        pctx.extra["evidence_ctx"] = evidence_ctx
+        items: list[FilesetItem] = []
+        for report_dir in sorted(evidence_ctx.report_dirs):
+            report_id = evidence_ctx.report_dirs[report_dir]
+            adapter = GwEvidenceAdapter(report_id=report_id)
+            doc_bodies = _report_finding_bodies(pctx.root, report_dir)
+            items.append((report_dir, report_dir / "evidence", evidence_ctx, adapter, doc_bodies))
+        return items
 
-    result = ReportsPhaseResult(
-        plans=plans,
-        events=events,
-        summaries=summaries,
-        dirs=dirs,
+    def fileset_on_success(
+        pctx: PhaseCtx,
+        folder: PurePosixPath,
+        doc_bodies: dict[PurePosixPath, str] | None,
+        fs_result: Any,
+    ) -> None:
+        del folder
+        if not pctx.dry_run and fs_result.resolved_captions:
+            _apply_caption_rewrites(
+                pctx.root, doc_bodies or {}, fs_result.resolved_captions, folder_name="evidence"
+            )
+
+    def post_fileset(pctx: PhaseCtx) -> None:
+        # Evidence rows, re-fetched fresh (post-write) for every report, so the
+        # narrative/findings adapters' RefResolvers see ids/captions/friendly-names
+        # as they actually are right now, not as of the start of this sync — built
+        # ONCE here and returned for the findings phase to reuse (never a second
+        # org-wide fetch for the same data).
+        evidence_ctx = pctx.extra["evidence_ctx"]
+        evidence_by_report: dict[int, dict[int, dict[str, Any]]] = {}
+        for report_id in evidence_ctx.report_dirs.values():
+            rows = GwEvidenceAdapter(report_id=report_id).list_remote(evidence_ctx)
+            evidence_by_report[report_id] = {i: r.data for i, r in rows.items()}
+        pctx.extra["evidence_by_report"] = evidence_by_report
+
+    def engine_steps(pctx: PhaseCtx) -> list[tuple[Any, Any]]:
+        ctx = pctx.extra["ctx"]
+        evidence_by_report = pctx.extra["evidence_by_report"]
+        return [
+            (ctx, NarrativeSectionAdapter(evidence_by_report=evidence_by_report)),
+            (ctx, ReportNoteAdapter()),
+        ]
+
+    spec = PhaseSpec(
+        name="report",
+        validate_subtree="findings/reports",
+        force_prefix=("findings", "reports"),
+        build_ctx=build_ctx,
+        structure=structure,
+        fileset_items=fileset_items,
+        fileset_on_success=fileset_on_success,
+        post_fileset=post_fileset,
+        engine_steps=engine_steps,
     )
-    return result, evidence_by_report
+    result = run_phase(
+        root,
+        client,
+        spec,
+        dry_run=dry_run,
+        force_local=force_local,
+        force_remote=force_remote,
+        allow_mass_change=allow_mass_change,
+        snapshot=snapshot,
+        quiet=quiet,
+    )
+    phase_result = ReportsPhaseResult(
+        plans=result.plans,
+        events=result.events,
+        summaries=result.summaries,
+        dirs=result.extra["dirs"],
+    )
+    return phase_result, result.extra["evidence_by_report"]
 
 
 def _refresh_report_dirs(ctx: GWReportContext, index: Index) -> None:
