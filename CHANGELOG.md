@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - 2026-09-21
+
+### Fixed
+
+- Slugs transliterate to ASCII instead of dropping non-ASCII letters: a report
+  titled `Sızma Testi Raporu` is pulled into `sizma-testi-raporu/`, not
+  `s-zma-testi-raporu/`. One shared slugify now also names inbox findings.
+- A pulled wiki page file is named by BookStack's own slug for the page (as book and
+  chapter directories already were), so internal links written in BookStack
+  (`/books/<book>/page/<slug>`, WIKI-007) resolve against it by construction.
+
 ## [0.4.1] - 2026-09-21
 
 ### Fixed
