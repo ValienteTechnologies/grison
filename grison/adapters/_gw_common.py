@@ -101,7 +101,7 @@ class GWReportContext:
     ``.grison/index.json`` (kind ``gw.report``) AFTER :func:`grison.adapters.
     gw_report.sync_report_dirs` has created any brand-new report directory this
     run — so every report a narrative/note record could possibly belong to already
-    has a resolvable directory by the time :mod:`grison.engine.apply` runs.
+    has a resolvable directory by the time :mod:`grison.engine.documents` runs.
     """
 
     client: GhostwriterClient

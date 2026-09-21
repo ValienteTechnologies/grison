@@ -23,9 +23,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from grison.engine.apply import sidecar_path
 from grison.engine.filesets import RunOptions, canonical_prose, canonical_remote_prose, sync_fileset
 from grison.engine.model import Outcome, RemoteRecord
+from grison.engine.sidecar import sidecar_path
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
 from grison.fsio import atomic_write_bytes
@@ -231,7 +231,7 @@ def test_local_caption_opinion_pushes_and_no_opinion_mirrors_remote(tmp_path: Pa
 
 def test_mass_delete_trips_the_change_guard(tmp_path: Path) -> None:
     # Establish the mirror via 8 remote rows pulled down (PULL_NEW is deliberately
-    # exempt from the W-side guard -- ENGINE.md/apply.py's own rule, mirrored here --
+    # exempt from the W-side guard -- ENGINE.md/grison.engine.common's own rule, mirrored here --
     # so the *deletion* pass below is the one and only thing this test measures).
     store = FakeFileStore()
     adapter = FakeFileSetAdapter(store)
@@ -379,7 +379,7 @@ def test_caption_push_drift_since_classification_is_a_collision_not_an_overwrite
     """The caption-push apply step used to only check ``fresh is None`` — a
     caption that changed on the server between classification and the write was
     silently overwritten. Now it goes through the SAME pre-write re-fetch guard
-    the document engine uses (:func:`grison.engine.apply.refetch_guard`)."""
+    the document engine uses (:func:`grison.engine.common.refetch_guard`)."""
     store = FakeFileStore()
     adapter = DriftingAdapter(store)
     index, state, snapshot = _env(tmp_path)
@@ -822,7 +822,7 @@ def test_invalid_fileset_create_is_withheld_others_proceed(tmp_path: Path) -> No
     with failures is never pushed or created", was never actually enforced for
     a file-set record). ``sync_fileset`` now takes the SAME ``failures`` list
     the caller already validated the workspace with, mirroring
-    ``grison.engine.apply.run``'s identical gate: the flagged file never
+    ``grison.engine.documents.run``'s identical gate: the flagged file never
     uploads and becomes an ``invalid`` event naming the rule id, while every
     OTHER file in the same folder still proceeds (per-record isolation,
     ENGINE.md §5).

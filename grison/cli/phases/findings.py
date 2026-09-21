@@ -19,7 +19,7 @@ from grison.remote.ghostwriter import GhostwriterClient
 @dataclass
 class FindingsPhaseResult:
     """The findings phase's result: library findings + reported findings, both
-    through :mod:`grison.engine.apply`. Evidence file sets sync in the REPORTS
+    through :mod:`grison.engine.documents`. Evidence file sets sync in the REPORTS
     phase now, before this one — see :func:`grison.cli._run_reports_phase`'s
     docstring (D1: a reupload's re-push must land in the same run as the
     reupload, which requires evidence to sync before whatever references it) —

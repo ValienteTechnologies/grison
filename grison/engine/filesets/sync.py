@@ -47,7 +47,7 @@ def sync_fileset(  # noqa: PLR0913
     synced to the remote server): the SAME failure list the caller already
     computed for this scope (report/book) via
     :func:`grison.validator.validate_workspace` — matched here by exact path,
-    mirroring :func:`grison.engine.apply.run`'s identical gate. Omit/empty for
+    mirroring :func:`grison.engine.documents.run`'s identical gate. Omit/empty for
     a caller that hasn't validated (never silently skips the gate — an empty
     list just means nothing failed)."""
     options = options or RunOptions()

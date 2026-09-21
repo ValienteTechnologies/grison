@@ -18,10 +18,6 @@ derivation, the apply-loop shell — lives in :mod:`grison.engine.common` instea
 imported by both; what's here is only what a document-shaped record needs that a
 file-set record doesn't (read-only/append-only classification, canonicalisation-
 after-push, the move/reparent write).
-
-``grison.engine.apply`` (the module this package replaced) still re-exports
-``run``, ``RunOptions`` and every name it used to declare — a backward-compatible
-shim, not a second implementation.
 """
 
 from __future__ import annotations

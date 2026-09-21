@@ -10,8 +10,9 @@ from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from grison.engine.apply import RunOptions, run, sidecar_path
+from grison.engine.documents import RunOptions, run
 from grison.engine.model import Canonical, LocalDoc, Outcome, RemoteRecord
+from grison.engine.sidecar import sidecar_path
 from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
 from grison.index import Index, IndexKind
@@ -218,7 +219,7 @@ def test_dry_run_never_deletes_a_real_collision_sidecar(tmp_path: Path) -> None:
 class DriftingAdapter(FakeAdapter):
     """A ``fetch_remote`` frozen at construction time (as if classification's bulk
     fetch ran before an out-of-band remote edit landed), while ``refetch`` — called
-    by :func:`grison.engine.apply.refetch_guard` immediately before the write —
+    by :func:`grison.engine.common.refetch_guard` immediately before the write —
     reads the store's CURRENT state. Simulates ENGINE.md §3's pre-write drift
     window: a record changed on the server between classification and the write
     that was about to happen."""

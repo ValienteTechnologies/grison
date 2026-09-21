@@ -90,14 +90,14 @@ class NarrativeSectionAdapter:
     zero-argument ``NarrativeSectionAdapter()``. Either way, ``self._index`` is
     captured as a side effect of
     ``fetch_remote``/``refetch`` — the only two methods this adapter has that DO
-    receive ``ctx`` — which :mod:`grison.engine.apply`'s loop order guarantees
+    receive ``ctx`` — which :mod:`grison.engine.documents`'s loop order guarantees
     run before any ``canonical_local``/``canonical_remote`` call on the SAME
     adapter instance within one sync (``scan_local``+``fetch_remote`` both
     happen up front, then classification). The one caller with no ctx-bearing
     call at all, ever (:func:`grison.engine.offline_status.
     compute_offline_status`), degrades to an empty index/no evidence lookup —
     the same "no id known" a library finding with no evidence at all already
-    gets from :mod:`grison.adapters.gw_findings`'s own ``_EMPTY_RESOLVER``,
+    gets from :mod:`grison.adapters.gw_findings.common`'s own ``_EMPTY_RESOLVER``,
     never a crash."""
 
     kind = "gw.reportSection"

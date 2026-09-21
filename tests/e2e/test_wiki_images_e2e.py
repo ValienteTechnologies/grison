@@ -187,7 +187,7 @@ def test_page_push_reuses_the_per_run_gallery_cache_not_one_fetch_per_page(
     run_grison,
     bs_server,
 ):
-    """grison/adapters/bs_pages.py::_remote_body_for_push (and the pre-write
+    """grison/adapters/bs_pages/gallery.py::_remote_body_for_push (and the pre-write
     re-fetch guard's own URL localization) used to call ``_gallery_by_name_for_book``
     fresh on every push — a full page-list + gallery-list refetch per page pushed.
     ``fetch_remote`` already cached this per book; the fix (``ctx.gallery_cache``)
@@ -299,7 +299,7 @@ def test_image_reupload_pushes_the_page_with_the_new_url_in_the_same_run(
     COLLISION, needing ``--force-local``.
 
     Fixed: an unresolved reference's token is computed directly from the URL
-    TEXT itself (:func:`grison.adapters.bs_pages._gallery_token`), never a
+    TEXT itself (:func:`grison.adapters.bs_pages.gallery._gallery_token`), never a
     live lookup — so a reupload that leaves the page's own stored body
     untouched (still naming the OLD, now-orphaned url) leaves
     ``canonical_remote``'s payload UNCHANGED (still equal to ``base``), while
@@ -347,3 +347,68 @@ def test_image_reupload_pushes_the_page_with_the_new_url_in_the_same_run(
 
     assert "wiki (bs.page): clean 1" in clean_result.output
     assert bs_server.operation_log[before:] == []  # settled
+
+
+def test_one_books_images_fileset_failure_does_not_abort_the_wiki_phase(
+    run_grison,
+    bs_server,
+    monkeypatch,
+):
+    """BRIEF task 2 (ENGINE.md §5 per-record isolation), for the wiki phase's own
+    per-book ``images/`` file set — mirrors ``tests/e2e/test_findings_e2e.py``'s
+    ``test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase``.
+    An unexpected exception out of ONE book's ``engine_sync_fileset`` call is
+    caught by ``grison.cli.phases.common.run_phase``'s own per-fileset-item
+    try/except (ENGINE.md §5), becoming that book's own ``failed`` record —
+    every OTHER book's images AND pages, in the SAME phase/run, must still sync,
+    and the run must still exit nonzero, correctly attributed to the one book."""
+    import grison.cli.phases.common as phase_common_mod
+
+    book_a = bs_server.store.seed_book(name="Playbook")
+    book_b = bs_server.store.seed_book(name="Runbook")
+    page_a = bs_server.store.seed_page(
+        book_id=book_a["id"], name="Getting Started", markdown="# Getting Started\n"
+    )
+    bs_server.store.seed_page(
+        book_id=book_b["id"], name="Runbook Steps", markdown="# Runbook Steps\n"
+    )
+    run_grison("sync")  # pull both books/pages down first
+
+    pages = (
+        ("playbook", "getting-started", "Getting Started"),
+        ("runbook", "runbook-steps", "Runbook Steps"),
+    )
+    for book_dir, page_stem, title in pages:
+        images_dir = Path.cwd() / "methodology" / "library" / book_dir / "images"
+        images_dir.mkdir(parents=True)
+        (images_dir / "diagram.png").write_bytes(b"\x89PNG-fake-bytes")
+        page_path = Path.cwd() / "methodology" / "library" / book_dir / f"{page_stem}.md"
+        page_path.write_text(
+            f"---\ntitle: {title}\n---\n\n![Network diagram](images/diagram.png)\n",
+            encoding="utf-8",
+        )
+
+    real_sync_fileset = phase_common_mod.engine_sync_fileset
+
+    def _fake_sync_fileset(root, ctx, adapter, folder, **kwargs):
+        if str(folder) == "methodology/library/runbook/images":
+            raise RuntimeError("boom")
+        return real_sync_fileset(root, ctx, adapter, folder, **kwargs)
+
+    monkeypatch.setattr(phase_common_mod, "engine_sync_fileset", _fake_sync_fileset)
+
+    result = run_grison("sync")
+
+    # the phase-level "wiki sync failed" message (grison.cli.phases.common._run_phase)
+    # must NEVER fire for this — the failure is runbook's images set's alone.
+    assert "wiki sync failed" not in result.output, result.output
+    assert "bs.image[methodology/library/runbook]): failed 1" in result.output, result.output
+    assert "boom" in result.output
+    # playbook's images AND its page still synced in the SAME run.
+    assert len(bs_server.store.gallery) == 1
+    row = bs_server.store.gallery[0]
+    assert row["uploaded_to"] == page_a["id"]
+    pushed_markdown = bs_server.store.page(page_a["id"])["markdown"]
+    assert row["url"] in pushed_markdown
+    assert "images/diagram.png" not in pushed_markdown
+    assert result.exit_code == 1, result.output  # still a problem — just correctly attributed

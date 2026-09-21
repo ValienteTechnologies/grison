@@ -9,9 +9,9 @@ against the REMOTE record's current content -> MOVE + EDIT; otherwise unpaired.
 
 Pairing is one-to-one, best score first, ties broken deterministically by path, and
 never crosses record kinds (an M of kind "bs.page" only ever pairs against a U of kind
-"bs.page") — the caller (apply.py) is what actually enforces the "any directory" part
-of "moving a page to another chapter is a move": it hands this module every M/U of one
-kind across the WHOLE scope being synced, not per-directory.
+"bs.page") — the caller (:mod:`grison.engine.documents`) is what actually enforces the
+"any directory" part of "moving a page to another chapter is a move": it hands this
+module every M/U of one kind across the WHOLE scope being synced, not per-directory.
 """
 
 from __future__ import annotations

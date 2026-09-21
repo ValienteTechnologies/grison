@@ -1,6 +1,6 @@
 """The ONE classification table (ENGINE.md 'The classification table'), as one pure
 function. Every input is already-computed presence flags and content hashes — this
-module never touches the filesystem, the network, or state; :mod:`grison.engine.apply`
+module never touches the filesystem, the network, or state; :mod:`grison.engine.documents`
 computes those inputs (via the adapter's ``canonical_local``/``canonical_remote`` and
 :func:`grison.hashing.digest`) and calls :func:`classify` once per record slot.
 
@@ -100,7 +100,7 @@ def classify(  # noqa: PLR0911, PLR0913
         # missing + remote present (row 7, "deleted locally, edited remotely" ->
         # force-local deletes the remote too, force-remote restores it locally), and
         # local present + remote missing (row 9, "edited locally, deleted remotely"
-        # -> force-local re-creates it remotely as a PUSH — apply.py's pre-write
+        # -> force-local re-creates it remotely as a PUSH — grison.engine.common's pre-write
         # re-fetch guard is what turns a PUSH with no remote record left into a
         # create — force-remote deletes the local copy to match).
         if force_local:
@@ -169,7 +169,7 @@ def _classify_append_only(  # noqa: PLR0913
         return Outcome.CREATE
     return Outcome.CLEAN  # a remote-only append-only record with no local copy: PULL_NEW
     # is deliberately NOT returned here — callers of an append-only adapter choose
-    # whether unseen remote records get pulled at all; see the note in apply.py.
+    # whether unseen remote records get pulled at all; see the note in grison.engine.documents.
 
 
 def _classify_indexed(  # noqa: PLR0911

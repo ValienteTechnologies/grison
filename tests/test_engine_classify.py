@@ -374,7 +374,7 @@ def test_force_flags_have_no_effect_outside_a_collision() -> None:
 # DELETE_LOCAL — "--force-remote PATH" always means the remote wins (restore, never
 # delete the remote copy); "--force-local PATH" always means the local side wins
 # (recreate, never delete the local copy). classify() itself performs this
-# resolution — apply.py's change guard then sees the already-resolved outcome.
+# resolution — grison.engine.common's change guard then sees the already-resolved outcome.
 
 
 def test_force_remote_on_a_plain_delete_remote_restores_it() -> None:
