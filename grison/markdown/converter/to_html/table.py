@@ -33,6 +33,7 @@ def _render_table_node(
         for cell in cells:
             inline = cell.children[0] if cell.children else None
             line = (inline.map[0] + 1) if inline is not None and inline.map else _node_line(node)
+            _refuse_split_code_span(inline, line)
             content = _render_inline_nodes(_inline_children(cell), refs, jinja_escape, line=line)
             tds.append(f"<{tag}><p>{content}</p></{tag}>")
         return f"<tr>{''.join(tds)}</tr>"
@@ -53,3 +54,26 @@ def _table_rows(node: SyntaxTreeNode) -> list[list[SyntaxTreeNode]]:
         for tr in section.children:
             rows.append(list(tr.children))
     return rows
+
+
+def _refuse_split_code_span(inline: SyntaxTreeNode | None, line: int) -> None:
+    """Lab finding (converter-grammar-lab, 2026-09-21): an unescaped ``|`` inside
+    a code span in a table cell is, per GFM, a cell separator — markdown-it
+    splits the row there and the author's ``\`BusyBox|telnetd\``` silently
+    becomes two cells with a dangling backtick each, which then round-trips as
+    a corrupted table. The dangling backtick is the one signal: markdown-it
+    leaves a backtick run it could not match as a code span in a plain ``text``
+    token, so any text token holding an unescaped backtick means the cell was
+    split inside a code span (a legitimate ``\`\`a\`b\`\`\`` is one code_inline
+    token and never trips this)."""
+    if inline is None:
+        return
+    stack = list(inline.children)
+    while stack:
+        tok = stack.pop()
+        if tok.type == "text" and "`" in tok.content:
+            raise ConverterError(
+                f"unsupported markdown: a '|' inside inline code in a table cell splits "
+                f"the cell (line {line}) — write it as \\| inside the code span"
+            )
+        stack.extend(tok.children)

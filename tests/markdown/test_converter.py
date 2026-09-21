@@ -748,3 +748,15 @@ def test_whitespace_only_strong_in_real_sentence_dropped_and_reported() -> None:
     md = html_to_md("<p>before<strong> </strong>after</p>", on_loss=events.append)
     assert md == "before after"
     assert any("whitespace-only" in e and "strong" in e for e in events)
+
+
+def test_md_to_html_refuses_a_pipe_inside_a_code_span_in_a_table_cell() -> None:
+    """Lab finding: GFM splits the row at an unescaped ``|`` even inside a code
+    span, so the table silently corrupts on push; refuse it with the fix."""
+    md = "| svc | note |\n|---|---|\n| `BusyBox|telnetd` | x |\n"
+    with pytest.raises(ConverterError, match=r"inside inline code in a table cell"):
+        md_to_html(md)
+    # the escaped form is the documented fix and converts
+    assert "<code>BusyBox|telnetd</code>" in md_to_html(
+        "| svc | note |\n|---|---|\n| `BusyBox\\|telnetd` | x |\n"
+    )
