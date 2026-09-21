@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from grison.cli import FindingsPhaseResult, _format_reasons, app
 from grison.engine.model import Event, KindSummary, Outcome, Plan
 
-_FIX = Path(__file__).parent / "fixtures" / "scanners"
+_FIX = Path(__file__).parent.parent / "fixtures" / "scanners"
 _runner = CliRunner()
 _GW_CREDS_VARS = (
     "GRISON_GW_URL",

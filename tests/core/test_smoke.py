@@ -15,7 +15,7 @@ def test_version() -> None:
     # VERSION (repo root) is the single source of truth: hatchling reads it at
     # build/install time, __version__ reads the installed metadata. A mismatch
     # means the editable install is stale (re-run `uv sync`) or packaging broke.
-    ssot = (Path(__file__).parents[1] / "VERSION").read_text().strip()
+    ssot = (Path(__file__).parents[2] / "VERSION").read_text().strip()
     assert __version__ == version("grison") == ssot
 
 

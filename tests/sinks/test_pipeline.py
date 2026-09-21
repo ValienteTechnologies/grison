@@ -10,7 +10,7 @@ import pytest
 from grison.formats import finding as finding_fmt
 from grison.sinks import ParsePathNotFound, run_parse
 
-_FIX = Path(__file__).parent / "fixtures" / "scanners"
+_FIX = Path(__file__).parent.parent / "fixtures" / "scanners"
 _ALL_SCANNERS = {"acunetix", "burp", "nessus", "nmap", "openvas", "qualys", "sslyze", "zap"}
 
 

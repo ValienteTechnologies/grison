@@ -7,7 +7,7 @@ from pathlib import Path
 from grison.scanners import BurpScanner, ImportOptions
 from grison.scanners.ir import Severity
 
-FIXTURES = Path(__file__).parent / "fixtures" / "scanners"
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "scanners"
 
 
 def load(name: str) -> bytes:

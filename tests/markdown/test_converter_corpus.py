@@ -18,7 +18,7 @@ import pytest
 
 from grison.markdown import ConverterError, html_to_md, md_to_html
 
-_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "lab-samples"
+_FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "lab-samples"
 _FINDING_SECTIONS = ("description", "impact", "mitigation", "replication_steps", "references")
 
 

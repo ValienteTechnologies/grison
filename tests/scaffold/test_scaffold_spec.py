@@ -11,7 +11,7 @@ from pathlib import Path
 
 from grison.scaffold.spec import spec_text
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def test_spec_text_matches_the_package_data_file() -> None:

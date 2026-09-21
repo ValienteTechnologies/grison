@@ -8,7 +8,7 @@ import pytest
 
 from grison.scanners import BY_NAME, detect, detect_bytes, scanner_for
 
-_FIX = Path(__file__).parent / "fixtures" / "scanners"
+_FIX = Path(__file__).parent.parent / "fixtures" / "scanners"
 
 
 @pytest.mark.parametrize(

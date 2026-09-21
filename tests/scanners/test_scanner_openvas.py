@@ -8,7 +8,7 @@ from grison.model.cvss import parse_cvss
 from grison.scanners import ImportOptions, OpenVASScanner
 from grison.scanners.ir import Severity
 
-FIXTURES = Path(__file__).parent / "fixtures" / "scanners"
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "scanners"
 
 
 def load(name: str) -> bytes:

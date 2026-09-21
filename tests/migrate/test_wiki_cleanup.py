@@ -60,7 +60,7 @@ _ARTIFACT_RES = [
     (re.compile(r'<div class="?notice'), "leaked notice-block div", True),
 ]
 
-FIXTURES = Path(__file__).parent / "fixtures" / "wiki-cleanup"
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "wiki-cleanup"
 _MD = MarkdownIt("commonmark")
 # markdown-it-py's own BLOCK-level reference-definition rule consults
 # validateLink too (confirmed empirically): with the DEFAULT validator, a

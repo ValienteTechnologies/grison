@@ -11,7 +11,7 @@ from grison.scanners import ImportOptions, NessusScanner
 from grison.scanners.ir import Severity
 from grison.scanners.nessus import _cvss2_to_cvss3
 
-FIXTURES = Path(__file__).parent / "fixtures" / "scanners"
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "scanners"
 
 
 def load(name: str) -> bytes:
