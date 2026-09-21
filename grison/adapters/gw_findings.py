@@ -155,10 +155,18 @@ def _plain_canonical(doc: finding_fmt.FindingDoc) -> dict[str, Any]:
     }
 
 
+def _title_of(data: dict[str, Any]) -> str:
+    """The title a pulled file gets, and therefore the title the remote canonical
+    form must carry: the local parser strips the ``# title`` line and refuses an
+    empty one, so a remote title with surrounding whitespace (Ghostwriter never
+    trims) or no title at all must normalise the same way on both sides."""
+    return (data.get("title") or "").strip() or "Untitled"
+
+
 def _remote_plain_canonical(data: dict[str, Any], tags: list[str]) -> dict[str, Any]:
     cwe, plain = _split_tags(tags)
     return {
-        "title": data.get("title") or "",
+        "title": _title_of(data),
         "severity": Severity.from_gw_id(data["severityId"]).value,
         "finding_type": FindingType.from_gw_id(data["findingTypeId"]).value,
         "cvss_vector": data.get("cvssVector") or None,
@@ -311,7 +319,7 @@ class GwLibraryFindingAdapter:
             else None,
             cwe=cwe,
             tags=plain,
-            title=data.get("title") or "Untitled",
+            title=_title_of(data),
             # headings=True: see _remote_sections_canonical's comment above.
             **{f: html_to_md(data.get(f) or "", headings=True) for f in _SECTIONS},
         )
@@ -321,7 +329,7 @@ class GwLibraryFindingAdapter:
         del root
         from grison.sinks.file_sink import slugify
 
-        return PurePosixPath("findings", "library", f"{slugify(data.get('title') or '')}.md")
+        return PurePosixPath("findings", "library", f"{slugify(_title_of(data))}.md")
 
     def relocated_path(self, data: dict[str, Any], *, current: PurePosixPath) -> PurePosixPath:
         del data
@@ -489,7 +497,7 @@ class GwReportedFindingAdapter:
             else None,
             cwe=cwe,
             tags=plain,
-            title=data.get("title") or "Untitled",
+            title=_title_of(data),
             affected_entities=_affected_entities_from_html(data.get("affectedEntities") or "")
             or None,
             # headings=True: see _remote_sections_canonical's comment above.
@@ -502,7 +510,7 @@ class GwReportedFindingAdapter:
         from grison.sinks.file_sink import slugify
 
         base = PurePosixPath(report_dir) if report_dir else PurePosixPath("findings", "reports")
-        return base / f"{slugify(data.get('title') or '')}.md"
+        return base / f"{slugify(_title_of(data))}.md"
 
     def relocated_path(self, data: dict[str, Any], *, current: PurePosixPath) -> PurePosixPath:
         report_dir = self.index.path_of(IndexKind.GW_REPORT, data["reportId"])

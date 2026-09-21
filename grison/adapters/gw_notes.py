@@ -146,7 +146,7 @@ class ReportNoteAdapter:
         return {"body": doc.body.strip()}
 
     def canonical_remote(self, data: dict[str, Any]) -> Canonical:
-        return {"body": data["body_md"]}
+        return {"body": data["body_md"].strip()}
 
     def render_local(self, data: dict[str, Any], *, path: PurePosixPath) -> str:
         del path

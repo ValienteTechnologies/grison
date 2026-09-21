@@ -1205,3 +1205,35 @@ def test_non_ascii_evidence_filename_pushes_from_a_narrative_embed(run_grison, g
     assert "reports (gw.reportSection): push 1" in result.output
     report = next(r for r in gw_server.store.reports if r["id"] == 7)
     assert 'data-evidence-id="90"' in report["extraFields"]["executive_summary"]
+
+
+def test_trailing_empty_blocks_in_sections_and_notes_are_clean_after_a_pull(run_grison, gw_server):
+    """Same defect class as the findings parity test: a narrative section or a
+    project note whose stored HTML ends in empty blocks/whitespace must not
+    classify "edited" right after a clean pull."""
+    _use_fields(gw_server, "executive_summary")
+    gw_server.store.seed_report(
+        id=7,
+        title="Report A",
+        extraFields={"executive_summary": "<p>Summary.</p><p></p><h3></h3>\n\n"},
+        project={
+            "id": 55,
+            "scopes": REPORT_SCOPES,
+            "comments": [
+                {
+                    "id": 10,
+                    "note": "<p>Note text</p><p></p>\n",
+                    "timestamp": "2026-01-02",
+                    "operatorId": 1,
+                    "user": {"name": "Lab Admin", "username": "lab"},
+                }
+            ],
+        },
+    )
+    run_grison("sync")
+
+    result = run_grison("sync")
+
+    assert "reports (gw.reportSection): clean 1" in result.output, result.output
+    assert "reports (gw.projectNote): clean 1" in result.output, result.output
+    assert gw_server.operation_log == []

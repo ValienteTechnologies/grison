@@ -154,6 +154,7 @@ class RunOptions:
     force_local: frozenset[PurePosixPath] = frozenset()
     force_remote: frozenset[PurePosixPath] = frozenset()
     mass_change_ratio: float = MASS_CHANGE_RATIO
+    allow_mass_change: bool = False  # see grison.engine.apply.RunOptions
 
 
 @dataclass(frozen=True)
@@ -379,8 +380,14 @@ def canonical_prose(md: str, resolver: ResolvesEmbeds) -> dict[str, Any]:
     record classifies PUSH, not a silent CLEAN or an unresolved-reference
     PULL overwrite (D1: "replacing an image's bytes must re-push every
     finding referencing it")."""
+    # .strip() on BOTH sides (here and canonical_remote_prose): every local format
+    # parser strips its prose (finding sections, narrative body, note body, page
+    # body), so the remote form must too, or a record whose stored HTML ends in an
+    # empty paragraph/heading classifies as "edited" right after a clean pull.
     return {
-        "text": _substitute_ref_identity(md, lambda path: _id_token(resolver.to_remote_id(path)))
+        "text": _substitute_ref_identity(
+            md.strip(), lambda path: _id_token(resolver.to_remote_id(path))
+        )
     }
 
 
@@ -451,7 +458,7 @@ def canonical_remote_prose(
         md = html_to_md(html or "", headings=headings, refs=resolver)
     except ConverterError:
         md = html or ""
-    return {"text": md}
+    return {"text": md.strip()}  # parity with canonical_prose — see its comment
 
 
 def rewrite_captions(md: str, resolved: dict[str, tuple[str, str]], *, folder_name: str) -> str:

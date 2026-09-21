@@ -1365,3 +1365,68 @@ def test_nbsp_padded_trailing_paragraphs_pull_clean_with_no_settle_push(
 
     assert "findings (gw.finding): clean" in second.output, second.output
     assert "push" not in second.output, second.output
+
+
+def test_remote_whitespace_titles_and_trailing_empty_blocks_are_clean_after_a_pull(
+    run_grison, gw_server
+):
+    """Real-workspace defect (2026-09-21, first v2 pull of the production mirror):
+    52 findings classified "edited" right after a clean pull, with no local edit.
+    Ghostwriter never trims a title (`" DNS Server ..."`), stores empty titles, and
+    its editor leaves empty trailing `<p></p>`/`<h3></h3>` blocks in a field. The
+    local parser strips the `# title` line and every section's text, so the remote
+    canonical form must normalise identically — or every such record push-loops."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    gw_server.store.seed_finding(
+        id=1,
+        title=" Padded Title ",
+        severityId=3,
+        findingTypeId=4,
+        description="<p>Body.</p><p></p><h3></h3>",
+        references="<p>ref</p>\n\n\n",
+    )
+    gw_server.store.seed_finding(id=2, title="", severityId=3, findingTypeId=4)
+    gw_server.store.seed_reported_finding(
+        id=50,
+        reportId=report["id"],
+        title=" Padded Reported ",
+        severityId=3,
+        findingTypeId=4,
+        mitigation="<ul><li><p>Fix it.</p></li></ul><h3></h3>",
+    )
+    first = run_grison("sync")
+    assert "findings (gw.finding): pull_new 2" in first.output, first.output
+    assert "findings (gw.reportedFinding): pull_new 1" in first.output, first.output
+    assert (Path.cwd() / "findings" / "library" / "untitled.md").is_file()
+
+    second = run_grison("sync")
+
+    assert "findings (gw.finding): clean 2" in second.output, second.output
+    assert "findings (gw.reportedFinding): clean 1" in second.output, second.output
+    assert gw_server.operation_log == []  # zero mutations across both syncs
+
+
+def test_allow_mass_change_lets_a_bulk_import_through_the_guard(run_grison, gw_server, workspace):
+    """A whole report's worth of brand-new local findings is a legitimate bulk
+    write the change guard would withhold forever (no per-path force flag scales
+    to it). ``--allow-mass-change`` is the operator's explicit, one-run consent:
+    the guard steps aside, every write still lands in the undo snapshot."""
+    gw_server.store.seed_finding(id=1, title="Weak TLS Ciphers", severityId=3, findingTypeId=4)
+    first = run_grison("sync")
+    assert first.exit_code == 0, first.output
+    src = workspace / "findings" / "library" / "weak-tls-ciphers.md"
+    for i in range(8):
+        (src.parent / f"copy-{i}.md").write_text(
+            src.read_text(encoding="utf-8").replace("# Weak TLS Ciphers", f"# Copy {i}"),
+            encoding="utf-8",
+        )
+
+    withheld = run_grison("sync")
+    assert "MASS-CHANGE GUARD tripped on gw.finding" in withheld.output, withheld.output
+    assert len(gw_server.store.findings) == 1
+
+    allowed = run_grison("sync", "--allow-mass-change")
+
+    assert "findings (gw.finding): clean 1, create 8" in allowed.output, allowed.output
+    assert len(gw_server.store.findings) == 9
+    assert "snapshot:" in allowed.output
