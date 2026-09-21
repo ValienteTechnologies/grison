@@ -75,15 +75,21 @@ def _set_fake_ghostwriter_creds(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _stub_sync_phases(monkeypatch: pytest.MonkeyPatch, run_sync=None, sync_reports=None) -> None:
-    import grison.cli as cli_mod
+    import grison.cli.commands.sync as sync_mod
+    import grison.cli.phases.findings as findings_phase_mod
+    import grison.cli.phases.reports as reports_phase_mod
     from grison.cli import ReportsPhaseResult
 
-    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(sync_mod, "check_ghostwriter_compatibility", lambda client, root: None)
     monkeypatch.setattr(
-        cli_mod, "_run_findings_phase", run_sync or (lambda *a, **k: FindingsPhaseResult())
+        findings_phase_mod,
+        "_run_findings_phase",
+        run_sync or (lambda *a, **k: FindingsPhaseResult()),
     )
     monkeypatch.setattr(
-        cli_mod, "_run_reports_phase", sync_reports or (lambda *a, **k: (ReportsPhaseResult(), {}))
+        reports_phase_mod,
+        "_run_reports_phase",
+        sync_reports or (lambda *a, **k: (ReportsPhaseResult(), {})),
     )
 
 
@@ -226,7 +232,9 @@ def test_sync_exit_code_reflects_result_errors(
 ) -> None:
     """A batch that finishes with isolated per-record errors must still exit non-zero —
     a green summary line next to a swallowed error would be misleading."""
-    import grison.cli as cli_mod
+    import grison.cli.commands.sync as sync_mod
+    import grison.cli.phases.findings as findings_phase_mod
+    import grison.cli.phases.reports as reports_phase_mod
     from grison.cli import ReportsPhaseResult
 
     monkeypatch.chdir(tmp_path)
@@ -270,9 +278,9 @@ def test_sync_exit_code_reflects_result_errors(
     ):
         return ReportsPhaseResult(), {}
 
-    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
-    monkeypatch.setattr(cli_mod, "_run_findings_phase", fake_run_sync)
-    monkeypatch.setattr(cli_mod, "_run_reports_phase", fake_reports_phase)
+    monkeypatch.setattr(sync_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(findings_phase_mod, "_run_findings_phase", fake_run_sync)
+    monkeypatch.setattr(reports_phase_mod, "_run_reports_phase", fake_reports_phase)
     r = _runner.invoke(app, ["sync"])
     assert r.exit_code == 1
     assert "boom" in r.output
@@ -288,7 +296,9 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
     "something the user need not act on must not fail the run" property for an
     INFO-severity SKIP (a draft/template record, ENGINE.md's exit-code policy):
     it's printed (with --verbose) but never flips the exit code."""
-    import grison.cli as cli_mod
+    import grison.cli.commands.sync as sync_mod
+    import grison.cli.phases.findings as findings_phase_mod
+    import grison.cli.phases.reports as reports_phase_mod
     from grison.cli import ReportsPhaseResult
     from grison.engine.model import VetoSeverity
 
@@ -339,9 +349,9 @@ def test_sync_info_severity_skip_does_not_flip_exit_code(
     ):
         return ReportsPhaseResult(), {}
 
-    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
-    monkeypatch.setattr(cli_mod, "_run_findings_phase", fake_run_sync)
-    monkeypatch.setattr(cli_mod, "_run_reports_phase", fake_reports_phase)
+    monkeypatch.setattr(sync_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(findings_phase_mod, "_run_findings_phase", fake_run_sync)
+    monkeypatch.setattr(reports_phase_mod, "_run_reports_phase", fake_reports_phase)
     r = _runner.invoke(app, ["sync"])
     assert r.exit_code == 0, r.output
 

@@ -365,13 +365,13 @@ def test_sync_refuses_when_a_canonical_deny_rule_is_hand_removed(
     settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     gw_before, bs_before = len(gw_server.request_log), len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_gw_client", _no_remote_client)
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_gw_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("sync")
 
@@ -403,12 +403,12 @@ def test_undo_refuses_when_a_canonical_deny_rule_is_hand_removed(
     settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     bs_before = len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("undo")
 
@@ -462,13 +462,13 @@ def test_sync_refuses_a_format_1_manifest(
     _write_format_1_manifest(workspace)
     before = sorted(p.relative_to(workspace) for p in workspace.rglob("*") if p.is_file())
     gw_before, bs_before = len(gw_server.request_log), len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_gw_client", _no_remote_client)
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_gw_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("sync")
 
@@ -507,12 +507,12 @@ def test_undo_refuses_a_format_1_manifest(
 
     _write_format_1_manifest(workspace)
     bs_before = len(bs_server.request_log)
-    import grison.cli as cli_mod
+    import grison.cli.clients as cli_clients_mod
 
     def _no_remote_client(*a: object, **k: object) -> None:
         raise AssertionError("no remote client should ever be constructed")
 
-    monkeypatch.setattr(cli_mod, "_make_bs_client", _no_remote_client)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", _no_remote_client)
 
     result = run_grison("undo")
 
@@ -594,13 +594,16 @@ def test_sync_json_wiki_slot_is_null_when_bookstack_is_not_configured(
     bootstrap_workspace(tmp_path)
 
     import grison.cli as cli_mod
+    import grison.cli.commands.sync as sync_mod
+    import grison.cli.phases.findings as findings_phase_mod
+    import grison.cli.phases.reports as reports_phase_mod
 
-    monkeypatch.setattr(cli_mod, "check_ghostwriter_compatibility", lambda client, root: None)
+    monkeypatch.setattr(sync_mod, "check_ghostwriter_compatibility", lambda client, root: None)
     monkeypatch.setattr(
-        cli_mod, "_run_findings_phase", lambda *a, **k: cli_mod.FindingsPhaseResult()
+        findings_phase_mod, "_run_findings_phase", lambda *a, **k: cli_mod.FindingsPhaseResult()
     )
     monkeypatch.setattr(
-        cli_mod, "_run_reports_phase", lambda *a, **k: (cli_mod.ReportsPhaseResult(), {})
+        reports_phase_mod, "_run_reports_phase", lambda *a, **k: (cli_mod.ReportsPhaseResult(), {})
     )
 
     result = CliRunner().invoke(cli_mod.app, ["sync", "--json"])
