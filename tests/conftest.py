@@ -1,5 +1,6 @@
 """Shared e2e fixtures: fake remotes, a scratch workspace, and a CLI runner wired to
-both through the ``grison.cli`` transport seam (``_make_gw_client``/``_make_bs_client``).
+both through the ``grison.cli.clients`` transport seam
+(``_make_gw_client``/``_make_bs_client``).
 
 No test under ``tests/e2e/`` needs the network: ``run_grison`` invokes the real CLI
 (``typer.testing.CliRunner`` against ``grison.cli.app``) with both remote clients'
@@ -15,6 +16,7 @@ import pytest
 from typer.testing import CliRunner, Result
 
 import grison.cli as cli_mod
+import grison.cli.clients as cli_clients_mod
 from grison import manifest as manifest_mod
 from grison.index import Index
 from grison.remote.bookstack import BookStackClient
@@ -117,8 +119,8 @@ def run_grison(
     def make_bs(creds: Creds) -> BookStackClient:
         return BookStackClient(creds, transport=bs_server.transport, sleep=lambda _: None)
 
-    monkeypatch.setattr(cli_mod, "_make_gw_client", make_gw)
-    monkeypatch.setattr(cli_mod, "_make_bs_client", make_bs)
+    monkeypatch.setattr(cli_clients_mod, "_make_gw_client", make_gw)
+    monkeypatch.setattr(cli_clients_mod, "_make_bs_client", make_bs)
     monkeypatch.chdir(workspace)
 
     runner = CliRunner()

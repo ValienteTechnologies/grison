@@ -186,13 +186,13 @@ def test_validate_exit_2_on_internal_grisonerror(
     (tmp_path / ".grison").mkdir()
     manifest_mod.write(tmp_path)
 
-    import grison.cli as cli_mod
+    import grison.cli.commands.validate as validate_mod
     from grison.errors import GrisonError
 
     def _boom(root: Path, *, paths: list[Path] | None = None) -> list[object]:
         raise GrisonError("could not load the rule registry")
 
-    monkeypatch.setattr(cli_mod, "validate_workspace", _boom)
+    monkeypatch.setattr(validate_mod, "validate_workspace", _boom)
     result = _runner.invoke(app, ["validate"])
     assert result.exit_code == 2
     assert result.output.startswith("error: ")
@@ -208,12 +208,12 @@ def test_validate_exit_2_on_unexpected_internal_exception(
     (tmp_path / ".grison").mkdir()
     manifest_mod.write(tmp_path)
 
-    import grison.cli as cli_mod
+    import grison.cli.commands.validate as validate_mod
 
     def _boom(root: Path, *, paths: list[Path] | None = None) -> list[object]:
         raise KeyError("unexpected")
 
-    monkeypatch.setattr(cli_mod, "validate_workspace", _boom)
+    monkeypatch.setattr(validate_mod, "validate_workspace", _boom)
     result = _runner.invoke(app, ["validate"])
     assert result.exit_code == 2
     assert result.output.startswith("error: ")
