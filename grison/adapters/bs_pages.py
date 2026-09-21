@@ -432,8 +432,11 @@ class BsPageAdapter:
         # BookStack's OWN page slug, exactly like book/chapter directories use the
         # remote slug: it is what every internal link (`/books/<b>/page/<slug>`,
         # WIKI-007) and every wiki URL already names, so the file resolves them by
-        # construction. slugify(name) is only the fallback for a row without one.
-        parts.append(f"{data.get('slug') or slugify(data['name'])}.md")
+        # construction. Passed through slugify because a BookStack collision suffix
+        # is mixed-case (`notes-aBc`) and file names are lower-case only (WS-001);
+        # WIKI-007 matches case-insensitively for the same reason. slugify(name)
+        # is only the fallback for a row without a slug.
+        parts.append(f"{slugify(data.get('slug') or data['name'])}.md")
         return PurePosixPath(*parts)
 
     def relocated_path(self, data: dict[str, Any], *, current: PurePosixPath) -> PurePosixPath:

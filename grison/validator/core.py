@@ -820,7 +820,9 @@ def _check_internal_links(
         m = _INTERNAL_LINK_RE.match(path_part)
         if not m:
             continue
-        book, kind, slug = m.group("book"), m.group("kind"), m.group("slug")
+        # lower-cased: a BookStack collision suffix is mixed-case (`notes-aBc`) while
+        # the pulled file is named by the lower-case slug (WS-001, bs_pages.default_path)
+        book, kind, slug = m.group("book"), m.group("kind"), m.group("slug").lower()
         target = (
             slugs.chapters.get(book, frozenset())
             if kind == "chapter"
