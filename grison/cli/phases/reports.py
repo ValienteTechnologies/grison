@@ -15,7 +15,7 @@ from grison.adapters._gw_common import build_context as build_gw_context
 from grison.adapters.gw_evidence import GwEvidenceAdapter
 from grison.adapters.gw_notes import ReportNoteAdapter
 from grison.adapters.gw_report import NarrativeSectionAdapter
-from grison.cli.phases.common import FilesetItem, PhaseCtx, PhaseSpec, run_phase, scoped_failures
+from grison.cli.phases.common import FilesetItem, PhaseCtx, PhaseSpec, run_phase
 from grison.cli.phases.findings import _apply_caption_rewrites, _report_finding_bodies
 from grison.engine.model import Event, KindSummary, Plan
 from grison.engine.undo import Snapshot
@@ -123,7 +123,6 @@ def _run_reports_phase(
             on_event=None if pctx.quiet else lambda msg: typer.secho(msg, dim=True),
         )
         _refresh_report_dirs(pctx.extra["ctx"], pctx.index)
-        pctx.failures = scoped_failures(pctx.root, "findings/reports")
 
     def fileset_items(pctx: PhaseCtx) -> list[FilesetItem]:
         evidence_ctx = GWContext.build(client, pctx.index)

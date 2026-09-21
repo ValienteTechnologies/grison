@@ -102,8 +102,8 @@ FilesetItem = tuple[PurePosixPath, PurePosixPath, Any, Any, "dict[PurePosixPath,
 @dataclass
 class PhaseCtx:
     """What every :class:`PhaseSpec` hook receives — the plumbing common to every
-    phase, plus ``failures`` (mutable: a hook may re-validate and replace it, see
-    :func:`scoped_failures`'s docstring) and ``extra``, a free-form bag hooks use to
+    phase, plus ``failures`` (filled in once, after the structure hook, by
+    :func:`scoped_failures`) and ``extra``, a free-form bag hooks use to
     pass their own phase-specific state to a LATER hook — the remote ctx(s) a
     ``build_ctx`` hook builds, for ``fileset_items``/``engine_steps`` to read back;
     the reports phase's own ``evidence_by_report``, stashed by its ``post_fileset``
@@ -214,13 +214,18 @@ def run_phase(
         snapshot=snapshot,
         dry_run=dry_run,
         quiet=quiet,
-        failures=scoped_failures(root, spec.validate_subtree),
+        failures=[],
         options=options,
         fs_options=fs_options,
     )
     spec.build_ctx(pctx)
     if spec.structure is not None:
         spec.structure(pctx)
+    # Validate AFTER the structure step, once: report directories / book and
+    # chapter directories the structure step just created or relocated must be
+    # part of what the validator sees (the old reports runner validated twice
+    # for exactly this reason; the first pass was never read).
+    pctx.failures = scoped_failures(root, spec.validate_subtree)
 
     plans: list[Plan] = []
     events: list[Event] = []
