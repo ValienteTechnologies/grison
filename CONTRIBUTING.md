@@ -23,6 +23,29 @@ uv run pytest -q              # unit + property + e2e tests
 CI (`.github/workflows/ci.yml`) runs all four gates above — `ruff check`, `ruff
 format --check`, `mypy grison`, and `pytest` — on 3.11, 3.12, and 3.13.
 
+## Code layout
+
+One package per concern, one file per responsibility, nothing over ~400 lines
+(the GraphQL query constants and the rule registry are the two flat lists that
+run longer). Public names are re-exported from each package's `__init__.py`;
+internal callers import from the module that owns a name, never through a shim.
+
+| Package | Owns |
+|---|---|
+| `grison/cli/` | Typer entry point. `commands/` one file per verb; `phases/` the three sync phases as `PhaseSpec`s driven by one `run_phase`; `guards.py` format, workspace-rule, credential and lock gates; `render.py` and `payloads.py` terminal and JSON output; `gitdriving.py` the optional commit-per-sync |
+| `grison/engine/` | The reconcile engines. `common.py` what both share (change guard, refetch guard, validation gate, apply loop); `documents/` the document engine (findings, sections, notes, pages); `filesets/` the file-set engine (evidence, wiki images); `classify.py`, `identity.py`, `sidecar.py`, `undo.py`, `state.py`, `mirrors.py` |
+| `grison/adapters/` | One adapter per remote record kind, each a package when it has more than one responsibility: `gw_findings/` (library, reported), `gw_report/` (dirs, mirror, sections), `gw_evidence.py`, `gw_notes.py`, `bs_pages/` (normalize, gallery, adapter), `bs_structure.py`, `bs_images.py`; `_slug.py` the one slugify |
+| `grison/remote/` | HTTP clients and credentials. `ghostwriter/` (queries, client, errors), `bookstack.py`, `http.py`, `creds.py`, `compat.py` (server schema check), `bootstrap.py` |
+| `grison/markdown/` | `converter/` markdown <-> Ghostwriter HTML, `from_html/` and `to_html/` over shared grammar, node and text helpers; `frontmatter.py`, `refscan.py`, `refs.py`, `mapping.py` |
+| `grison/formats/` | The on-disk document formats (finding, narrative, note, wiki page, mirrors): parse, validate, dump |
+| `grison/validator/` | `core/` one module per rule family (names, findings, reports, wiki, index, scaffold, layout, scope); `registry.py` the rule table the spec and tests are checked against |
+| `grison/scaffold/` | Everything grison writes into a workspace besides synced content: spec copy, templates, CLAUDE.md, agent settings, hooks |
+| `grison/scanners/`, `grison/sinks/` | Scanner export parsers and the inbox writer behind `grison parse` |
+| `grison/model/` | CVSS and CWE data |
+| `grison/migrate/` | One-time wiki cleanup used by the v1 -> v2 move; deleted once that migration is done |
+
+Top-level modules (`index.py`, `manifest.py`, `hashing.py`, `fsio.py`, `gitdrive.py`, `workspace.py`, `errors.py`) are the small cross-cutting pieces every package uses.
+
 ## How tests are organized
 
 - **Unit tests** (`tests/<area>/test_*.py`) — one module's own behavior, grouped into
