@@ -40,7 +40,7 @@ def _apply_create(  # noqa: PLR0913
     # item 11, fix-fin1: a force-local "resurrect" of a remote-deleted file
     # (classify.py converts DELETE_LOCAL -> CREATE) reaches here with `p.id`
     # still set to the OLD, now-gone remote id — see the mirrored comment in
-    # grison.engine.apply._apply_create.
+    # grison.engine.documents.apply_remote._apply_create.
     old_id = p.id
     body = local_files[p.path.name]
     opinion = captions.get(p.path.name)

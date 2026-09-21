@@ -26,8 +26,8 @@ from typing import Any, TypeVar
 
 import typer
 
-from grison.engine.apply import RunOptions
-from grison.engine.apply import run as engine_run
+from grison.engine.documents import RunOptions
+from grison.engine.documents import run as engine_run
 from grison.engine.filesets import RunOptions as FilesetRunOptions
 from grison.engine.filesets import sync_fileset as engine_sync_fileset
 from grison.engine.model import Event, KindSummary, Outcome, Plan
@@ -175,8 +175,8 @@ class PhaseSpec:
     #: Runs once, after the whole fileset loop (e.g. the reports phase building
     #: ``evidence_by_report`` for the narrative/notes engine steps that follow).
     post_fileset: Callable[[PhaseCtx], None] | None = None
-    #: The ``grison.engine.apply`` adapters this phase runs, one (ctx, adapter)
-    #: pair per kind, run through ``grison.engine.apply.run`` in order.
+    #: The ``grison.engine.documents`` adapters this phase runs, one (ctx, adapter)
+    #: pair per kind, run through ``grison.engine.documents.run`` in order.
     engine_steps: Callable[[PhaseCtx], Iterable[tuple[Any, Any]]] = lambda _pctx: ()
 
 

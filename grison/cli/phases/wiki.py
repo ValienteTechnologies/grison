@@ -57,11 +57,11 @@ def _run_wiki_phase(
     book's ``images/`` file set (D9/BRIEF task C: BEFORE its pages, so a fresh
     upload's gallery URL is visible to the page push that follows — same ordering
     reason as gw.evidence-before-gw.reportSection, see the reports phase), then
-    pages through :mod:`grison.engine.apply`. The validation gate is scoped to
+    pages through :mod:`grison.engine.documents`. The validation gate is scoped to
     ``methodology/`` here (task step 1's scope parameter), same pattern as the
     findings phase's own ``findings/`` scoping — each phase validates only its own
     subtree; pulls are never blocked by it, only pushes/creates/deletes (see
-    ``grison.engine.apply``'s own gate). Unlike the reports phase, validation here
+    ``grison.engine.documents``'s own gate). Unlike the reports phase, validation here
     runs BEFORE the structure pass, not after — this phase's own ``structure`` hook
     never re-validates.
 

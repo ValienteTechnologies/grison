@@ -37,7 +37,7 @@ class BSContext:
     #: business and must never surface as a permanent, unidentified "skip" every sync.
     indexed_page_ids: frozenset[int] = frozenset()
     #: book_id -> {filename: absolute gallery URL}, populated lazily and reused for
-    #: the whole sync run by :func:`grison.adapters.bs_pages._gallery_by_name_for_book`
+    #: the whole sync run by :func:`grison.adapters.bs_pages.gallery._gallery_by_name_for_book`
     #: — a page's gallery-URL translation (push AND the pre-write re-fetch guard)
     #: used to re-fetch this book's entire page list + gallery on every call; one
     #: fetch per book per run is enough, since no gallery row changes after the

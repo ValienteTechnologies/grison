@@ -73,7 +73,7 @@ def _pair_decision_to_plan(
     if not d.edited:
         # identical content: a remote write happens ONLY if the directory move
         # implies a different parent than the remote currently has (never a no-op
-        # write) — apply.py's MOVE handler checks canonical equality to decide.
+        # write) — apply_remote.py's ``_apply_move`` checks canonical equality to decide.
         outcome = Outcome.MOVE
     else:
         outcome = Outcome.MOVE_EDIT

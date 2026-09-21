@@ -743,8 +743,8 @@ def test_valued_tags_pull_from_remote(run_grison, bs_server):
     path = Path.cwd() / "methodology" / "library" / "playbook" / "notes.md"
     fm, _ = _read_fm(path)
     # v2 tags are plain strings (no name/value structure in the frontmatter model) —
-    # a valued BookStack tag round-trips as "name:value" (bs_pages.py's own
-    # documented convention).
+    # a valued BookStack tag round-trips as "name:value" (bs_pages/normalize.py's
+    # own documented convention).
     assert fm["tags"] == ["owasp:A01"]
 
 

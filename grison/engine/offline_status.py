@@ -4,7 +4,7 @@ feedback item 6: ``grison status`` must be able to say something real without
 contacting BookStack).
 
 Reuses exactly the same local-discovery (``adapter.scan_local``) and identity-pairing
-(:mod:`grison.engine.identity`) building blocks :mod:`grison.engine.apply` uses for a
+(:mod:`grison.engine.identity`) building blocks :mod:`grison.engine.documents` uses for a
 real sync, just without ``fetch_remote``/``refetch``: every indexed-but-missing local
 file is paired against every present-but-unindexed one, but since there is no remote
 content to compare against here, only the "identical to the last-synced base" branch
@@ -24,7 +24,7 @@ record lands in exactly one of seven mutually-exclusive buckets:
   whichever of the above the record would otherwise land in, since a broken record
   is the thing the user must act on first, regardless of its edit state
 
-A live collision sidecar (``grison.engine.apply.sidecar_path``) is reported
+A live collision sidecar (``grison.engine.sidecar.sidecar_path``) is reported
 separately, alongside a record's own bucket, rather than as an eighth mutually
 exclusive bucket — the record underneath a pending sidecar can be perfectly "clean"
 by every other measure; the sidecar is an independent, additive signal.
@@ -36,8 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from grison.engine.adapter import Adapter
-from grison.engine.apply import sidecar_path
 from grison.engine.identity import Missing, Unindexed, pair
+from grison.engine.sidecar import sidecar_path
 from grison.engine.state import StateStore
 from grison.hashing import digest
 from grison.index import Index

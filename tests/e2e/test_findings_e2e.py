@@ -462,7 +462,7 @@ def test_undo_of_an_evidence_create_plus_two_finding_pushes_restores_both_files(
     file for ONE of them — the other kept its post-push content (including the
     now-dangling evidence reference), producing a spurious collision on the
     very next sync. Fixed: every push/move_edit op's own local pre-image is
-    restored (``grison.engine.apply``'s ``UndoOp.local_preimage``, previously
+    restored (``grison.engine.undo``'s ``UndoOp.local_preimage``, previously
     only ever captured for a ``create`` op), and the "restored" message is only
     printed once that write has actually happened."""
     report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
@@ -776,8 +776,8 @@ def test_cross_report_move_with_identical_content_reparents(run_grison, gw_serve
     include ``book``/``chapter`` — moving a finding FILE to another report
     directory with byte-identical content must still write the new ``reportId``
     to Ghostwriter, and a third sync must come back clean. BEFORE the fix,
-    ``apply.py::_apply_move``'s ``needs_write`` compared the two canonical
-    payloads equal (report membership was invisible to both), so the finding
+    ``grison.engine.documents.apply_remote``'s ``_apply_move``'s ``needs_write`` compared
+    the two canonical payloads equal (report membership was invisible to both), so the finding
     kept its OLD ``reportId`` on Ghostwriter forever, silently."""
     report_a = gw_server.store.seed_report(
         id=7, title="Report A", project={"scopes": REPORT_SCOPES}

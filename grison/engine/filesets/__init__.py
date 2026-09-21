@@ -9,8 +9,8 @@ code path.
 
 Why this is not just another :class:`grison.engine.adapter.Adapter` run through
 :mod:`grison.engine.documents`: that engine's :class:`~grison.engine.model.LocalDoc`
-carries ``raw_text: str`` (decoded text) and ``apply.py`` always writes a pulled/
-created record with :func:`grison.fsio.atomic_write_text` — both assume a
+carries ``raw_text: str`` (decoded text) and :mod:`grison.engine.documents` always
+writes a pulled/created record with :func:`grison.fsio.atomic_write_text` — both assume a
 document. A file-set record's body is arbitrary bytes (an image is not always
 UTF-8-decodable), so this module re-implements the same shape of loop (classify,
 change guard, pre-write re-fetch, undo, bookkeeping) directly against bytes,

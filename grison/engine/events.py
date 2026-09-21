@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 #: (re)write; "loss" is an INFO-severity side-channel event (see :func:`emit_losses`)
 #: for a converter's ``on_loss`` message, never tied to a Plan's own outcome; every
 #: other verb matches an :class:`~grison.engine.model.Outcome` name (``move_edit``
-#: also renders as "move" — see :func:`grison.engine.apply.plan_event`).
+#: also renders as "move" — see :func:`verb_for_outcome` below).
 VERBS = frozenset(
     {
         "pull",
@@ -47,8 +47,9 @@ VERBS = frozenset(
     }
 )
 
-#: Outcome.value -> event verb, for anywhere (apply.py's own event construction,
-#: undo.py's snapshot summaries) that needs to name an outcome's verb consistently.
+#: Outcome.value -> event verb, for anywhere (grison.engine.documents' and
+#: grison.engine.filesets' own event construction, undo.py's snapshot summaries)
+#: that needs to name an outcome's verb consistently.
 #: Falls back to swapping underscores for hyphens for anything not listed (already
 #: the right shape for e.g. "delete_local" -> "delete-local").
 _OUTCOME_VERB = {"move_edit": "move", "delete_remote": "delete-remote"}
