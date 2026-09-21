@@ -19,16 +19,14 @@ from grison.validator.terms import ConfidentialTerm
 def _check_manifest_and_hygiene(root: Path) -> list[Failure]:
     out: list[Failure] = []
     # Only check the format when there is an actual format to check (item 10,
-    # fix-fin1): a real manifest.yml on record, or real pre-v2 content
-    # (grison.manifest.has_v1_content — the SAME precise signal
-    # bootstrap_workspace itself uses). Without this, manifest.read()'s own
+    # fix-fin1) — grison.manifest.is_bootstrapped, the SAME precise signal
+    # bootstrap_workspace itself uses. Without this, manifest.read()'s own
     # cruder fallback heuristic ("no manifest.yml, but .grison/env exists ->
     # format 1") would misreport a directory whose .grison/env merely exists
     # with no real content yet as "needs migration", contradicting
     # bootstrap_workspace's own documented decision to start such a directory
     # fresh at CURRENT_FORMAT.
-    manifest_path = root / manifest_mod.MANIFEST_RELATIVE_PATH
-    if manifest_path.is_file() or manifest_mod.has_v1_content(root):
+    if manifest_mod.is_bootstrapped(root):
         try:
             manifest_mod.check(root)
         except manifest_mod.WorkspaceNeedsMigration as e:

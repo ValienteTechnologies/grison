@@ -95,6 +95,26 @@ def has_v1_content(root: Path) -> bool:
     )
 
 
+def is_bootstrapped(root: Path) -> bool:
+    """Whether ``root`` has already been through a bootstrap (of any format,
+    including a v1 workspace this grison refuses to sync outright — see
+    :class:`WorkspaceNeedsMigration`): a v2 manifest exists, or real v1 content
+    does (:func:`has_v1_content`). A directory holding nothing but a hand-placed
+    ``.grison/env`` (a scripted deployment, a credential file copied into a fresh
+    clone) is NOT bootstrapped — see :func:`has_v1_content`'s own docstring.
+
+    The one precise signal shared by every "is this a real, existing workspace"
+    decision in the codebase — :mod:`grison.cli.guards`' own format-mismatch/
+    bootstrap gates, :mod:`grison.validator.core.layout`'s manifest-and-hygiene
+    check, and :mod:`grison.remote.bootstrap`'s own "start fresh at
+    CURRENT_FORMAT vs. this is a real v1 workspace" branch — read from this ONE
+    function so they can never disagree with each other. Cheap in the common
+    (already-bootstrapped v2) case: ``manifest.yml`` existing short-circuits
+    before ``has_v1_content``'s own ``rglob`` ever runs."""
+    manifest_path = root / MANIFEST_RELATIVE_PATH
+    return manifest_path.is_file() or has_v1_content(root)
+
+
 def read(root: Path) -> Manifest:
     """Read ``.grison/manifest.yml``. A workspace with v1 artefacts
     (``.grison/env`` exists) but no manifest reads as format 1 — the manifest

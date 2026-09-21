@@ -715,12 +715,12 @@ def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
     """BRIEF task 2 (ENGINE.md §5 per-record isolation): before this fix, an
     unexpected exception out of one report's ``engine_sync_fileset`` call
     propagated straight out of ``_run_findings_phase`` — caught only at the
-    WHOLE-PHASE level by ``grison.cli._run_phase`` ("findings sync failed: ..."),
+    WHOLE-PHASE level by ``grison.cli.phases.common._run_phase`` ("findings sync failed: ..."),
     discarding the entire findings phase's result: library findings, and every
     OTHER report's findings, along with it. The fix wraps each report's evidence
     file-set sync in its own try/except, so one report's failure becomes that
     report's own `failed` record and every other report/finding still syncs."""
-    import grison.cli.phases.reports as reports_phase_mod
+    import grison.cli.phases.common as phase_common_mod
 
     gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
     gw_server.store.seed_report(id=8, title="Report B", project={"scopes": REPORT_SCOPES})
@@ -740,18 +740,18 @@ def test_one_reports_evidence_fileset_failure_does_not_abort_the_findings_phase(
         encoding="utf-8",
     )
 
-    real_sync_fileset = reports_phase_mod.engine_sync_fileset
+    real_sync_fileset = phase_common_mod.engine_sync_fileset
 
     def _fake_sync_fileset(root, ctx, adapter, folder, **kwargs):
         if str(folder) == "findings/reports/report-b/evidence":
             raise RuntimeError("boom")
         return real_sync_fileset(root, ctx, adapter, folder, **kwargs)
 
-    monkeypatch.setattr(reports_phase_mod, "engine_sync_fileset", _fake_sync_fileset)
+    monkeypatch.setattr(phase_common_mod, "engine_sync_fileset", _fake_sync_fileset)
 
     result = run_grison("sync")
 
-    # the phase-level "findings sync failed" message (grison.cli._run_phase) must
+    # the phase-level "findings sync failed" message (grison.cli.phases.common._run_phase) must
     # NEVER fire for this — the failure is report-b's evidence set's alone.
     assert "findings sync failed" not in result.output, result.output
     assert "gw.evidence[findings/reports/report-b]): failed 1" in result.output, result.output

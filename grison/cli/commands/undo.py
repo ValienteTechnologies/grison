@@ -91,22 +91,12 @@ def undo(
         typer.Option("--list", help="List available snapshots, newest first, and exit."),
     ] = False,
 ) -> None:
-    """Reverse a whole ``grison sync`` run's remote writes from its undo snapshot
-    (``.grison/snapshots/``) — findings, report/note, and wiki, whichever this
-    snapshot holds (one snapshot per sync RUN, not one per phase: ``grison sync``
-    shares a single ``Snapshot`` across every phase it runs).
+    """Dev notes (user-facing behavior is in ``--help``/README's ``## Commands``):
 
-    Replays the snapshot's inverse operations through the adapters, newest write
-    first (across every phase's kinds — a library push from the findings phase and
-    an evidence upload from the report phase in the SAME run are undone by one
-    ``grison undo``, newest first), each one guarded by the same pre-write re-fetch
-    check ``grison sync`` itself uses — a record changed on the server since the
-    snapshot was taken is reported, not silently overwritten. A snapshot may hold
-    both Ghostwriter and BookStack kinds together, so this picks which remote(s) to
-    contact, and which adapters to build, by looking at the kinds the snapshot
-    actually recorded — never touching a remote the snapshot doesn't need. Owner-
-    only: never run from an agent's own initiative (see the workspace's scaffolded
-    ``.claude/settings.json`` deny-list).
+    A snapshot may hold both Ghostwriter and BookStack kinds together (one
+    snapshot per sync RUN, not per phase); which remote(s) to contact, and which
+    adapters to build, is decided by looking at the kinds the snapshot actually
+    recorded — never touching a remote the snapshot doesn't need.
     """
     root = find_workspace_root(Path.cwd())
     _refuse_if_format_mismatch(root)  # D13 (item 10) — before any work

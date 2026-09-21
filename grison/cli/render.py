@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 import typer
@@ -10,6 +11,7 @@ from grison.cli.phases.findings import FindingsPhaseResult
 from grison.cli.phases.reports import ReportsPhaseResult
 from grison.cli.phases.wiki import WikiPhaseResult
 from grison.engine import events as engine_events
+from grison.engine.model import Event, KindSummary
 from grison.engine.offline_status import OfflineStatus
 from grison.sinks import ParseSummary
 
@@ -61,59 +63,73 @@ def _print_offline_non_clean(offline: OfflineStatus, *, area: str) -> None:
         typer.secho(f"  {entry.bucket:8} {entry.path}{detail}", fg=color, dim=color is None)
 
 
+def _print_phase_summary(
+    label: str,
+    events: list[Event],
+    summaries: dict[str, KindSummary],
+    *,
+    verbose: bool = False,
+    empty_text: str = "",
+    extra: Callable[[], None] | None = None,
+) -> None:
+    """The event lines + per-kind counts line every phase prints, shared by
+    :func:`_print_findings_summary`/``_print_wiki_summary``/``_print_reports_summary``
+    below — each supplies its own ``label`` (``"findings"``/``"wiki"``/``"reports"``),
+    ``empty_text`` (findings shows ``clean`` for an empty counts line; wiki/reports
+    show nothing — an existing difference this keeps, not a new one), and ``extra``
+    (the wiki/reports-only structure/dirs lines, printed after the per-kind loop).
+    No per-phase "snapshot: ..." line here: one sync run shares ONE snapshot across
+    every phase (``grison.cli.commands.sync`` persists it once, after the last phase
+    runs, and prints it once itself) — see :mod:`grison.engine.undo`'s module
+    docstring."""
+    for line in engine_events.render_text_lines(events, verbose=verbose):
+        color = None
+        if line.startswith(("collision", "invalid", "failed", "withheld")):
+            color = typer.colors.RED
+        elif line.startswith("skip"):
+            color = typer.colors.YELLOW
+        typer.secho(line, fg=color, dim=color is None)
+    for kind, summary in summaries.items():
+        counts = ", ".join(f"{k} {v}" for k, v in sorted(summary.counts.items()))
+        typer.secho(f"{label} ({kind}): {counts or empty_text}", fg=typer.colors.GREEN)
+        if summary.counts.get("withheld"):
+            typer.secho(
+                f"MASS-CHANGE GUARD tripped on {kind} — writes withheld.", fg=typer.colors.RED
+            )
+    if extra is not None:
+        extra()
+
+
 def _print_findings_summary(
     findings: FindingsPhaseResult,
     *,
     dry_run: bool,
     verbose: bool = False,
 ) -> None:
-    for line in engine_events.render_text_lines(findings.events, verbose=verbose):
-        color = None
-        if line.startswith(("collision", "invalid", "failed", "withheld")):
-            color = typer.colors.RED
-        elif line.startswith("skip"):
-            color = typer.colors.YELLOW
-        typer.secho(line, fg=color, dim=color is None)
-    for kind, summary in findings.summaries.items():
-        counts = ", ".join(f"{k} {v}" for k, v in sorted(summary.counts.items()))
-        typer.secho(f"findings ({kind}): {counts or 'clean'}", fg=typer.colors.GREEN)
-        if summary.counts.get("withheld"):
-            typer.secho(
-                f"MASS-CHANGE GUARD tripped on {kind} — writes withheld.", fg=typer.colors.RED
-            )
-    # No per-phase "snapshot: ..." line here: one sync run shares ONE snapshot across
-    # every phase (grison.cli.sync persists it once, after the last phase runs, and
-    # prints it once itself) — see grison.engine.undo's module docstring.
+    del dry_run  # no findings-specific tense/count text depends on it
+    _print_phase_summary(
+        "findings", findings.events, findings.summaries, verbose=verbose, empty_text="clean"
+    )
 
 
 def _print_wiki_summary(wiki: WikiPhaseResult, *, dry_run: bool, verbose: bool = False) -> None:
-    for line in engine_events.render_text_lines(wiki.events, verbose=verbose):
-        color = None
-        if line.startswith(("collision", "invalid", "failed", "withheld")):
-            color = typer.colors.RED
-        elif line.startswith("skip"):
-            color = typer.colors.YELLOW
-        typer.secho(line, fg=color, dim=color is None)
-    for kind, summary in wiki.summaries.items():
-        counts = ", ".join(f"{k} {v}" for k, v in sorted(summary.counts.items()))
-        typer.secho(f"wiki ({kind}): {counts}", fg=typer.colors.GREEN)
-        if summary.counts.get("withheld"):
-            typer.secho(
-                f"MASS-CHANGE GUARD tripped on {kind} — writes withheld.", fg=typer.colors.RED
+    del dry_run  # the structure pass's own lines never depend on it (unlike reports')
+
+    def _structure() -> None:
+        st = wiki.structure
+        if st.created_books or st.created_chapters:
+            typer.echo(
+                f"structure: create {len(st.created_books)} book(s), "
+                f"{len(st.created_chapters)} chapter(s)"
             )
-    st = wiki.structure
-    if st.created_books or st.created_chapters:
-        typer.echo(
-            f"structure: create {len(st.created_books)} book(s), "
-            f"{len(st.created_chapters)} chapter(s)"
-        )
-    if st.materialized:
-        typer.echo(f"structure: mirror {len(st.materialized)} book/chapter/shelf file(s)")
-    for path, reason in st.skipped:
-        typer.secho(f"skipped  {path}: {reason}", fg=typer.colors.YELLOW)
-    for e in st.errors:
-        typer.secho(f"  error: {e}", fg=typer.colors.RED)
-    # No per-phase "snapshot: ..." line here — see _print_findings_summary's comment.
+        if st.materialized:
+            typer.echo(f"structure: mirror {len(st.materialized)} book/chapter/shelf file(s)")
+        for path, reason in st.skipped:
+            typer.secho(f"skipped  {path}: {reason}", fg=typer.colors.YELLOW)
+        for e in st.errors:
+            typer.secho(f"  error: {e}", fg=typer.colors.RED)
+
+    _print_phase_summary("wiki", wiki.events, wiki.summaries, verbose=verbose, extra=_structure)
 
 
 def _print_reports_summary(
@@ -122,35 +138,23 @@ def _print_reports_summary(
     dry_run: bool,
     verbose: bool = False,
 ) -> None:
-    for line in engine_events.render_text_lines(reports.events, verbose=verbose):
-        color = None
-        if line.startswith(("collision", "invalid", "failed", "withheld")):
-            color = typer.colors.RED
-        elif line.startswith("skip"):
-            color = typer.colors.YELLOW
-        typer.secho(line, fg=color, dim=color is None)
-    for kind, summary in reports.summaries.items():
-        counts = ", ".join(f"{k} {v}" for k, v in sorted(summary.counts.items()))
-        typer.secho(f"reports ({kind}): {counts}", fg=typer.colors.GREEN)
-        if summary.counts.get("withheld"):
-            typer.secho(
-                f"MASS-CHANGE GUARD tripped on {kind} — writes withheld.", fg=typer.colors.RED
-            )
-    d = reports.dirs
-    if d.created:
-        tense = "would create" if dry_run else "create"
-        typer.echo(f"reports: {tense} {len(d.created)} report dir(s)")
-    if d.materialized:
-        typer.echo(f"reports: mirror {len(d.materialized)} .report.yml/project.md file(s)")
-    for path, reason in d.skipped:
-        typer.secho(f"skipped  {path}: {reason}", fg=typer.colors.YELLOW)
-    if d.scope_failures:
-        typer.secho(f"{len(d.scope_failures)} report(s) missing scope:", fg=typer.colors.RED)
-        for msg in d.scope_failures:
-            typer.echo(f"  ! {msg}")
-    for e in d.errors:
-        typer.secho(f"  error: {e}", fg=typer.colors.RED)
-    # No per-phase "snapshot: ..." line here — see _print_findings_summary's comment.
+    def _dirs() -> None:
+        d = reports.dirs
+        if d.created:
+            tense = "would create" if dry_run else "create"
+            typer.echo(f"reports: {tense} {len(d.created)} report dir(s)")
+        if d.materialized:
+            typer.echo(f"reports: mirror {len(d.materialized)} .report.yml/project.md file(s)")
+        for path, reason in d.skipped:
+            typer.secho(f"skipped  {path}: {reason}", fg=typer.colors.YELLOW)
+        if d.scope_failures:
+            typer.secho(f"{len(d.scope_failures)} report(s) missing scope:", fg=typer.colors.RED)
+            for msg in d.scope_failures:
+                typer.echo(f"  ! {msg}")
+        for e in d.errors:
+            typer.secho(f"  error: {e}", fg=typer.colors.RED)
+
+    _print_phase_summary("reports", reports.events, reports.summaries, verbose=verbose, extra=_dirs)
 
 
 def _print_parse_summary(summary: ParseSummary, out_dir: Path, *, dry_run: bool) -> None:

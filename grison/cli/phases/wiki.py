@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import typer
 
@@ -12,17 +13,12 @@ from grison.adapters import bs_structure
 from grison.adapters._bs_common import build_context
 from grison.adapters.bs_images import BsImagesAdapter, page_ids_in_book
 from grison.adapters.bs_pages import BsPageAdapter
-from grison.engine.apply import RunOptions
-from grison.engine.apply import run as engine_run
-from grison.engine.filesets import RunOptions as FilesetRunOptions
-from grison.engine.filesets import sync_fileset as engine_sync_fileset
+from grison.cli.phases.common import FilesetItem, PhaseCtx, PhaseSpec, run_phase
 from grison.engine.model import Event, KindSummary, Plan
-from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
 from grison.index import Index, IndexKind
 from grison.markdown.refscan import scan_refs
 from grison.remote.bookstack import BookStackClient
-from grison.validator import validate_workspace
 
 
 @dataclass
@@ -45,18 +41,6 @@ class WikiPhaseResult:
         return 0
 
 
-def _wiki_relative_force_set(root: Path, paths: set[Path]) -> frozenset[PurePosixPath]:
-    out: set[PurePosixPath] = set()
-    for p in paths:
-        try:
-            rel = p.relative_to(root)
-        except ValueError:
-            continue
-        if rel.parts and rel.parts[0] == "methodology":
-            out.add(PurePosixPath(rel.as_posix()))
-    return frozenset(out)
-
-
 def _run_wiki_phase(
     root: Path,
     client: BookStackClient,
@@ -69,12 +53,17 @@ def _run_wiki_phase(
     quiet: bool = False,
 ) -> WikiPhaseResult:
     """The wiki phase: BookStack structure (books/chapters/shelves — creates any new
-    local book/chapter directory, then regenerates the read-only mirrors), then pages
-    through :mod:`grison.engine.apply`. The validation gate is scoped to
+    local book/chapter directory, then regenerates the read-only mirrors), then a
+    book's ``images/`` file set (D9/BRIEF task C: BEFORE its pages, so a fresh
+    upload's gallery URL is visible to the page push that follows — same ordering
+    reason as gw.evidence-before-gw.reportSection, see the reports phase), then
+    pages through :mod:`grison.engine.apply`. The validation gate is scoped to
     ``methodology/`` here (task step 1's scope parameter), same pattern as the
-    findings phase's own ``findings/`` scoping (:func:`_run_findings_phase`) — each
-    phase validates only its own subtree; pulls are never blocked by it, only
-    pushes/creates/deletes (see ``grison.engine.apply``'s own gate).
+    findings phase's own ``findings/`` scoping — each phase validates only its own
+    subtree; pulls are never blocked by it, only pushes/creates/deletes (see
+    ``grison.engine.apply``'s own gate). Unlike the reports phase, validation here
+    runs BEFORE the structure pass, not after — this phase's own ``structure`` hook
+    never re-validates.
 
     ``snapshot`` is ``grison.cli.sync``'s ONE run-wide :class:`Snapshot`, shared with
     the report and findings phases that already ran — this phase's own writes
@@ -89,93 +78,69 @@ def _run_wiki_phase(
     (the caller's own ``json_output``) suppresses it; the same information is
     already in ``structure.created_books``/``materialized``/etc., which the
     JSON payload surfaces properly."""
-    index = Index.load(root)
-    state = StateStore(root)
-    ctx = build_context(client, state)
-    ctx.indexed_page_ids = frozenset(
-        rec.id for rec in index.records.values() if rec.kind.value == BsPageAdapter.kind
-    )
 
-    all_failures = validate_workspace(root, paths=[root / "methodology"])
-    wiki_failures = [f for f in all_failures if f.path.startswith("methodology")]
-
-    structure = bs_structure.sync_structure(
-        root,
-        ctx,
-        index,
-        state,
-        snapshot,
-        dry_run=dry_run,
-        on_event=None if quiet else lambda msg: typer.secho(msg, dim=True),
-    )
-
-    options = RunOptions(
-        dry_run=dry_run,
-        force_local=_wiki_relative_force_set(root, force_local),
-        force_remote=_wiki_relative_force_set(root, force_remote),
-        allow_mass_change=allow_mass_change,
-    )
-    fs_options = FilesetRunOptions(
-        dry_run=dry_run,
-        force_local=_wiki_relative_force_set(root, force_local),
-        force_remote=_wiki_relative_force_set(root, force_remote),
-        allow_mass_change=allow_mass_change,
-    )
-
-    # D9/BRIEF task C: each book's images/ folder BEFORE its pages, so a fresh
-    # upload's gallery URL is visible to the page push that follows (same
-    # ordering reason as gw.evidence-before-gw.reportSection, see
-    # _run_reports_phase).
-    events: list[Event] = []
-    summaries: dict[str, KindSummary] = {}
-    image_plans: list[Plan] = []
-    for book_dir, book_id in sorted(_book_dirs(index).items()):
-        page_ids = page_ids_in_book(client, ctx, book_id)
-        book_pages = [p for p in ctx.client.fetch_pages() if p["id"] in page_ids]
-        anchor_page_id = min((p["id"] for p in book_pages), default=None)
-        images_adapter = BsImagesAdapter(
-            book_id=book_id,
-            page_ids=page_ids,
-            anchor_page_id=anchor_page_id,
-            anchor_for=_anchor_for_book(root, index, book_dir),
+    def build_ctx(pctx: PhaseCtx) -> None:
+        ctx = build_context(client, pctx.state)
+        ctx.indexed_page_ids = frozenset(
+            rec.id for rec in pctx.index.records.values() if rec.kind.value == BsPageAdapter.kind
         )
-        result = engine_sync_fileset(
-            root,
-            ctx,
-            images_adapter,
-            book_dir / "images",
-            index=index,
-            state=state,
-            snapshot=snapshot,
-            options=fs_options,
-            failures=wiki_failures,
+        pctx.extra["ctx"] = ctx
+
+    def structure(pctx: PhaseCtx) -> None:
+        pctx.extra["structure"] = bs_structure.sync_structure(
+            pctx.root,
+            pctx.extra["ctx"],
+            pctx.index,
+            pctx.state,
+            pctx.snapshot,
+            dry_run=pctx.dry_run,
+            on_event=None if pctx.quiet else lambda msg: typer.secho(msg, dim=True),
         )
-        events.extend(result.events)
-        summaries[f"bs.image[{book_dir}]"] = result.summary
-        image_plans.extend(result.plans)
 
-    plans, page_events, summary = engine_run(
-        root,
-        ctx,
-        BsPageAdapter(),
-        index=index,
-        state=state,
-        snapshot=snapshot,
-        failures=wiki_failures,
-        options=options,
-    )
-    events.extend(page_events)
-    summaries[BsPageAdapter.kind] = summary
-    plans = [*image_plans, *plans]
+    def fileset_items(pctx: PhaseCtx) -> list[FilesetItem]:
+        ctx = pctx.extra["ctx"]
+        items: list[FilesetItem] = []
+        for book_dir, book_id in sorted(_book_dirs(pctx.index).items()):
+            page_ids = page_ids_in_book(client, ctx, book_id)
+            book_pages = [p for p in ctx.client.fetch_pages() if p["id"] in page_ids]
+            anchor_page_id = min((p["id"] for p in book_pages), default=None)
+            adapter = BsImagesAdapter(
+                book_id=book_id,
+                page_ids=page_ids,
+                anchor_page_id=anchor_page_id,
+                anchor_for=_anchor_for_book(pctx.root, pctx.index, book_dir),
+            )
+            items.append((book_dir, book_dir / "images", ctx, adapter, None))
+        return items
 
-    if not dry_run:
-        index.save()
+    def engine_steps(pctx: PhaseCtx) -> list[tuple[Any, Any]]:
+        return [(pctx.extra["ctx"], BsPageAdapter())]
 
-    return WikiPhaseResult(
-        plans=plans,
-        events=events,
-        summaries=summaries,
+    spec = PhaseSpec(
+        name="wiki",
+        validate_subtree="methodology",
+        force_prefix=("methodology",),
+        build_ctx=build_ctx,
         structure=structure,
+        fileset_items=fileset_items,
+        engine_steps=engine_steps,
+    )
+    result = run_phase(
+        root,
+        client,
+        spec,
+        dry_run=dry_run,
+        force_local=force_local,
+        force_remote=force_remote,
+        allow_mass_change=allow_mass_change,
+        snapshot=snapshot,
+        quiet=quiet,
+    )
+    return WikiPhaseResult(
+        plans=result.plans,
+        events=result.events,
+        summaries=result.summaries,
+        structure=result.extra["structure"],
     )
 
 

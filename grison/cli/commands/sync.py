@@ -90,21 +90,23 @@ def sync(
         ),
     ] = False,
 ) -> None:
-    """Reconcile the workspace with Ghostwriter + BookStack — push/pull/collision
-    derived per record.
+    """Dev notes (user-facing behavior is in ``--help``/README's "How sync decides"):
 
-    Bootstraps on first run. Direction isn't chosen: a locally-edited record pushes, a
-    remote-changed one pulls, and a record changed on both sides is surfaced (never
-    overwritten). Every remote write is snapshot-backed: the whole run (report,
-    findings and wiki phases alike) shares ONE undo snapshot, so a single ``grison
-    undo`` afterwards reverses every remote write this run made, newest first —
-    never just the last phase's. ``--force-local``/``--force-remote`` accept a path
-    under ``methodology/`` (routed to the wiki engine) or under ``findings/`` (routed
-    to the older findings/report phases).
+    Phase order is not incidental: report, then findings, then wiki. Evidence file
+    sets sync inside the REPORT phase, before narrative sections — a reupload's
+    re-push of every finding/section referencing it must land in the SAME run as
+    the reupload (D1), which only holds if the reupload has already happened by
+    the time the referencing record classifies. ``--force-local``/``--force-remote``
+    scope a given path to whichever phase's subtree it falls under
+    (``methodology/`` or ``findings/``) — a path outside both is inert.
     """
     root = Path.cwd()
-    _refuse_if_format_mismatch(root)  # D13 (item 10) — before any bootstrap/work
+    # Computed once and threaded through both calls below (item 6, workspace-gates
+    # audit): `is_bootstrapped`'s `has_v1_content` half walks findings/methodology
+    # with an rglob whenever neither has a manifest yet — a fresh-workspace sync
+    # used to pay for that walk twice (once here, once inside bootstrap_workspace).
     bootstrapped = _is_bootstrapped(root)
+    _refuse_if_format_mismatch(root, bootstrapped=bootstrapped)  # D13 (item 10)
     if dry_run and not bootstrapped:
         # item 2, fix-fin1: a real (non-dry) first sync bootstraps a fresh
         # directory from scratch (~11 files) — `--dry-run` must never do that
@@ -132,7 +134,7 @@ def sync(
             scaffold=ScaffoldResult(),
         )
     else:
-        boot = bootstrap_workspace(root)
+        boot = bootstrap_workspace(root, bootstrapped=bootstrapped)
     creds = load_creds(root)
     settings = load_settings(root)
     try:

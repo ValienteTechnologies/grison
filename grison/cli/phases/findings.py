@@ -8,28 +8,12 @@ from typing import Any
 
 from grison.adapters._gw_common import GWContext
 from grison.adapters.gw_findings import GwLibraryFindingAdapter, GwReportedFindingAdapter
-from grison.engine.apply import RunOptions
-from grison.engine.apply import run as engine_run
+from grison.cli.phases.common import PhaseCtx, PhaseSpec, run_phase
 from grison.engine.filesets import rewrite_captions
 from grison.engine.model import Event, KindSummary, Plan
-from grison.engine.state import StateStore
 from grison.engine.undo import Snapshot
 from grison.fsio import atomic_write_text
-from grison.index import Index
 from grison.remote.ghostwriter import GhostwriterClient
-from grison.validator import validate_workspace
-
-
-def _findings_relative_force_set(root: Path, paths: set[Path]) -> frozenset[PurePosixPath]:
-    out: set[PurePosixPath] = set()
-    for p in paths:
-        try:
-            rel = p.relative_to(root)
-        except ValueError:
-            continue
-        if rel.parts and rel.parts[0] == "findings":
-            out.add(PurePosixPath(rel.as_posix()))
-    return frozenset(out)
 
 
 @dataclass
@@ -103,67 +87,45 @@ def _run_findings_phase(
     docstring (D1) — so ``evidence_by_report`` (that phase's own result, built
     ONCE right after its evidence-file-set sync) is a required parameter, not
     something this phase re-fetches; the fresh-index dependency that made "report
-    phase, then findings phase" work at all (a reupload's new id, or a brand-new
-    report directory, must already be on disk before this phase's own
-    ``Index.load`` below) is unchanged — it was always ``grison.cli.sync``'s
-    sequential phase calls (each phase persists its index before the next one
-    loads), never anything specific to where evidence used to sync. Validation is
-    scoped to ``findings/`` here, same pattern as the wiki phase's own
-    ``methodology/`` scoping.
+    phase, then findings phase" work at all is unchanged — it was always
+    ``grison.cli.sync``'s sequential phase calls (each phase persists its index
+    before the next one loads), never anything specific to where evidence used to
+    sync. Validation is scoped to ``findings/`` here, same pattern as the wiki
+    phase's own ``methodology/`` scoping.
 
     ``snapshot`` is ``grison.cli.sync``'s ONE run-wide :class:`Snapshot` — the same
     object the report and (if it runs) wiki phases also append to and that
     ``sync`` alone persists, once, after every phase has run (one undo snapshot
     per sync run, not one per phase — see :mod:`grison.engine.undo`'s module
     docstring). This phase never persists it and never creates its own."""
-    index = Index.load(root)
-    state = StateStore(root)
-    ctx = GWContext.build(client, index)
 
-    all_failures = validate_workspace(root, paths=[root / "findings"])
-    findings_failures = [f for f in all_failures if f.path.startswith("findings")]
+    def build_ctx(pctx: PhaseCtx) -> None:
+        pctx.extra["ctx"] = GWContext.build(client, pctx.index)
 
-    fl = _findings_relative_force_set(root, force_local)
-    fr = _findings_relative_force_set(root, force_remote)
-    options = RunOptions(
-        dry_run=dry_run, force_local=fl, force_remote=fr, allow_mass_change=allow_mass_change
+    def engine_steps(pctx: PhaseCtx) -> list[tuple[Any, Any]]:
+        rf_adapter = GwReportedFindingAdapter(
+            index=pctx.index, evidence_by_report=evidence_by_report
+        )
+        return [
+            (client, GwLibraryFindingAdapter()),
+            (pctx.extra["ctx"], rf_adapter),
+        ]
+
+    spec = PhaseSpec(
+        name="findings",
+        validate_subtree="findings",
+        force_prefix=("findings",),
+        build_ctx=build_ctx,
+        engine_steps=engine_steps,
     )
-
-    events: list[Event] = []
-    summaries: dict[str, KindSummary] = {}
-
-    lib_plans, lib_events, lib_summary = engine_run(
+    result = run_phase(
         root,
         client,
-        GwLibraryFindingAdapter(),
-        index=index,
-        state=state,
+        spec,
+        dry_run=dry_run,
+        force_local=force_local,
+        force_remote=force_remote,
+        allow_mass_change=allow_mass_change,
         snapshot=snapshot,
-        failures=findings_failures,
-        options=options,
     )
-    events.extend(lib_events)
-    summaries[GwLibraryFindingAdapter.kind] = lib_summary
-
-    rf_adapter = GwReportedFindingAdapter(index=index, evidence_by_report=evidence_by_report)
-    rf_plans, rf_events, rf_summary = engine_run(
-        root,
-        ctx,
-        rf_adapter,
-        index=index,
-        state=state,
-        snapshot=snapshot,
-        failures=findings_failures,
-        options=options,
-    )
-    events.extend(rf_events)
-    summaries[GwReportedFindingAdapter.kind] = rf_summary
-
-    if not dry_run:
-        index.save()
-
-    return FindingsPhaseResult(
-        plans=[*lib_plans, *rf_plans],
-        events=events,
-        summaries=summaries,
-    )
+    return FindingsPhaseResult(plans=result.plans, events=result.events, summaries=result.summaries)

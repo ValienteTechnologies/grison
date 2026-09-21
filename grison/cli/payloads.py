@@ -12,9 +12,15 @@ from grison.cli.phases.findings import FindingsPhaseResult
 from grison.cli.phases.reports import ReportsPhaseResult
 from grison.cli.phases.wiki import WikiPhaseResult
 from grison.engine import events as engine_events
-from grison.engine.model import KindSummary
+from grison.engine.model import Event, KindSummary
 from grison.engine.offline_status import StatusEntry
 from grison.engine.state import StateStore
+
+
+def _kinds_json(summaries: dict[str, KindSummary]) -> dict[str, Any]:
+    """The ``{"kinds": {...}}`` shape every phase's ``--json`` payload and
+    last-sync summary shares: one entry per kind, its counts + problem paths."""
+    return {k: {"counts": s.counts, "problem_paths": s.problem_paths} for k, s in summaries.items()}
 
 
 def _remote_phase_json(
@@ -26,12 +32,7 @@ def _remote_phase_json(
     same shape offline ``status``'s ``remote_error`` used before this phase split)."""
     if phase not in remote_summaries:
         return error if error is not None else "not attempted"
-    return {
-        "kinds": {
-            kind: {"counts": s.counts, "problem_paths": s.problem_paths}
-            for kind, s in remote_summaries[phase].items()
-        }
-    }
+    return {"kinds": _kinds_json(remote_summaries[phase])}
 
 
 def _entry_json(e: StatusEntry) -> dict[str, Any]:
@@ -99,102 +100,103 @@ def _phase_payload_or_error(
     return {"error": error} if error is not None else None
 
 
+def _phase_payload(
+    summaries: dict[str, KindSummary],
+    events: list[Event],
+    exit_code: int,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One phase's contribution to ``sync --json``'s ONE combined document (item 8,
+    fix-fin1) — ``events``/``summary`` only; ``snapshot``/the run's overall
+    ``exit_code`` are hoisted to the top level by the caller (the SAME snapshot dir
+    and overall exit-code decision are shared by every phase this run, so repeating
+    them per-phase was pure redundancy, not independent information). ``extra``
+    (e.g. the wiki phase's own ``structure``, the reports phase's own ``dirs``) is
+    merged into ``summary`` alongside ``kinds``/``exit_code`` — every phase's own
+    ``_*_payload`` wrapper supplies its own, or none."""
+    summary: dict[str, Any] = {"kinds": _kinds_json(summaries)}
+    if extra:
+        summary.update(extra)
+    summary["exit_code"] = exit_code
+    return {"events": [engine_events.event_dict(e) for e in events], "summary": summary}
+
+
+def _phase_last_sync_summary(
+    summaries: dict[str, KindSummary],
+    snapshot_dir: Path | None,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One phase's ``.grison/state/last-sync.json`` entry body — ``kinds`` +
+    ``snapshot_dir``, plus whatever phase-specific ``extra`` (the reports phase's
+    own ``dirs`` counts) its own wrapper supplies."""
+    out: dict[str, Any] = {"kinds": _kinds_json(summaries)}
+    if extra:
+        out.update(extra)
+    out["snapshot_dir"] = str(snapshot_dir) if snapshot_dir else None
+    return out
+
+
 def _findings_payload(findings: FindingsPhaseResult) -> dict[str, Any]:
-    """This phase's contribution to ``sync --json``'s ONE combined document (item
-    8, fix-fin1) — ``events``/``summary`` only; ``snapshot``/the run's overall
-    ``exit_code`` are hoisted to the top level (the SAME snapshot dir and overall
-    exit-code decision are shared by every phase this run, so repeating them
-    per-phase was pure redundancy, not independent information)."""
-    return {
-        "events": [engine_events.event_dict(e) for e in findings.events],
-        "summary": {
-            "kinds": {
-                k: {"counts": s.counts, "problem_paths": s.problem_paths}
-                for k, s in findings.summaries.items()
-            },
-            "exit_code": findings.exit_code,
-        },
-    }
+    return _phase_payload(findings.summaries, findings.events, findings.exit_code)
 
 
 def _findings_last_sync_summary(findings: FindingsPhaseResult) -> dict[str, Any]:
-    return {
-        "kinds": {
-            k: {"counts": s.counts, "problem_paths": s.problem_paths}
-            for k, s in findings.summaries.items()
-        },
-        "snapshot_dir": str(findings.snapshot_dir) if findings.snapshot_dir else None,
-    }
+    return _phase_last_sync_summary(findings.summaries, findings.snapshot_dir)
 
 
 def _wiki_payload(wiki: WikiPhaseResult) -> dict[str, Any]:
-    """See :func:`_findings_payload`'s docstring — same "events + summary only"
-    shape, ``snapshot``/overall ``exit_code`` hoisted to the top level."""
-    return {
-        "events": [engine_events.event_dict(e) for e in wiki.events],
-        "summary": {
-            "kinds": {
-                k: {"counts": s.counts, "problem_paths": s.problem_paths}
-                for k, s in wiki.summaries.items()
-            },
+    return _phase_payload(
+        wiki.summaries,
+        wiki.events,
+        wiki.exit_code,
+        extra={
             "structure": {
                 "created_books": wiki.structure.created_books,
                 "created_chapters": wiki.structure.created_chapters,
                 "materialized": wiki.structure.materialized,
                 "skipped": wiki.structure.skipped,
                 "errors": wiki.structure.errors,
-            },
-            "exit_code": wiki.exit_code,
+            }
         },
-    }
+    )
 
 
 def _wiki_last_sync_summary(wiki: WikiPhaseResult) -> dict[str, Any]:
-    return {
-        "kinds": {
-            k: {"counts": s.counts, "problem_paths": s.problem_paths}
-            for k, s in wiki.summaries.items()
-        },
-        "snapshot_dir": str(wiki.snapshot_dir) if wiki.snapshot_dir else None,
-    }
+    return _phase_last_sync_summary(wiki.summaries, wiki.snapshot_dir)
 
 
 def _reports_payload(reports: ReportsPhaseResult) -> dict[str, Any]:
-    """See :func:`_findings_payload`'s docstring — same "events + summary only"
-    shape, ``snapshot``/overall ``exit_code`` hoisted to the top level."""
-    return {
-        "events": [engine_events.event_dict(e) for e in reports.events],
-        "summary": {
-            "kinds": {
-                k: {"counts": s.counts, "problem_paths": s.problem_paths}
-                for k, s in reports.summaries.items()
-            },
+    return _phase_payload(
+        reports.summaries,
+        reports.events,
+        reports.exit_code,
+        extra={
             "dirs": {
                 "created": reports.dirs.created,
                 "materialized": reports.dirs.materialized,
                 "scope_failures": reports.dirs.scope_failures,
                 "skipped": reports.dirs.skipped,
                 "errors": reports.dirs.errors,
-            },
-            "exit_code": reports.exit_code,
+            }
         },
-    }
+    )
 
 
 def _reports_last_sync_summary(rep: ReportsPhaseResult) -> dict[str, Any]:
-    return {
-        "kinds": {
-            k: {"counts": s.counts, "problem_paths": s.problem_paths}
-            for k, s in rep.summaries.items()
+    return _phase_last_sync_summary(
+        rep.summaries,
+        rep.snapshot_dir,
+        extra={
+            "dirs": {
+                "created": rep.dirs.created,
+                "materialized": rep.dirs.materialized,
+                "scope_failures": len(rep.dirs.scope_failures),
+                "errors": len(rep.dirs.errors),
+            }
         },
-        "dirs": {
-            "created": rep.dirs.created,
-            "materialized": rep.dirs.materialized,
-            "scope_failures": len(rep.dirs.scope_failures),
-            "errors": len(rep.dirs.errors),
-        },
-        "snapshot_dir": str(rep.snapshot_dir) if rep.snapshot_dir else None,
-    }
+    )
 
 
 def _record_phase_last_sync(

@@ -32,12 +32,8 @@ def scaffold(
         ),
     ] = False,
 ) -> None:
-    """(Re)generate every scaffolded file: ``.grison/SPEC.md``, ``.grison/templates/``,
-    ``.grison/terms.txt``, ``CLAUDE.md``, ``.claude/settings.json``, the root
-    ``.gitignore``'s collision-sidecar entry, and (in a git repo) the ``pre-commit``
-    hook. Runs automatically on every ``grison sync``/``grison parse`` too — this
-    command is for regenerating on demand, e.g. after upgrading grison.
-    """
+    # User-facing behavior is in --help/README's ## Commands; nothing dev-only to
+    # add here.
     from grison.scaffold import scaffold_workspace as _scaffold_workspace
 
     root = Path.cwd()
@@ -73,11 +69,8 @@ app.add_typer(hook_app, name="hook")
     help="Post-edit hook body: validates only the edited file and prints feedback. Always exits 0.",
 )
 def hook_post_edit() -> None:
-    """The PostToolUse hook body (see grison/scaffold/hook.py) — reads the tool-call
-    JSON from stdin, validates only the edited file, and prints feedback for the
-    agent. Always exits 0: a PostToolUse hook cannot block a tool call that already
-    ran, so this only ever informs, never fails.
-    """
+    """Body lives in grison/scaffold/hook.py. Always exits 0 — a PostToolUse hook
+    cannot block a tool call that already ran, so this only ever informs."""
     from grison.scaffold.hook import main as _hook_main
 
     raise typer.Exit(code=_hook_main())

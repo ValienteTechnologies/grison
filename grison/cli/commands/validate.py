@@ -33,21 +33,13 @@ def validate(
         ),
     ] = False,
 ) -> None:
-    """Validate the workspace against format v2 — offline, no credentials, no network.
+    """Dev notes (user-facing behavior is in ``--help``/README's ``## Commands``):
 
-    Runs from anywhere inside the workspace (walks up to find ``.grison/``, like
-    ``git`` finds ``.git/``); ``PATHS`` are resolved relative to the current
-    directory, then expressed relative to the workspace root. Quiet on success. One
-    line per failure: ``path:line: RULE-ID message — fix``.
-
-    Exit code: ``0`` the workspace is clean; ``1`` the validator ran fine and found
-    one or more real document problems; ``2`` the validator itself could not run at
-    all (a usage error — including a given path that doesn't exist, is outside the
-    workspace, or isn't a validated location — or an unexpected internal failure) —
-    so a pre-commit hook or CI step can tell "your documents are invalid" (1, fix the
-    documents) apart from "validate itself is broken" (2, fix grison / the
-    invocation), instead of both looking like the same failure. A ``PATHS`` entry
-    that matches nothing NEVER silently exits 0 — see §9 of the workspace-format spec.
+    The 1-vs-2 exit-code split is deliberate — a pre-commit hook or CI step must
+    be able to tell "your documents are invalid" (1, fix the documents) apart
+    from "validate itself is broken" (2, fix grison / the invocation), never both
+    looking like the same failure. A ``PATHS`` entry that matches nothing is
+    class 2, never a silent 0 — see §9 of the workspace-format spec.
     """
     try:
         root = find_workspace_root(Path.cwd())
