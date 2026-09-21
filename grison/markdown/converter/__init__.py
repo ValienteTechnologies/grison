@@ -287,10 +287,11 @@ and pulling ``html_to_md``'s own output again always returns byte-identical
 markdown, not merely "close" after one more round.
 
 This package is a pure module split of what was one ``converter.py`` file:
-``errors``/``grammar``/``nodes``/``mdparse``/``mdtext``/``refs_codec``/``jinja``/
-``inline_normalize`` are direction-neutral leaves shared by both directions;
-``from_html`` holds :func:`html_to_md` and everything it alone needs;
-``to_html`` holds :func:`md_to_html` and everything it alone needs.
+``errors``/``grammar``/``nodes``/``mdparse``/``mdtext``/``refs_codec``/
+``refs_render``/``jinja``/``inline_normalize`` are direction-neutral leaves
+shared by both directions; ``from_html`` holds :func:`html_to_md` and
+everything it alone needs; ``to_html`` holds :func:`md_to_html` and everything
+it alone needs.
 """
 
 from __future__ import annotations

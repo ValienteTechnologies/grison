@@ -22,7 +22,7 @@ import re
 from markdown_it.tree import SyntaxTreeNode
 
 from grison.markdown.converter.errors import ConverterError
-from grison.markdown.converter.grammar import _UNRESOLVED_RE
+from grison.markdown.converter.grammar import _MAX_NESTED_LIST_DEPTH, _UNRESOLVED_RE
 from grison.markdown.converter.mdparse import _MD
 from grison.markdown.converter.to_html.evidence import _push_embed_ref, _render_unresolved_marker
 from grison.markdown.converter.to_html.inline import _render_inline_nodes
@@ -111,7 +111,7 @@ def _render_block_node(
         )
         return f"<h{level}>{inner}</h{level}>"
     if node.type in ("bullet_list", "ordered_list"):
-        return _render_list_node2(
+        return _render_md_list_node(
             node,
             headings=headings,
             refs=refs,
@@ -159,7 +159,7 @@ def _render_paragraph_node(
     return f"<p>{_render_inline_nodes(inline_children, refs, jinja_escape, line=line)}</p>"
 
 
-def _render_list_node2(
+def _render_md_list_node(
     node: SyntaxTreeNode,
     *,
     headings: bool,
@@ -168,13 +168,15 @@ def _render_list_node2(
     lines: list[str],
     nesting: int,
 ) -> str:
-    """Render a ``bullet_list``/``ordered_list`` node. One level of nesting is
-    supported: an item's OWN nested list renders inside its ``<li>`` (``nesting``
-    goes from 0 at the top level to 1 there); a list nested inside THAT one
-    (``nesting`` would reach 2) is a hard ``ConverterError`` naming the line — the
-    HTML->markdown side still collapses a real GW record's 3rd+ level into that
-    same one level (with ``on_loss``) since existing corpus data has it, but
-    freshly-authored markdown must not grow a level nothing can round-trip."""
+    """Render a ``bullet_list``/``ordered_list`` node. ``_MAX_NESTED_LIST_DEPTH``
+    (1) level of nesting is supported: an item's OWN nested list renders inside
+    its ``<li>`` (``nesting`` goes from 0 at the top level to 1 there); a list
+    nested inside THAT one (``nesting`` would reach ``_MAX_NESTED_LIST_DEPTH + 1``)
+    is a hard ``ConverterError`` naming the line — the HTML->markdown side still
+    collapses a real GW record's 3rd+ level into that same one level (with
+    ``on_loss``, see ``_flatten_nested_list`` in ``from_html/blocks.py``) since
+    existing corpus data has it, but freshly-authored markdown must not grow a
+    level nothing can round-trip."""
     is_ol = node.type == "ordered_list"
     tag = "ol" if is_ol else "ul"
     start = node.attrs.get("start")
@@ -206,12 +208,12 @@ def _render_list_item_node(
     nested_html = ""
     for child in li.children:
         if child.type in ("bullet_list", "ordered_list"):
-            if nesting >= 1:
+            if nesting >= _MAX_NESTED_LIST_DEPTH:
                 raise ConverterError(
                     "unsupported markdown: list nested more than one level deep "
                     f"(line {_node_line(child)})"
                 )
-            nested_html += _render_list_node2(
+            nested_html += _render_md_list_node(
                 child,
                 headings=headings,
                 refs=refs,

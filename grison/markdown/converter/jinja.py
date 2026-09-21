@@ -85,6 +85,17 @@ def _note_block_boundary(state: _RawScanState, on_loss: Callable[[str], None] | 
         )
 
 
+def _unwrap_jinja_strlit(text: str) -> str:
+    """Resolve every D10 escape token in ``text`` back to the literal delimiter
+    token it stands for — the exact inverse of ``_jinja_escape_html`` (see
+    ``_JINJA_STRLIT_RE``). The one place this substitution is written: both
+    ``_render_text_run``'s literal branch (from_html/inline.py — the result is
+    then markdown-escaped) and :func:`_unwrap_jinja_escapes` below (the result
+    stays fully literal, for ``<code>`` content) call this instead of repeating
+    the regex substitution inline."""
+    return _JINJA_STRLIT_RE.sub(lambda m: m.group(1), text)
+
+
 def _unwrap_jinja_escapes(text: str, raw_state: _RawScanState) -> str:
     """Resolve every D10 escape token (``_jinja_escape_html``'s per-token form) AND
     every ``{% raw %}...{% endraw %}`` region back to plain literal text — used for
@@ -99,7 +110,7 @@ def _unwrap_jinja_escapes(text: str, raw_state: _RawScanState) -> str:
     reporting here (:func:`_render_code_text` has no ``on_loss`` of its own)."""
     out: list[str] = []
     for _is_literal, piece in _split_raw_regions(text, raw_state, None):
-        out.append(_JINJA_STRLIT_RE.sub(lambda m: m.group(1), piece))
+        out.append(_unwrap_jinja_strlit(piece))
     return "".join(out)
 
 

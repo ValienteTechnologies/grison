@@ -12,9 +12,14 @@ from grison.markdown.converter.from_html.evidence import (
     _render_cross_ref_span,
     _render_dot_form_inline,
 )
-from grison.markdown.converter.grammar import _INLINE_SPECIAL_RE, _JINJA_STRLIT_RE
+from grison.markdown.converter.grammar import _INLINE_SPECIAL_RE
 from grison.markdown.converter.inline_normalize import _merge_adjacent_inline
-from grison.markdown.converter.jinja import _RawScanState, _split_raw_regions, _unwrap_jinja_escapes
+from grison.markdown.converter.jinja import (
+    _RawScanState,
+    _split_raw_regions,
+    _unwrap_jinja_escapes,
+    _unwrap_jinja_strlit,
+)
 from grison.markdown.converter.mdtext import (
     _fence_code,
     _md_escape_quotes,
@@ -92,7 +97,7 @@ def _render_text_run(
     out: list[str] = []
     for is_literal, piece in _split_raw_regions(text, raw_state, on_loss):
         if is_literal:
-            literal = _JINJA_STRLIT_RE.sub(lambda m: m.group(1), piece)
+            literal = _unwrap_jinja_strlit(piece)
             out.append(_md_escape_run(literal))
         else:
             out.append(_render_text_run_specials(piece, refs, on_loss))

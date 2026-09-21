@@ -62,6 +62,18 @@ _RAW_OPEN_RE = r"\{%-?\s*raw\s*-?%\}"
 _RAW_CLOSE_RE = r"\{%-?\s*endraw\s*-?%\}"
 _RAW_TOKEN_RE = re.compile(rf"(?P<raw_open>{_RAW_OPEN_RE})|(?P<raw_close>{_RAW_CLOSE_RE})")
 _UNRESOLVED_RE = re.compile(r"^gw:evidence-ref:(?:id=(?P<id>\d+)|name=(?P<name>.*))$", re.DOTALL)
+# The one level of list nesting markdown's own indent-based sub-list syntax can
+# express (module docstring, "Nesting"). Shared by both directions' own,
+# genuinely different counting: from_html/blocks.py's ``_flatten_nested_list``
+# counts ``depth`` from 1 at the first nested level and COLLAPSES (with
+# on_loss) anything deeper, since real GW HTML can already have it; to_html/
+# blocks.py's ``_render_md_list_node``/``_render_list_item_node`` count
+# ``nesting`` from 0 at the top level and hard-REJECT authoring a level this
+# deep, since freshly-authored markdown must never grow a shape that can't
+# round-trip. Both checks are phrased directly against this one constant so
+# the relationship — one shared limit, two different responses — stays
+# explicit rather than being two independently-tuned magic numbers.
+_MAX_NESTED_LIST_DEPTH = 1
 _GW_REF_ENCODED_ATTR = "data-gw-ref-encoded"
 _EVIDENCE_DIV_CLASS = "richtext-evidence"
 _EVIDENCE_ID_ATTR = "data-evidence-id"
