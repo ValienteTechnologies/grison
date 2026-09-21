@@ -2,8 +2,10 @@
 plain text (:func:`_esc`), backslash-escaping literal text so it survives a
 markdown-it reparse unchanged (:func:`_md_escape_run` and friends), wrapping
 content in a ``*``/``**`` emphasis delimiter (:func:`_wrap_delim`), finalizing
-a rendered markdown line (:func:`_finalize_line`), and fencing inline code
-content (:func:`_fence_code`).
+a rendered markdown line (:func:`_finalize_line`), and choosing a backtick
+fence long enough to safely wrap literal text that itself contains backticks
+(:func:`_backtick_fence`, used by both :func:`_fence_code` here and
+``from_html/fence.py``'s ``_fence_marker_for``).
 """
 
 from __future__ import annotations
@@ -147,6 +149,18 @@ def _finalize_line(text: str, on_loss: Callable[[str], None] | None = None) -> s
     return "\n".join(lines)
 
 
+def _backtick_fence(text: str, min_length: int) -> str:
+    """A backtick fence for wrapping/framing literal ``text`` that may itself
+    contain backticks: one longer than the longest backtick run already
+    present (CommonMark's own convention — see :func:`_fence_code` and
+    ``from_html/fence.py``'s ``_fence_marker_for``), so no run inside ``text``
+    can ever be mistaken for, or collide with, the fence itself — but never
+    shorter than ``min_length``, since an inline code SPAN's own CommonMark
+    minimum is a single backtick while a FENCED code BLOCK's is three."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    return "`" * max(min_length, longest + 1)
+
+
 def _fence_code(text: str) -> str:
     """Render literal code-span text with a backtick fence one longer than the
     longest run of backticks already in it (CommonMark's own convention for a
@@ -173,8 +187,7 @@ def _fence_code(text: str) -> str:
     exactly that compensating pair and leaves the real content untouched."""
     if text == "":
         return ""
-    runs = re.findall(r"`+", text)
-    fence = "`" * (max((len(r) for r in runs), default=0) + 1)
+    fence = _backtick_fence(text, 1)
     if text.startswith("`"):
         text = " " + text
     if text.endswith("`"):

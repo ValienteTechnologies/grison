@@ -754,9 +754,115 @@ def test_md_to_html_refuses_a_pipe_inside_a_code_span_in_a_table_cell() -> None:
     """Lab finding: GFM splits the row at an unescaped ``|`` even inside a code
     span, so the table silently corrupts on push; refuse it with the fix."""
     md = "| svc | note |\n|---|---|\n| `BusyBox|telnetd` | x |\n"
-    with pytest.raises(ConverterError, match=r"inside inline code in a table cell"):
+    with pytest.raises(ConverterError, match=r"unmatched backtick in a table cell"):
         md_to_html(md)
     # the escaped form is the documented fix and converts
     assert "<code>BusyBox|telnetd</code>" in md_to_html(
         "| svc | note |\n|---|---|\n| `BusyBox\\|telnetd` | x |\n"
+    )
+
+
+# --- converter-grammar-lab code-review fixes (2026-09-21) --------------------
+
+
+def test_unsupported_sibling_of_a_single_p_list_item_raises_not_silently_dropped() -> None:
+    """Bug fix: the old ``_render_li`` only inspected children it already
+    recognized (``<p>``/``<div>``/``<pre>``), so an unrecognized sibling next to
+    exactly one ``<p>`` hit the single-paragraph fast path and was dropped with
+    no error and no ``on_loss`` report at all."""
+    with pytest.raises(ConverterError, match="unsupported markdown: table inside a list item"):
+        html_to_md("<ul><li><p>text</p><table><tr><td>x</td></tr></table></li></ul>")
+    with pytest.raises(ConverterError, match="unsupported markdown: blockquote inside a list item"):
+        html_to_md("<ul><li><p>text</p><blockquote><p>q</p></blockquote></li></ul>")
+
+
+def test_fence_still_supported_as_the_one_other_block_inside_a_list_item() -> None:
+    # Decision documented alongside the fix above: <pre> inside <li> stays
+    # supported (fence-in-list); <table>/<blockquote> inside <li> do not.
+    html = (
+        "<ol><li><p>Run</p>"
+        '<pre spellcheck="false"><code class="language-bash">x</code></pre>'
+        "</li></ol>"
+    )
+    assert html_to_md(html) == "1. Run\n\n   ```bash\n   x\n   ```"
+
+
+def test_md_to_html_refuses_a_malformed_table_column_count_mismatch() -> None:
+    """``_check_not_table`` reinstated: a header/separator column-count
+    mismatch fails markdown-it's own table rule and falls through to an
+    ordinary paragraph — that paragraph must be refused, not silently pushed
+    as a ``<p>`` with ``<br>``s."""
+    with pytest.raises(
+        ConverterError,
+        match=r"malformed table \(line 1\) — header and separator rows must have the same "
+        "number of columns",
+    ):
+        md_to_html("| A | B |\n| --- |\n| 1 | 2 | 3 |\n")
+
+
+def test_md_to_html_well_formed_table_unaffected_by_the_malformed_table_guard() -> None:
+    assert md_to_html("| A |\n| --- |\n| 1 |\n") == (
+        "<table><tbody><tr><th><p>A</p></th></tr><tr><td><p>1</p></td></tr></tbody></table>"
+    )
+
+
+def test_md_to_html_refuses_a_lone_unescaped_backtick_in_a_table_cell() -> None:
+    """Finding 3: a literal backtick with no pipe anywhere still trips the
+    dangling-backtick check — the message must not blame a '|' that was never
+    there."""
+    with pytest.raises(ConverterError, match=r"unmatched backtick in a table cell") as exc_info:
+        md_to_html("| desc |\n| --- |\n| a ` mark |\n")
+    assert "escape a literal backtick as \\`" in str(exc_info.value)
+    assert "a pipe inside a code span as \\|" in str(exc_info.value)
+
+
+def test_html_to_md_refuses_br_nested_inside_a_mark_in_a_table_cell() -> None:
+    """Finding 4: the old check only looked at direct children of the cell, so
+    a <br> nested inside <strong>/<em>/<a> slipped through and would render as
+    a literal newline, corrupting the table."""
+    with pytest.raises(ConverterError, match="unsupported <br> inside a <table> cell"):
+        html_to_md("<table><tr><td><strong>a<br>b</strong></td></tr></table>")
+    with pytest.raises(ConverterError, match="unsupported <br> inside a <table> cell"):
+        html_to_md('<table><tr><td><a href="x">a<br>b</a></td></tr></table>')
+
+
+def test_on_loss_reports_class_attr_on_inline_code_not_in_a_pre() -> None:
+    # Finding 5: <code class="…"> keeps the language class ONLY directly
+    # inside <pre> (the fenced-code shape); elsewhere it must be reported via
+    # on_loss like any other dropped attribute, not silently kept.
+    events: list[str] = []
+    md = html_to_md('<p><code class="foo">x</code></p>', on_loss=events.append)
+    assert md == "`x`"
+    assert any("class" in e for e in events)
+
+
+def test_on_loss_silent_for_class_attr_on_code_directly_inside_pre() -> None:
+    events: list[str] = []
+    html_to_md(
+        '<pre spellcheck="false"><code class="language-bash">x</code></pre>',
+        on_loss=events.append,
+    )
+    assert events == []
+
+
+def test_fence_marker_and_inline_code_fence_share_the_same_backtick_scan() -> None:
+    # Finding 6: from_html/fence.py's _fence_marker_for now delegates to
+    # mdtext._backtick_fence, the same "longest run plus one" scan _fence_code
+    # uses, differing only in minimum length (3 for a block fence, 1 inline).
+    from grison.markdown.converter.from_html.fence import _fence_marker_for
+    from grison.markdown.converter.mdtext import _backtick_fence, _fence_code
+
+    assert _fence_marker_for("plain") == "```"
+    assert _fence_marker_for("has ``` triple") == "````"
+    assert _fence_code("has ``` triple") == "````has ``` triple````"
+    assert _fence_marker_for("x") == _backtick_fence("x", 3)
+
+
+def test_md_to_html_table_cell_renders_with_no_duplicate_child_lookup() -> None:
+    # Finding 7: render_row used to compute cell.children[0] twice (once
+    # directly, once again inside _inline_children). Just a behavioral check
+    # that the single shared lookup still renders correctly.
+    assert md_to_html("| A |\n| --- |\n| **bold** |\n") == (
+        "<table><tbody><tr><th><p>A</p></th></tr>"
+        "<tr><td><p><strong>bold</strong></p></td></tr></tbody></table>"
     )

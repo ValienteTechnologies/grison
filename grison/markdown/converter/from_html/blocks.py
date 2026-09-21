@@ -13,7 +13,7 @@ from grison.markdown.converter.from_html.evidence import _render_evidence_div, _
 from grison.markdown.converter.from_html.fence import _render_pre_node
 from grison.markdown.converter.from_html.inline import _render_inline
 from grison.markdown.converter.from_html.table import _render_table, _render_table_wrapper
-from grison.markdown.converter.grammar import _HEADING_TAGS, _MAX_NESTED_LIST_DEPTH
+from grison.markdown.converter.grammar import _BLOCK_TAGS, _HEADING_TAGS, _MAX_NESTED_LIST_DEPTH
 from grison.markdown.converter.jinja import _note_block_boundary, _RawScanState
 from grison.markdown.converter.mdtext import _finalize_line
 from grison.markdown.converter.nodes import _Node, _report_dropped_attrs, _report_loss, _TreeBuilder
@@ -305,7 +305,29 @@ def _render_li(
     lines are appended to the returned list SEPARATELY (never combined into one
     multi-line string element) so the caller's existing per-element indent
     (``_render_list_node``) reaches every one of them.
+
+    A ``<table>``/``<blockquote>`` (or any other block-level tag, or a heading
+    when ``headings=True``) sitting alongside/instead of the recognized
+    ``<p>``/``<div>``/``<pre>``/``<ul>``/``<ol>`` children is OUTSIDE this
+    vocabulary — matching ``to_html/blocks.py``'s ``_render_list_item_node``,
+    which already hard-rejects the same shapes on the markdown-authoring side
+    — and raises the same "unsupported markdown: ... inside a list item"
+    ``ConverterError`` rather than being silently dropped. Bug fix (lab
+    finding, converter-grammar-lab, 2026-09-21): the OLD code only ever
+    collected recognized siblings into ``blocks`` below and never inspected
+    what it left out, so an unrecognized sibling next to a single supported
+    ``<p>`` (e.g. ``<li><p>text</p><table>...</table></li>``) hit the
+    single-``<p>``-item fast path a few lines down and the ``<table>`` was
+    dropped on the floor with no error and no ``on_loss`` report at all.
     """
+    for child in li.children:
+        if (
+            isinstance(child, _Node)
+            and (child.tag in _BLOCK_TAGS or child.tag in _HEADING_TAGS)
+            and child.tag not in _LI_BLOCK_TAGS
+            and child.tag not in _LIST_TAGS
+        ):
+            raise ConverterError(f"unsupported markdown: {child.tag} inside a list item")
     blocks = [c for c in li.children if isinstance(c, _Node) and c.tag in _LI_BLOCK_TAGS]
     lists = [c for c in li.children if isinstance(c, _Node) and c.tag in _LIST_TAGS]
     nested: list[str] = []

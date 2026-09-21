@@ -16,6 +16,7 @@ from collections.abc import Callable
 
 from grison.markdown.converter.errors import ConverterError
 from grison.markdown.converter.jinja import _RawScanState, _unwrap_jinja_escapes
+from grison.markdown.converter.mdtext import _backtick_fence
 from grison.markdown.converter.nodes import _Node, _report_dropped_attrs, _report_loss
 
 _LANG_CLASS_RE = re.compile(r"(?:^|\s)language-(\S+)")
@@ -34,9 +35,10 @@ def _fence_marker_for(text: str) -> str:
     code block, unlike an inline code span's single-backtick minimum) and one
     longer than the longest run of backticks already in ``text`` — so no line
     inside the block can ever be mistaken for (or accidentally close against)
-    the fence itself."""
-    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
-    return "`" * max(3, longest + 1)
+    the fence itself. Shares its "longest run plus one" scan with
+    ``mdtext._fence_code``'s own inline-code-span fence via
+    :func:`_backtick_fence`, the two differing only in their minimum length."""
+    return _backtick_fence(text, 3)
 
 
 def _flatten_fence_content(

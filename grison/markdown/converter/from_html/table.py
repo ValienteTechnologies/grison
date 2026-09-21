@@ -81,6 +81,20 @@ def _cell_content_children(cell: _Node, on_loss: Callable[[str], None] | None) -
     return non_ws
 
 
+def _contains_br(children: list[_Node | str]) -> bool:
+    """Whether ``<br>`` appears ANYWHERE among ``children``, at any nesting
+    depth — not just as a direct child. A ``<br>`` nested inside ``<strong>``/
+    ``<em>``/``<a>`` (any inline mark, GW's TipTap editor readily produces this)
+    still renders as a literal newline once flattened to markdown, which
+    corrupts a GFM table cell exactly the same as a direct-child ``<br>``
+    does, so the same rejection has to walk descendants, not just this level."""
+    for c in children:
+        if isinstance(c, _Node):
+            if c.tag == "br" or _contains_br(c.children):
+                return True
+    return False
+
+
 def _render_cell(
     cell: _Node,
     refs: RefResolver | None,
@@ -88,7 +102,7 @@ def _render_cell(
     raw_state: _RawScanState,
 ) -> str:
     content_children = _cell_content_children(cell, on_loss)
-    if any(isinstance(c, _Node) and c.tag == "br" for c in content_children):
+    if _contains_br(content_children):
         raise ConverterError(
             "unsupported <br> inside a <table> cell (a GFM table cell can't contain a line break)"
         )

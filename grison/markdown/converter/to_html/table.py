@@ -16,7 +16,7 @@ from __future__ import annotations
 from markdown_it.tree import SyntaxTreeNode
 
 from grison.markdown.converter.errors import ConverterError
-from grison.markdown.converter.to_html.common import _inline_children, _node_line
+from grison.markdown.converter.to_html.common import _node_line
 from grison.markdown.converter.to_html.inline import _render_inline_nodes
 from grison.markdown.refs import RefResolver
 
@@ -34,7 +34,9 @@ def _render_table_node(
             inline = cell.children[0] if cell.children else None
             line = (inline.map[0] + 1) if inline is not None and inline.map else _node_line(node)
             _refuse_split_code_span(inline, line)
-            content = _render_inline_nodes(_inline_children(cell), refs, jinja_escape, line=line)
+            content = _render_inline_nodes(
+                inline.children if inline is not None else [], refs, jinja_escape, line=line
+            )
             tds.append(f"<{tag}><p>{content}</p></{tag}>")
         return f"<tr>{''.join(tds)}</tr>"
 
@@ -63,9 +65,11 @@ def _refuse_split_code_span(inline: SyntaxTreeNode | None, line: int) -> None:
     becomes two cells with a dangling backtick each, which then round-trips as
     a corrupted table. The dangling backtick is the one signal: markdown-it
     leaves a backtick run it could not match as a code span in a plain ``text``
-    token, so any text token holding an unescaped backtick means the cell was
-    split inside a code span (a legitimate ``\`\`a\`b\`\`\`` is one code_inline
-    token and never trips this)."""
+    token, so any text token holding an unescaped backtick means EITHER of two
+    author errors — a ``|`` split a code span in two, or a literal backtick was
+    left unescaped to begin with (a legitimate ``\`\`a\`b\`\`\`` is one
+    code_inline token and never trips this either way) — so the message names
+    both possible fixes rather than assuming the pipe-split one alone."""
     if inline is None:
         return
     stack = list(inline.children)
@@ -73,7 +77,7 @@ def _refuse_split_code_span(inline: SyntaxTreeNode | None, line: int) -> None:
         tok = stack.pop()
         if tok.type == "text" and "`" in tok.content:
             raise ConverterError(
-                f"unsupported markdown: a '|' inside inline code in a table cell splits "
-                f"the cell (line {line}) — write it as \\| inside the code span"
+                f"unsupported markdown: unmatched backtick in a table cell (line {line}) — "
+                "escape a literal backtick as \\` and a pipe inside a code span as \\|"
             )
         stack.extend(tok.children)

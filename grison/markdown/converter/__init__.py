@@ -51,6 +51,14 @@ bare, with no ``<p>`` wrapping, as before. This multi-block support is one level
 only — a nested (2nd-level) list item with multiple blocks of its own is outside
 this vocabulary.
 
+A fenced code block (below) is the one other block allowed inside a list item,
+as its own block alongside a paragraph — the "step text, then a fence"
+replication-steps shape. A ``<table>`` or ``<blockquote>`` — both top-level-only
+constructs (see their own sections below) — is not: either one found inside a
+list item is outside this vocabulary in both directions and raises the same
+"unsupported markdown: ... inside a list item" ``ConverterError`` any other
+disallowed list-item content does, rather than being silently dropped.
+
 Fenced code blocks, blockquotes, and GFM tables (added 2026-09-21 — the grammar
 was widened to these three constructs specifically because real report authors
 hit them constantly; 52 of 57 real findings in the rework's own corpus failed

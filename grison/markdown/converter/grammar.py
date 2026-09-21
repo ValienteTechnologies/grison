@@ -110,11 +110,14 @@ _KEEP_ATTRS: dict[str, tuple[str, ...]] = {
     # reported as dropped) rather than run through the generic per-attribute
     # on_loss path, same reasoning as the canonical link rel/target values
     # above: they're EXPECTED shape, not a loss. ``class`` on <code> is where
-    # the ``language-<info>`` token lives; a stray ``class`` on some other,
-    # non-fence <code> element (never emitted by a real TipTap editor) is
-    # simply ignored rather than reported — a narrower cost than the
-    # complexity of threading parent context through the tree builder just to
-    # keep this special-cased to fenced code alone.
+    # the ``language-<info>`` token lives, but ONLY when that <code> is a
+    # direct child of <pre> — the fenced-code shape itself; the tree builder
+    # checks that parent context before consulting this table at all (see
+    # ``_TreeBuilder._open``). An ORDINARY inline <code class="…"> (not inside
+    # a <pre> — never emitted by a real TipTap editor, but not itself invalid
+    # HTML either) goes through the ordinary generic on_loss attribute-drop
+    # path instead of silently keeping the class, same as a stray attribute on
+    # any other allowed tag.
     "pre": ("class", "spellcheck"),
     "code": ("class",),
 }

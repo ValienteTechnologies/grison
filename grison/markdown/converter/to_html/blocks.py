@@ -15,6 +15,8 @@ renderer.
 
 from __future__ import annotations
 
+import re
+
 from markdown_it.tree import SyntaxTreeNode
 
 from grison.markdown.converter.errors import ConverterError
@@ -28,6 +30,17 @@ from grison.markdown.converter.to_html.table import _render_table_node
 from grison.markdown.refs import RefResolver
 
 _ATX_MARKUP = frozenset({"#", "##", "###", "####", "#####", "######"})
+# Pre-table-rule relic, reinstated (lab finding, converter-grammar-lab,
+# 2026-09-21): with the GFM ``table`` block rule enabled (see ``mdparse.py``),
+# a WELL-formed pipe table never reaches ``_check_not_table`` at all — it's
+# already its own ``table`` node (``to_html/table.py``). A MALFORMED one
+# (header/separator column-count mismatch) fails markdown-it's own table rule
+# instead and falls all the way through to an ordinary paragraph, which used
+# to render silently as a ``<p>`` with ``<br>``s — the author's garbled table
+# pushed as garbage prose with no error at all. This is the ORIGINAL
+# pre-table-rule separator-line pattern (a bare ``---``/``:--``/``--:`` run,
+# optionally pipe-delimited, spanning 2+ columns).
+_TABLE_SEP_RE = re.compile(r"\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?")
 
 
 def md_to_html(
@@ -111,6 +124,33 @@ _BLOCK_TYPE_NAMES = {
 }
 
 
+def _check_not_table(node: SyntaxTreeNode) -> None:
+    """Reject a paragraph that is really a malformed GFM table markdown-it's
+    ``table`` rule declined to parse (see ``_TABLE_SEP_RE`` above), rather than
+    silently rendering it as a ``<p>`` with ``<br>``s. The signal a real table
+    attempt leaves behind even after falling through to a plain paragraph: a
+    bare separator-only line (``_TABLE_SEP_RE``, 2+ columns), or — for the
+    narrower one-column case a 2+-column separator pattern can't catch (``|
+    --- |`` has only one dash run) — EVERY line of the paragraph individually
+    shaped like a pipe row (starts and ends with ``|``). Neither shape occurs
+    in ordinary prose, so either one means the author was writing a table and
+    a column-count mismatch is why it didn't parse as one."""
+    inline = node.children[0] if node.children else None
+    content = inline.content if inline is not None else ""
+    if not content:
+        return
+    raw_lines = content.split("\n")
+    looks_like_table = any(_TABLE_SEP_RE.fullmatch(ln.strip()) for ln in raw_lines) or all(
+        len(ln.strip()) > 1 and ln.strip().startswith("|") and ln.strip().endswith("|")
+        for ln in raw_lines
+    )
+    if looks_like_table:
+        raise ConverterError(
+            f"unsupported markdown: malformed table (line {_node_line(node)}) — header and "
+            "separator rows must have the same number of columns"
+        )
+
+
 def _render_paragraph_node(
     node: SyntaxTreeNode, *, refs: RefResolver | None, jinja_escape: bool
 ) -> str:
@@ -124,7 +164,12 @@ def _render_paragraph_node(
     content is block-only — bare inline ``<li>`` text is never actually stored),
     so grison's canonical push output matches that unconditionally rather than
     reproducing CommonMark's own tight/loose distinction, which Ghostwriter's
-    editor has no concept of at all."""
+    editor has no concept of at all. Checked first against ``_check_not_table``
+    — this runs for every paragraph regardless of where it sits (top-level, in
+    a list item, in a blockquote), so a malformed table degrading to a plain
+    paragraph is caught the same way no matter which context it fell through
+    in."""
+    _check_not_table(node)
     inline_children = _inline_children(node)
     if len(inline_children) == 1:
         only = inline_children[0]
