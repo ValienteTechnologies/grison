@@ -744,7 +744,7 @@ every other record kind gets — ENGINE.md 'The apply loop', item 1) — it prod
 Every finding section and narrative field is pushed through
 `grison.markdown.converter.md_to_html`. Its module docstring is the authoritative
 grammar and canonicalization list; `FND-014`/`REP-001` fire whenever a document falls
-outside it. Quoted verbatim from `grison/markdown/converter.py`:
+outside it. Quoted verbatim from `grison/markdown/converter/__init__.py`:
 
 > Whitelist (both directions):
 >   block:  ``<p>`` <-> paragraph, ``<ul><li>`` <-> ``- `` list item,
