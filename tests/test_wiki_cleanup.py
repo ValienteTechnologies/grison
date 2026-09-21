@@ -15,6 +15,7 @@ pre-engine sync module used to block pushes, per the task's instruction to
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -1026,7 +1027,9 @@ def test_book_root_page_still_gets_the_bare_images_spelling() -> None:
 
 # --- idempotence on the masked real-shape page (read-only, never copied) -----
 
-_REAL_SHAPE_PAGE = Path("/home/tfp/repos/grison-rework/lab/real-shapes/big-page-masked.md")
+# A masked (content-scrubbed, structure-preserved) real page from the rework lab,
+# kept outside this repo; point GRISON_REAL_SHAPE_PAGE at it to run this check.
+_REAL_SHAPE_PAGE = Path(os.environ.get("GRISON_REAL_SHAPE_PAGE", "/nonexistent"))
 
 
 @pytest.mark.skipif(not _REAL_SHAPE_PAGE.is_file(), reason="lab real-shape fixture not present")

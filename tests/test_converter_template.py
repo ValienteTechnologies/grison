@@ -6,7 +6,7 @@ pair-based, unlike an earlier design that wrapped matched
 ``{{...}}``/``{%...%}``/``{#...#}`` spans in Jinja's own
 ``{% raw %}...{% endraw %}`` block tag, since pairing can't neutralize a lone,
 never-closed opener — verified against a real Ghostwriter 7.2.6 lab server, see
-``/home/tfp/repos/grison-rework/proofs/d10-jinja-escape-lab.md``) and the
+the rework lab proof (``proofs/d10-jinja-escape-lab.md``, kept outside this repo)) and the
 reserved ``gw:`` inline-code form for active expressions.
 """
 
@@ -227,7 +227,7 @@ def test_active_expression_not_escaped_even_with_jinja_escape_true() -> None:
 # (1)-(4) apply (no dot-syntax/pagebreak/prefix markers in this test content).
 # Confirmed for real against the lab server, including the lone-opener/
 # nested-overlapping/literal-raw-endraw-text cases below — see
-# ``/home/tfp/repos/grison-rework/proofs/d10-jinja-escape-lab.md``.
+# the rework lab proof (``proofs/d10-jinja-escape-lab.md``, kept outside this repo).
 
 
 def _mimic_ghostwriter_render(html: str, context: dict | None = None) -> str:

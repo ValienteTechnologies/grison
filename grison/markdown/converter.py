@@ -129,7 +129,7 @@ of them raises ``ConverterError`` naming what to do instead (pass ``refs=``):
   spell out the literal strings ``{% raw %}``/``{% endraw %}`` with no jinja
   intent at all) uniformly, with no special-casing of any shape. Verified
   against a real Ghostwriter 7.2.6 lab server
-  (``/home/tfp/repos/grison-rework/proofs/d10-jinja-escape-lab.md``): an
+  (the rework lab proof (``proofs/d10-jinja-escape-lab.md``, kept outside this repo)): an
   unescaped ``{{7*7}}`` silently evaluates on export, an unescaped unknown tag
   (e.g. ``{% debug %}``) aborts the WHOLE report export with a 500 (Jinja
   compiles the entire field as one template before rendering — no per-record
@@ -1921,7 +1921,7 @@ def _jinja_escape_html(escaped_text: str) -> str:
     export to survive template compilation byte-for-byte, including a lone
     unclosed opener and text containing the literal strings "{% raw %}"/
     "{% endraw %}" (see module docstring and
-    ``/home/tfp/repos/grison-rework/proofs/d10-jinja-escape-lab.md``). Applied
+    the rework lab proof (``proofs/d10-jinja-escape-lab.md``, kept outside this repo)). Applied
     identically whether the fragment sits in plain paragraph text or inside a
     ``<code>`` element — Jinja's lexer scans the whole HTML string as one
     template regardless of what tag a substring sits inside, so an inserted

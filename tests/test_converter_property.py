@@ -706,7 +706,7 @@ def test_raw_block_repush_never_nests_escaping(html: str) -> None:
     (``{{ '...' }}``) INSIDE a ``{% raw %}...{% endraw %}`` block — because
     grison's push never emits ``{% raw %}`` at all any more (the per-token
     mechanism proven in
-    ``/home/tfp/repos/grison-rework/proofs/d10-jinja-escape-lab.md`` section 9
+    the rework lab proof (``proofs/d10-jinja-escape-lab.md``, kept outside this repo) section 9
     replaced it), so the two can never co-occur, structurally."""
     md = html_to_md(html)
     html2 = md_to_html(md)
