@@ -128,11 +128,15 @@ def _guarded(fn: Callable[..., _T2]) -> Callable[..., _T2]:
 def _is_bootstrapped(root: Path) -> bool:
     """Whether ``root`` has already been through a bootstrap (of any format,
     including a v1 workspace this grison refuses to sync — see
-    :func:`_refuse_if_format_mismatch`) — the same detection
-    :func:`grison.validator.find_workspace_root` uses. A genuinely fresh directory
-    (no ``.grison/`` at all) is the ONLY case a first ``grison sync``/``grison
-    parse`` is allowed to bootstrap from scratch (item 2, fix-fin1)."""
-    return (root / ".grison").is_dir()
+    :func:`_refuse_if_format_mismatch`): a v2 manifest exists, or real v1 content
+    does. A directory holding nothing but a hand-placed ``.grison/env`` (a scripted
+    deployment, a credential file copied into a fresh clone — the exact case
+    :func:`grison.remote.bootstrap.bootstrap_workspace` documents) is NOT
+    bootstrapped: gating it on the WS-* rules first (item 1) refused every first
+    sync in a git repo with WS-008, because the ``.grison/.gitignore`` that rule
+    wants is one of the files bootstrap has not written yet."""
+    manifest_path = root / manifest_mod.MANIFEST_RELATIVE_PATH
+    return manifest_path.is_file() or manifest_mod.has_v1_content(root)
 
 
 def _refuse_if_format_mismatch(root: Path) -> None:

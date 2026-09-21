@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] - 2026-09-21
+
+### Fixed
+
+- A first `grison sync` in a fresh `git init` directory holding only a hand-placed
+  `.grison/env` was refused with WS-008 before bootstrap could write the
+  `.grison/.gitignore` the rule asks for. A hand-placed env no longer counts as a
+  bootstrapped workspace; the run bootstraps, then the workspace rules gate it.
+
 ## [0.4.2] - 2026-09-21
 
 ### Fixed

@@ -228,6 +228,7 @@ def test_grisonerror_reaches_top_as_one_plain_line(
     grison_dir = tmp_path / ".grison"
     grison_dir.mkdir()
     (grison_dir / "env").write_text("GRISON_GW_URL=http://insecure.example\nGRISON_GW_TOKEN=tok\n")
+    manifest_mod.write(tmp_path)  # bootstrapped: a bare env alone would only "would create"
     result = _runner.invoke(app, ["sync", "--dry-run"])
     assert result.exit_code == 1
     assert result.output.startswith("error: ")
