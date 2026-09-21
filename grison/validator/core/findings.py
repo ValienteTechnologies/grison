@@ -152,9 +152,10 @@ def _check_finding_body(
             ref_issue = True
     # Only fall through to the real converter when refscan found no reference problem
     # of its own — REF-001/002/006's rule assignment never depends on the converter's
-    # error text (see D3 review); this still catches everything else (tables, raw
-    # HTML, unsupported constructs) in the common case. headings=True: see the
-    # library/inbox branch above — same reason.
+    # error text (see D3 review); this still catches everything else (raw HTML,
+    # indented code blocks, other unsupported constructs — fences/blockquotes/tables
+    # are supported since the 2026-09-21 grammar widening) in the common case.
+    # headings=True: see the library/inbox branch above — same reason.
     if not ref_issue:
         try:
             md_to_html(text, headings=True, refs=OfflineEvidenceResolver(evidence_dir))

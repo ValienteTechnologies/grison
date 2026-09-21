@@ -120,10 +120,14 @@ def build_claude_md(*, grison_version: str | None = None) -> str:
         "CVSS band routinely disagree before you've triaged the finding). Each "
         "section's markdown converts to Ghostwriter's own rich text, which only "
         "understands a small vocabulary: paragraphs, bulleted/numbered lists (one "
-        "level of nesting), **bold**, *em*, `code`, links, and hard line breaks. "
-        "No tables, no blockquotes, no fenced or indented code blocks, no raw "
-        "HTML, no `---` thematic breaks — any of those fails validation; put that "
-        "content in a code span/list instead."
+        "level of nesting), **bold**, *em*, `code`, links, hard line breaks, "
+        "fenced code blocks (own block, top-level or as its own block inside a "
+        "list item — a fence right after a step's text is fine), blockquotes "
+        "(top-level only, no tables/fences inside one), and GFM tables (top-level "
+        "only, one header row required, no column alignment, no nested blocks in "
+        "a cell). No indented code blocks, no raw HTML, no `---` thematic breaks, "
+        "no nested blockquote — any of those fails validation; put that content "
+        "in a fenced code block/list instead."
     )
     wiki_body = (
         "No other frontmatter key. The body is markdown BookStack renders "

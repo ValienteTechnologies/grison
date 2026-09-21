@@ -1,7 +1,8 @@
 """HTML->markdown: :func:`html_to_md` itself, plus top-level block grouping/
 merging and block/list rendering (paragraphs, headings, ``<ul>``/``<ol>``/
-``<li>``, and the evidence ``<div>``).
-"""
+``<li>``, blockquotes, and the evidence/table-wrapper ``<div>``). Fenced code
+blocks (``<pre>``) and GFM tables (``<table>``) each get their own leaf module
+(``fence``/``table``)."""
 
 from __future__ import annotations
 
@@ -9,8 +10,10 @@ from collections.abc import Callable
 
 from grison.markdown.converter.errors import ConverterError
 from grison.markdown.converter.from_html.evidence import _render_evidence_div, _try_render_dot_embed
+from grison.markdown.converter.from_html.fence import _render_pre_node
 from grison.markdown.converter.from_html.inline import _render_inline
-from grison.markdown.converter.grammar import _HEADING_TAGS, _MAX_NESTED_LIST_DEPTH
+from grison.markdown.converter.from_html.table import _render_table, _render_table_wrapper
+from grison.markdown.converter.grammar import _BLOCK_TAGS, _HEADING_TAGS, _MAX_NESTED_LIST_DEPTH
 from grison.markdown.converter.jinja import _note_block_boundary, _RawScanState
 from grison.markdown.converter.mdtext import _finalize_line
 from grison.markdown.converter.nodes import _Node, _report_dropped_attrs, _report_loss, _TreeBuilder
@@ -82,10 +85,13 @@ def _render_top_level_blocks(
     return rendered
 
 
+_TOP_LEVEL_BLOCK_TAGS = ("p", "ul", "ol", "div", "pre", "blockquote", "table")
+
+
 def _group_top_level(children: list[_Node | str]) -> list[_Node]:
-    """Split top-level children into p/ul/ol/div/heading blocks, wrapping stray
-    inline content in an implicit paragraph and dropping insignificant top-level
-    whitespace."""
+    """Split top-level children into p/ul/ol/div/pre/blockquote/table/heading
+    blocks, wrapping stray inline content in an implicit paragraph and dropping
+    insignificant top-level whitespace."""
     blocks: list[_Node] = []
     buffer: list[_Node | str] = []
 
@@ -98,7 +104,7 @@ def _group_top_level(children: list[_Node | str]) -> list[_Node]:
         if isinstance(child, str) and child.strip() == "":
             continue
         if isinstance(child, _Node) and (
-            child.tag in ("p", "ul", "ol", "div") or child.tag in _HEADING_TAGS
+            child.tag in _TOP_LEVEL_BLOCK_TAGS or child.tag in _HEADING_TAGS
         ):
             flush()
             blocks.append(child)
@@ -161,9 +167,55 @@ def _render_block(
         )
     if node.tag in ("ul", "ol"):
         return _render_list_node(node, refs, on_loss, raw_state)
+    if node.tag == "pre":
+        return _render_pre_node(node, on_loss, raw_state)
+    if node.tag == "blockquote":
+        return _render_blockquote(node, refs, on_loss, raw_state)
+    if node.tag == "table":
+        return _render_table(node, refs, on_loss, raw_state)
     if node.tag == "div":
+        classes = (node.attrs.get("class") or "").split()
+        if "collab-table-wrapper" in classes:
+            return _render_table_wrapper(node, refs, on_loss, raw_state)
         return _render_evidence_div(node, refs, on_loss)
     raise ConverterError(f"unsupported block-level tag: <{node.tag}>")
+
+
+def _render_blockquote(
+    node: _Node,
+    refs: RefResolver | None,
+    on_loss: Callable[[str], None] | None,
+    raw_state: _RawScanState,
+) -> str:
+    """Render a ``<blockquote>``'s block children — paragraphs and lists only
+    (module docstring, "Special forms"/blockquote) — to ``> ``-prefixed lines,
+    a blank line inside the quote rendering as a bare ``>`` (CommonMark's own
+    lazy-continuation-free blockquote-marker convention: every physical line
+    that belongs to the quote, blank or not, carries the marker). A nested
+    blockquote, or anything else GW's real ``Blockquote`` node (StarterKit
+    defaults) doesn't hold, is outside this vocabulary and raises the same
+    "unsupported" ``ConverterError`` any other disallowed content does."""
+    _report_dropped_attrs(node, on_loss)
+    rendered_blocks: list[str] = []
+    for child in node.children:
+        if isinstance(child, str):
+            if child.strip():
+                raise ConverterError(
+                    "stray text directly inside <blockquote> (expected <p>/<ul>/<ol>)"
+                )
+            continue
+        if child.tag == "p":
+            _report_dropped_attrs(child, on_loss)
+            text = _finalize_line(_render_inline(child.children, refs, on_loss, raw_state), on_loss)
+        elif child.tag in ("ul", "ol"):
+            text = _render_list_node(child, refs, on_loss, raw_state)
+        else:
+            raise ConverterError(
+                f"unsupported <{child.tag}> inside <blockquote> (expected <p>/<ul>/<ol>)"
+            )
+        rendered_blocks.append(text)
+    body = "\n\n".join(b for b in rendered_blocks if b != "")
+    return "\n".join(f"> {ln}" if ln else ">" for ln in body.split("\n"))
 
 
 def _ol_start(node: _Node, on_loss: Callable[[str], None] | None) -> int:
@@ -218,7 +270,7 @@ def _render_list_node(
 
 
 _LIST_TAGS = ("ul", "ol")
-_LI_BLOCK_TAGS = ("p", "div")
+_LI_BLOCK_TAGS = ("p", "div", "pre")
 
 
 def _render_li(
@@ -234,15 +286,48 @@ def _render_li(
     match (nested nested sub-items' own markers, or a blank line + indented
     continuation block for a multi-block/loose item — see module docstring).
 
-    A bare inline ``<li>`` (no ``<p>``/``<div>`` child at all — what THIS converter
-    itself emits for a single-block item) and an ``<li>`` with exactly one ``<p>``
-    (with or without a nested list) both render as one bare line: the corpus
-    impact/mitigation/references fields are ``<ul><li><p>…</p></li></ul>``, so
-    whitespace round-trips exactly rather than being paragraph-joined/stripped.
-    Two or more blocks (multiple ``<p>``, or a ``<p>``/embed ``<div>`` mix) render
+    A bare inline ``<li>`` (no ``<p>``/``<div>``/``<pre>`` child at all — what
+    THIS converter itself emits for a single-block item) and an ``<li>`` with
+    exactly one ``<p>`` (with or without a nested list) both render as one bare
+    line: the corpus impact/mitigation/references fields are
+    ``<ul><li><p>…</p></li></ul>``, so whitespace round-trips exactly rather
+    than being paragraph-joined/stripped. Two or more blocks (multiple ``<p>``,
+    or a ``<p>``/embed-``<div>``/fence-``<pre>`` mix — the "step text, then a
+    fence" replication-steps shape real report authors hit constantly) render
     as a loose item: each extra block becomes a blank line then an indented
-    continuation line.
+    continuation. A fence's own rendered text is itself multi-line (opening
+    marker, content, closing marker) and — unlike a plain paragraph's own
+    internal hard-break continuation lines, which CommonMark's lazy
+    continuation lets stay unindented (see
+    ``test_lazy_continuation_line_joins_list_item_paragraph``) — a fenced code
+    block gets NO such laziness: every one of its physical lines needs the
+    item's own marker-width indent to still parse as belonging to it, so its
+    lines are appended to the returned list SEPARATELY (never combined into one
+    multi-line string element) so the caller's existing per-element indent
+    (``_render_list_node``) reaches every one of them.
+
+    A ``<table>``/``<blockquote>`` (or any other block-level tag, or a heading
+    when ``headings=True``) sitting alongside/instead of the recognized
+    ``<p>``/``<div>``/``<pre>``/``<ul>``/``<ol>`` children is OUTSIDE this
+    vocabulary — matching ``to_html/blocks.py``'s ``_render_list_item_node``,
+    which already hard-rejects the same shapes on the markdown-authoring side
+    — and raises the same "unsupported markdown: ... inside a list item"
+    ``ConverterError`` rather than being silently dropped. Bug fix (lab
+    finding, converter-grammar-lab, 2026-09-21): the OLD code only ever
+    collected recognized siblings into ``blocks`` below and never inspected
+    what it left out, so an unrecognized sibling next to a single supported
+    ``<p>`` (e.g. ``<li><p>text</p><table>...</table></li>``) hit the
+    single-``<p>``-item fast path a few lines down and the ``<table>`` was
+    dropped on the floor with no error and no ``on_loss`` report at all.
     """
+    for child in li.children:
+        if (
+            isinstance(child, _Node)
+            and (child.tag in _BLOCK_TAGS or child.tag in _HEADING_TAGS)
+            and child.tag not in _LI_BLOCK_TAGS
+            and child.tag not in _LIST_TAGS
+        ):
+            raise ConverterError(f"unsupported markdown: {child.tag} inside a list item")
     blocks = [c for c in li.children if isinstance(c, _Node) and c.tag in _LI_BLOCK_TAGS]
     lists = [c for c in li.children if isinstance(c, _Node) and c.tag in _LIST_TAGS]
     nested: list[str] = []
@@ -263,21 +348,27 @@ def _render_li(
 
     lines: list[str] = []
     for b in blocks:
-        _report_dropped_attrs(b, on_loss)
         if b.tag == "div":
-            text = _render_evidence_div(b, refs, on_loss)
+            _report_dropped_attrs(b, on_loss)
+            block_lines = [_render_evidence_div(b, refs, on_loss)]
+        elif b.tag == "pre":
+            # _render_pre_node reports its own dropped attrs internally.
+            block_lines = _render_pre_node(b, on_loss, raw_state).split("\n")
         else:
+            _report_dropped_attrs(b, on_loss)
             bare_text = _is_bare_text(b.children)
             embed = (
                 _try_render_dot_embed(bare_text, refs, on_loss) if bare_text is not None else None
             )
-            if embed is not None:
-                text = embed
-            else:
-                text = _finalize_line(_render_inline(b.children, refs, on_loss, raw_state), on_loss)
+            text = (
+                embed
+                if embed is not None
+                else _finalize_line(_render_inline(b.children, refs, on_loss, raw_state), on_loss)
+            )
+            block_lines = [text]
         if lines:
             lines.append("")
-        lines.append(text)
+        lines.extend(block_lines)
     lines.extend(nested)
     return lines
 

@@ -9,7 +9,22 @@ from __future__ import annotations
 
 import re
 
-_BLOCK_TAGS = {"p", "ul", "ol", "li", "div"}
+_BLOCK_TAGS = {
+    "p",
+    "ul",
+    "ol",
+    "li",
+    "div",
+    "pre",
+    "blockquote",
+    "table",
+    "thead",
+    "tbody",
+    "tfoot",
+    "tr",
+    "th",
+    "td",
+}
 _INLINE_TAGS = {"strong", "code", "em", "a", "br"}
 _UNWRAP_TAGS = {"span"}
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
@@ -89,4 +104,20 @@ _KEEP_ATTRS: dict[str, tuple[str, ...]] = {
     "span": ("data-color", "style", _GW_REF_ENCODED_ATTR, "data-gw-ref"),
     "ol": ("start", "type"),
     "div": ("class", _EVIDENCE_ID_ATTR),
+    # ``spellcheck``/``class`` on <pre> and ``class`` on <code> are the two
+    # cosmetic/informational attributes the canonical fenced-code push shape
+    # carries (see module docstring, "Special forms"/fence) — kept (never
+    # reported as dropped) rather than run through the generic per-attribute
+    # on_loss path, same reasoning as the canonical link rel/target values
+    # above: they're EXPECTED shape, not a loss. ``class`` on <code> is where
+    # the ``language-<info>`` token lives, but ONLY when that <code> is a
+    # direct child of <pre> — the fenced-code shape itself; the tree builder
+    # checks that parent context before consulting this table at all (see
+    # ``_TreeBuilder._open``). An ORDINARY inline <code class="…"> (not inside
+    # a <pre> — never emitted by a real TipTap editor, but not itself invalid
+    # HTML either) goes through the ordinary generic on_loss attribute-drop
+    # path instead of silently keeping the class, same as a stray attribute on
+    # any other allowed tag.
+    "pre": ("class", "spellcheck"),
+    "code": ("class",),
 }

@@ -103,6 +103,65 @@ def test_multi_paragraph_li_joins() -> None:
     assert html_to_md(md_to_html(md)) == md
 
 
+# --- fenced code blocks, blockquotes, GFM tables (grammar widened 2026-09-21) -
+
+
+def test_replication_steps_fence_after_paragraph_step_is_the_real_shape() -> None:
+    # The real failure mode this widening fixes: 52 of 57 real findings in the
+    # rework's own corpus failed conversion on exactly this "step text, then a
+    # fence" replication-steps shape — GW's real FormattedCodeblock canonical
+    # push shape (codeblock.ts), a fence as its own block inside a list item.
+    html = (
+        "<ol><li><p>Run the scan</p>"
+        '<pre spellcheck="false"><code class="language-bash">nmap -sV target</code></pre>'
+        "</li><li><p>Review the output</p></li></ol>"
+    )
+    md = html_to_md(html)
+    assert md == "1. Run the scan\n\n   ```bash\n   nmap -sV target\n   ```\n2. Review the output"
+    assert html_to_md(md_to_html(md)) == md  # fixed point
+
+
+def test_real_nmap_style_table_converts() -> None:
+    # grison/scanners/nmap.py's own <table> shape: thead/tbody, no <p> in cells.
+    html = (
+        "<table><thead><tr><th>Port</th><th>Service</th><th>Product/Version</th></tr></thead>"
+        "<tbody><tr><td>22/tcp</td><td>ssh</td><td>OpenSSH 8.9</td></tr></tbody></table>"
+    )
+    md = html_to_md(html)
+    assert md == (
+        "| Port | Service | Product/Version |\n| --- | --- | --- |\n| 22/tcp | ssh | OpenSSH 8.9 |"
+    )
+    assert html_to_md(md_to_html(md)) == md
+
+
+def test_collab_table_wrapper_with_caption_is_the_real_tiptap_shape() -> None:
+    # TipTap's TableWithCaption extension real shape (table.ts).
+    html = (
+        '<div class="collab-table-wrapper"><table><tbody>'
+        "<tr><th><p>Host</p></th><th><p>Status</p></th></tr>"
+        "<tr><td><p>10.0.0.1</p></td><td><p>Up</p></td></tr>"
+        "</tbody></table>"
+        '<p class="collab-table-caption">'
+        '<span class="collab-table-caption-content">Table 1: scan hosts</span></p>'
+        "</div>"
+    )
+    events: list[str] = []
+    md = html_to_md(html, on_loss=events.append)
+    assert md == ("| Host | Status |\n| --- | --- |\n| 10.0.0.1 | Up |\n\nTable 1: scan hosts")
+    assert any("caption" in e for e in events)
+
+
+def test_blockquote_is_the_real_starterkit_shape() -> None:
+    # StarterKit's default Blockquote node: <blockquote><p>…</p></blockquote>.
+    html = (
+        "<blockquote><p>Per the client's scope letter, only 10.0.0.0/24 was "
+        "tested.</p></blockquote>"
+    )
+    md = html_to_md(html)
+    assert md == "> Per the client's scope letter, only 10.0.0.0/24 was tested."
+    assert html_to_md(md_to_html(md)) == md
+
+
 def test_link_url_with_quote_cannot_break_out_of_href() -> None:
     # CHANGED behavior (markdown-it now owns URL parsing): a malformed/hostile URL
     # must still not escape the href attribute and inject markup, but it's now

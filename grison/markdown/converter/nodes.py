@@ -47,6 +47,13 @@ class _TreeBuilder(HTMLParser):
             self.stack[-1].children.append(_Node("br"))
             return
         keep = _KEEP_ATTRS.get(tag, ())
+        if tag == "code" and self.stack[-1].tag != "pre":
+            # <code class="language-…"> is the canonical fenced-code shape only
+            # when <code> is a direct child of <pre> (see grammar.py's
+            # _KEEP_ATTRS comment) — an inline <code class="…"> anywhere else
+            # goes through the ordinary generic on_loss path below instead of
+            # silently keeping the class.
+            keep = ()
         node_attrs: dict[str, str] = {}
         dropped: list[str] = []
         for name, value in attrs:

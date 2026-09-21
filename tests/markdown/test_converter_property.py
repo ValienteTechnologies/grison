@@ -176,8 +176,14 @@ def list_block(draw: st.DrawFn) -> str:
             lines.append(draw(paragraph_text()))
         if draw(st.booleans()):  # loose continuation block for this item
             lines.append("")
-            if draw(st.booleans()):
+            continuation_kind = draw(st.sampled_from(["embed", "para", "fence"]))
+            if continuation_kind == "embed":
                 lines.append(indent + draw(embed_line()))
+            elif continuation_kind == "fence":
+                # A fence's own physical lines get NO CommonMark laziness (unlike
+                # a plain paragraph's hard-break continuation) — every one needs
+                # this item's own marker-width indent to still belong to it.
+                lines.extend(indent + ln for ln in draw(fence_text()).split("\n"))
             else:
                 lines.append(indent + draw(paragraph_text()))
         if draw(st.booleans()):  # one nested sub-list, one level
@@ -196,6 +202,52 @@ def list_block(draw: st.DrawFn) -> str:
 
 
 @st.composite
+def fence_text(draw: st.DrawFn) -> str:
+    # CommonMark treats a tilde fence identically to a backtick one (same
+    # "fence" node) — grison accepts either on authoring, always
+    # re-canonicalizing to backticks on the html->markdown side.
+    marker = draw(st.sampled_from(["```", "~~~", "````"]))
+    lang = draw(st.sampled_from(["", "bash", "python", "json"]))
+    header = f"{marker}{lang}" if lang else marker
+    n_lines = draw(st.integers(min_value=1, max_value=2))
+    body_lines = [draw(st.sampled_from(WORDS)) for _ in range(n_lines)]
+    return "\n".join([header, *body_lines, marker])
+
+
+@st.composite
+def blockquote_block(draw: st.DrawFn) -> str:
+    n_paras = draw(st.integers(min_value=1, max_value=2))
+    segments = [draw(paragraph_text()) for _ in range(n_paras)]
+    if draw(st.booleans()):
+        # A small, single-level list — enough to exercise "blockquote
+        # containing a list" without the full list_block() composite's own
+        # nested-sublist/loose-continuation complexity.
+        bullet = draw(st.sampled_from(["-", "*", "+"]))
+        n_items = draw(st.integers(min_value=1, max_value=2))
+        segments.append("\n".join(f"{bullet} {draw(paragraph_text())}" for _ in range(n_items)))
+    lines: list[str] = []
+    for i, seg in enumerate(segments):
+        if i > 0:
+            lines.append(">")
+        lines.extend(f"> {ln}" if ln else ">" for ln in seg.split("\n"))
+    return "\n".join(lines)
+
+
+@st.composite
+def table_block(draw: st.DrawFn) -> str:
+    ncols = draw(st.integers(min_value=1, max_value=3))
+    header = [draw(st.sampled_from(WORDS)) for _ in range(ncols)]
+    nrows = draw(st.integers(min_value=0, max_value=2))
+    rows = [[draw(inline_fragment()) for _ in range(ncols)] for _ in range(nrows)]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(["---"] * ncols) + " |",
+        *("| " + " | ".join(r) + " |" for r in rows),
+    ]
+    return "\n".join(lines)
+
+
+@st.composite
 def document(draw: st.DrawFn) -> str:
     # Real CommonMark merges two adjacent lists separated by only a blank line
     # into ONE (loose) list rather than keeping them separate — never generate
@@ -205,12 +257,22 @@ def document(draw: st.DrawFn) -> str:
     blocks = []
     prev_was_list = False
     for _ in range(n):
-        choices = ["para", "embed"] if prev_was_list else ["para", "list", "embed"]
+        choices = (
+            ["para", "embed", "fence", "blockquote", "table"]
+            if prev_was_list
+            else ["para", "list", "embed", "fence", "blockquote", "table"]
+        )
         kind = draw(st.sampled_from(choices))
         if kind == "para":
             blocks.append(draw(paragraph_text()))
         elif kind == "list":
             blocks.append(draw(list_block()))
+        elif kind == "fence":
+            blocks.append(draw(fence_text()))
+        elif kind == "blockquote":
+            blocks.append(draw(blockquote_block()))
+        elif kind == "table":
+            blocks.append(draw(table_block()))
         else:
             blocks.append(draw(embed_line()))
         prev_was_list = kind == "list"

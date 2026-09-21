@@ -11,7 +11,11 @@ from __future__ import annotations
 from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 
-_MD = MarkdownIt("commonmark")
+# The "commonmark" preset disables GFM extensions wholesale, including the
+# built-in "table" block rule (markdown-it-py ships it, just off by default
+# under this preset) — re-enabled explicitly since grison's own grammar now
+# supports GFM pipe tables (see the package docstring's whitelist).
+_MD = MarkdownIt("commonmark").enable("table")
 
 
 def _parse_inline_tree(text: str) -> SyntaxTreeNode:
