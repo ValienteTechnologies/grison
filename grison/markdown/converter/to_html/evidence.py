@@ -15,6 +15,7 @@ from grison.markdown.converter.grammar import (
 )
 from grison.markdown.converter.mdtext import _esc
 from grison.markdown.converter.refs_codec import _encode_gw_ref
+from grison.markdown.converter.refs_render import _no_resolver_error
 from grison.markdown.refs import RefResolver
 
 
@@ -38,9 +39,8 @@ def _render_unresolved_marker(m: re.Match[str], *, position: str) -> str:
 
 def _push_embed_ref(src: str, refs: RefResolver | None) -> str:
     if refs is None:
-        raise ConverterError(
-            "image/evidence embed found but no RefResolver was given "
-            "(pass refs= to md_to_html to resolve it, or remove the image)"
+        raise _no_resolver_error(
+            "image/evidence embed found", func="md_to_html", remedy="remove the image"
         )
     remote = refs.to_remote(src)
     if remote is None or remote.id is None:
@@ -50,9 +50,10 @@ def _push_embed_ref(src: str, refs: RefResolver | None) -> str:
 
 def _push_cross_ref(href: str, refs: RefResolver | None) -> str:
     if refs is None:
-        raise ConverterError(
-            "cross-reference to an evidence path found but no RefResolver was given "
-            "(pass refs= to md_to_html to resolve it, or use a non-evidence link)"
+        raise _no_resolver_error(
+            "cross-reference to an evidence path found",
+            func="md_to_html",
+            remedy="use a non-evidence link",
         )
     remote = refs.to_remote(href)
     if remote is None or remote.name is None:

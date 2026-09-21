@@ -13,9 +13,13 @@ from grison.markdown.converter.grammar import (
     _EVIDENCE_ID_ATTR,
     _GW_REF_ENCODED_ATTR,
 )
-from grison.markdown.converter.mdtext import _fence_code, _md_escape_run
-from grison.markdown.converter.nodes import _Node, _report_loss
-from grison.markdown.converter.refs_codec import _decode_gw_ref, _ref_display_text
+from grison.markdown.converter.nodes import _Node
+from grison.markdown.converter.refs_codec import _decode_gw_ref
+from grison.markdown.converter.refs_render import (
+    _cross_ref_link_md,
+    _no_resolver_error,
+    _unresolved_marker_md,
+)
 from grison.markdown.refs import RefResolver, RemoteRef
 
 
@@ -39,15 +43,13 @@ def _render_resolved_embed(
     remote: RemoteRef, refs: RefResolver | None, on_loss: Callable[[str], None] | None
 ) -> str:
     if refs is None:
-        raise ConverterError(
-            "evidence reference found but no RefResolver was given "
-            "(pass refs= to html_to_md to resolve it, or drop the reference)"
+        raise _no_resolver_error(
+            "evidence reference found", func="html_to_md", remedy="drop the reference"
         )
     local = refs.to_local(remote)
     if local is None:
         marker = f"id={remote.id}" if remote.id is not None else f"name={remote.name}"
-        _report_loss(on_loss, f"unresolved reference: gw-evidence {marker}")
-        return _fence_code(f"gw:evidence-ref:{marker}")
+        return _unresolved_marker_md(marker, on_loss)
     title = f' "{local.description}"' if local.description else ""
     return f"![{local.caption}]({local.path}{title})"
 
@@ -82,15 +84,13 @@ def _render_cross_ref_span(
     else:
         name = n.attrs["data-gw-ref"]
     if refs is None:
-        raise ConverterError(
-            "cross-reference found but no RefResolver was given "
-            "(pass refs= to html_to_md to resolve it, or drop the reference)"
+        raise _no_resolver_error(
+            "cross-reference found", func="html_to_md", remedy="drop the reference"
         )
     local = refs.to_local(RemoteRef("gw-evidence", None, name, None))
     if local is None:
-        _report_loss(on_loss, f"unresolved reference: gw-evidence name={name}")
-        return _fence_code(f"gw:evidence-ref:name={name}")
-    return f"[{_md_escape_run(_ref_display_text(local))}]({local.path})"
+        return _unresolved_marker_md(f"name={name}", on_loss)
+    return _cross_ref_link_md(local)
 
 
 def _render_dot_form_inline(
@@ -100,15 +100,13 @@ def _render_dot_form_inline(
     if contents.startswith("ref "):
         name = contents[4:].strip()
         if refs is None:
-            raise ConverterError(
-                "legacy {{.ref}} reference found but no RefResolver was given "
-                "(pass refs= to html_to_md to resolve it, or drop the reference)"
+            raise _no_resolver_error(
+                "legacy {{.ref}} reference found", func="html_to_md", remedy="drop the reference"
             )
         local = refs.to_local(RemoteRef("gw-evidence", None, name, None))
         if local is None:
-            _report_loss(on_loss, f"unresolved reference: gw-evidence name={name}")
-            return _fence_code(f"gw:evidence-ref:name={name}")
-        return f"[{_md_escape_run(_ref_display_text(local))}]({local.path})"
+            return _unresolved_marker_md(f"name={name}", on_loss)
+        return _cross_ref_link_md(local)
     if contents == "caption" or contents.startswith("caption "):
         raise ConverterError(
             f"unsupported legacy construct {{{{.{contents}}}}}: grison has no "

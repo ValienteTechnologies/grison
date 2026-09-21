@@ -10,7 +10,7 @@ from collections.abc import Callable
 from grison.markdown.converter.errors import ConverterError
 from grison.markdown.converter.from_html.evidence import _render_evidence_div, _try_render_dot_embed
 from grison.markdown.converter.from_html.inline import _render_inline
-from grison.markdown.converter.grammar import _HEADING_TAGS
+from grison.markdown.converter.grammar import _HEADING_TAGS, _MAX_NESTED_LIST_DEPTH
 from grison.markdown.converter.jinja import _note_block_boundary, _RawScanState
 from grison.markdown.converter.mdtext import _finalize_line
 from grison.markdown.converter.nodes import _Node, _report_dropped_attrs, _report_loss, _TreeBuilder
@@ -292,13 +292,13 @@ def _flatten_nested_list(
     """Flatten a ``<ul>``/``<ol>`` nested inside an ``<li>`` — and anything nested
     inside IT — into a flat list of marker-prefixed sub-item lines, all at the one
     supported nesting level (the indent, matching the OUTER item's own marker
-    width, is applied by the caller). ``depth`` counts nesting levels from 1 (the
-    one level markdown itself can express); depth 2+ is a 3rd-or-deeper level
+    width, is applied by the caller). ``depth`` counts nesting levels from 1 (see
+    ``_MAX_NESTED_LIST_DEPTH``); a level deeper than that is a 3rd-or-deeper level
     already present in the source HTML being collapsed into that same one level —
     reported via ``on_loss`` since it's a real, if rare, loss of structure (the
     markdown side hard-rejects an attempt to author one instead — see
-    ``_render_list_item_node``)."""
-    if depth >= 2:
+    ``_render_list_item_node`` in ``to_html/blocks.py``)."""
+    if depth > _MAX_NESTED_LIST_DEPTH:
         _report_loss(
             on_loss,
             f"<{lst.tag}> nested {depth + 1} levels deep collapsed into the one supported "
