@@ -16,6 +16,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+from grison.adapters._gw_common import GWContext
+from grison.adapters.gw_evidence import GwEvidenceAdapter
+from grison.errors import GrisonError
 from grison.model.enums import FindingType, Severity
 from grison.remote.creds import Creds
 from grison.remote.ghostwriter import GhostwriterClient, GhostwriterError
@@ -254,6 +257,108 @@ def test_upload_evidence_friendly_name_unique_per_report() -> None:
             caption="",
             friendly_name="dup",
             file_base64=base64.b64encode(b"b").decode(),
+        )
+
+
+def test_upload_evidence_rejects_a_disallowed_extension() -> None:
+    """Real-workspace defect (2026-09-22): Ghostwriter's server-side
+    ``EVIDENCE_ALLOWED_EXTENSIONS`` (``ghostwriter/reporting/validators.py``) rejects
+    a ``.gif`` upload with this exact wording — grison must catch it offline first
+    (REF-009), but the fake still enforces it so a sync that somehow skipped
+    validation gets the same rejection a real server would give."""
+    gw = FakeGhostwriter()
+    gw.store.seed_report(id=1)
+    with pytest.raises(
+        GhostwriterFakeError, match=r'filename: File extension "\.gif" is not allowed'
+    ):
+        gw._upload_evidence(
+            report=1,
+            filename="capture.gif",
+            caption="",
+            friendly_name="capture",
+            file_base64=base64.b64encode(b"GIF89a").decode(),
+        )
+
+
+def test_upload_evidence_rejects_an_over_long_caption() -> None:
+    """Real-workspace defect (2026-09-22): Ghostwriter's ``Evidence.caption`` is a
+    255-char ``CharField`` — grison must catch this offline first (REF-010), but the
+    fake still enforces it with the real server's exact Django wording."""
+    gw = FakeGhostwriter()
+    gw.store.seed_report(id=1)
+    caption = "A" * 300
+    with pytest.raises(
+        GhostwriterFakeError,
+        match=r"caption: Ensure this value has at most 255 characters \(it has 300\)\.",
+    ):
+        gw._upload_evidence(
+            report=1,
+            filename="shot.png",
+            caption=caption,
+            friendly_name="shot",
+            file_base64=base64.b64encode(b"\x89PNG").decode(),
+        )
+
+
+def test_update_evidence_rejects_an_over_long_caption() -> None:
+    """Review finding: ``uploadEvidence`` enforced ``EVIDENCE_CAPTION_MAX_CHARS``
+    but ``update_evidence_by_pk`` didn't — a caption-only edit hits the exact same
+    server-side field validation as a fresh upload, so the fake must too, with the
+    same wording."""
+    gw = FakeGhostwriter()
+    report = gw.store.seed_report(id=1)
+    eid = gw._upload_evidence(
+        report=report["id"],
+        filename="shot.png",
+        caption="",
+        friendly_name="shot",
+        file_base64=base64.b64encode(b"\x89PNG").decode(),
+    )["id"]
+
+    with pytest.raises(
+        GhostwriterFakeError,
+        match=r"caption: Ensure this value has at most 255 characters \(it has 300\)\.",
+    ):
+        gw._resolve_mutation(
+            "update_evidence_by_pk",
+            {"pk_columns": {"id": eid}, "_set": {"caption": "A" * 300}},
+        )
+
+
+def test_gw_evidence_adapter_update_caption_refuses_an_over_long_caption_locally() -> None:
+    """Review finding: :meth:`GwEvidenceAdapter.update_caption`'s own
+    defense-in-depth check (``grison.adapters.gw_evidence``) must refuse an
+    over-long caption itself, before ever reaching the server — and, proving the
+    fake would reject it too if that local check were ever bypassed, a direct
+    ``update_evidence`` call through the same client also fails with the real
+    server's wording (the fix above)."""
+    gw = FakeGhostwriter()
+    report = gw.store.seed_report(id=1)
+    eid = gw._upload_evidence(
+        report=report["id"],
+        filename="shot.png",
+        caption="",
+        friendly_name="shot",
+        file_base64=base64.b64encode(b"\x89PNG").decode(),
+    )["id"]
+
+    client = _client(gw)
+    ctx = GWContext(client=client)
+    adapter = GwEvidenceAdapter(report_id=report["id"])
+    long_caption = "A" * 300
+
+    with pytest.raises(GrisonError, match="REF-010"):
+        adapter.update_caption(ctx, eid, caption=long_caption, description="")
+    # the local refusal happened before any network call — the row is untouched.
+    assert gw.store._by_id(gw.store.evidence, eid)["caption"] == ""
+
+    with pytest.raises(
+        GhostwriterFakeError,
+        match=r"caption: Ensure this value has at most 255 characters \(it has 300\)\.",
+    ):
+        gw._resolve_mutation(
+            "update_evidence_by_pk",
+            {"pk_columns": {"id": eid}, "_set": {"caption": long_caption}},
         )
 
 

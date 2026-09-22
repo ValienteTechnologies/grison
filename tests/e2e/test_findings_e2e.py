@@ -209,6 +209,93 @@ def test_non_ascii_uppercase_evidence_name_validates_and_syncs(run_grison, gw_se
     assert f'data-evidence-id="{row["id"]}"' in updated_finding["description"]
 
 
+def test_bad_extension_and_over_long_caption_are_refused_others_still_sync(
+    run_grison, gw_server, workspace
+):
+    """Real-workspace defect (2026-09-22): a first sync of a report with many
+    evidence files failed uploads server-side — Ghostwriter's own
+    ``EVIDENCE_ALLOWED_EXTENSIONS`` rejected a ``.gif``, and a caption over its
+    ``Evidence.caption`` 255-char limit was rejected too. Both must fail offline in
+    ``grison validate`` (REF-009/REF-010) before any push — the primary gate.
+
+    ``grison sync`` run anyway must never crash and must isolate each problem to
+    exactly the record it concerns (ENGINE.md §5 per-record isolation): the
+    bad-extension file (``capture.gif``) is permanently refused (``REF-009``, never
+    uploaded) with no way to self-heal (grison never guesses a real extension); the
+    over-long caption (``REF-010``) degrades to "no local caption opinion" — the
+    SAME defense-in-depth convergence ``REF-004`` caption conflicts already use
+    (:mod:`grison.engine.filesets.captions`) — so ``shot.png`` still uploads
+    (without the offending caption text), the referencing finding's on-disk embed
+    gets rewritten to match (empty caption), and its push still goes through in the
+    same run. A second, wholly unrelated finding's own edit pushes normally
+    throughout, proving nothing here aborts the rest of the sync."""
+    report = gw_server.store.seed_report(id=7, title="Report A", project={"scopes": REPORT_SCOPES})
+    report_dir = _rdir(workspace)
+    gw_server.store.seed_reported_finding(
+        id=50,
+        reportId=report["id"],
+        title="Finding One",
+        severityId=3,
+        findingTypeId=4,
+    )
+    gw_server.store.seed_reported_finding(
+        id=51,
+        reportId=report["id"],
+        title="Finding Two",
+        severityId=3,
+        findingTypeId=4,
+    )
+    run_grison("sync")
+
+    (report_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    (report_dir / "evidence" / "capture.gif").write_bytes(b"GIF89a")
+    (report_dir / "evidence" / "shot.png").write_bytes(b"\x89PNG-fake-bytes")
+
+    finding_one = report_dir / "finding-one.md"
+    long_caption = "A" * 300
+    text = finding_one.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Description\n\n",
+        f"## Description\n\n![{long_caption}](evidence/shot.png)\n\n",
+        1,
+    )
+    finding_one.write_text(text, encoding="utf-8")
+
+    finding_two = report_dir / "finding-two.md"
+    text = finding_two.read_text(encoding="utf-8")
+    text = text.replace("## Impact\n\n", "## Impact\n\nData is exposed to attackers.\n\n", 1)
+    finding_two.write_text(text, encoding="utf-8")
+
+    validate_result = run_grison("validate")
+    assert validate_result.exit_code == 1, validate_result.output
+    assert "REF-009" in validate_result.output
+    assert "capture.gif" in validate_result.output
+    assert "REF-010" in validate_result.output
+    assert "finding-one.md" in validate_result.output
+
+    result = run_grison("sync")
+
+    assert "REF-009" in result.output, result.output
+    assert "REF-010" in result.output, result.output
+    # the bad-extension evidence file is permanently refused — never uploaded.
+    assert not any(row["friendlyName"] == "capture" for row in gw_server.store.evidence)
+    # shot.png itself still uploads — just without the over-long caption text
+    # (degrades to "no local caption opinion", mirroring REF-004).
+    shot_row = next(row for row in gw_server.store.evidence if row["friendlyName"] == "shot")
+    assert shot_row["caption"] == ""
+    # the on-disk embed converges to match (rewritten, same sync run)...
+    assert long_caption not in finding_one.read_text(encoding="utf-8")
+    # ...so finding-one's own push proceeds too, carrying the (now-empty-caption)
+    # evidence reference.
+    updated_one = gw_server.store._by_id(gw_server.store.reported_findings, 50)
+    assert updated_one is not None
+    assert f'data-evidence-id="{shot_row["id"]}"' in updated_one["description"]
+    # finding-two's wholly unrelated edit pushed through in the same run too.
+    updated_two = gw_server.store._by_id(gw_server.store.reported_findings, 51)
+    assert updated_two is not None
+    assert "Data is exposed to attackers." in updated_two["impact"]
+
+
 def test_reported_finding_cross_reference_and_embed_converge_after_one_push(
     run_grison,
     gw_server,

@@ -23,6 +23,10 @@ from enum import Enum
 from grison import __version__
 from grison.formats.finding import SECTIONS
 from grison.model.enums import FindingType, Severity
+from grison.remote.ghostwriter.limits import (
+    EVIDENCE_ALLOWED_EXTENSIONS,
+    EVIDENCE_CAPTION_MAX_CHARS,
+)
 
 MARKER_PREFIX = "<!-- grison-generated CLAUDE.md"
 SPEC_FORMAT = 2  # the workspace format this file's content describes (brief D13)
@@ -148,6 +152,7 @@ def build_claude_md(*, grison_version: str | None = None) -> str:
         "existing Ghostwriter note; never add a frontmatter fence to a new note, "
         "and never edit a mirrored one's frontmatter."
     )
+    evidence_extensions = ", ".join(sorted(EVIDENCE_ALLOWED_EXTENSIONS))
     evidence_body = (
         "Attach an image with a markdown image line alone in its own block (or "
         "its own block inside one list item): `![caption](evidence/file.png "
@@ -157,7 +162,12 @@ def build_claude_md(*, grison_version: str | None = None) -> str:
         "sitting in that folder. A plain link, `[text](evidence/file.png)`, is a "
         'cross-reference ("see Figure N"), not an embed; neither form is allowed '
         "in a library or inbox finding. Removing an image line never deletes the "
-        "file itself."
+        "file itself. A file in a report's `evidence/` folder must have one of "
+        f"Ghostwriter's own allowed extensions ({evidence_extensions}, case-"
+        "insensitive) — convert a `.gif` to `.png`, or `.html`/`.csv` to `.txt`, "
+        "before adding it. An embed's caption is at most "
+        f"{EVIDENCE_CAPTION_MAX_CHARS} characters; put anything longer in the "
+        "surrounding section text instead."
     )
     banned_phrases = (
         "Do not write like an assistant: process-narration/tool-talk phrases such "

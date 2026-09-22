@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import httpx
@@ -47,6 +47,11 @@ from graphql import (
 )
 from graphql.error import GraphQLSyntaxError
 from graphql.language import OperationDefinitionNode
+
+from grison.remote.ghostwriter.limits import (
+    EVIDENCE_ALLOWED_EXTENSIONS,
+    EVIDENCE_CAPTION_MAX_CHARS,
+)
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "gw-schema-7.2.6.graphql"
 
@@ -188,6 +193,18 @@ class GhostwriterFakeError(RuntimeError):
     """Raised by a resolver for a constraint the fake enforces (unique friendlyName,
     missing report, unknown id, …) — surfaced to the client as an ordinary GraphQL
     execution error, same as a real Hasura/Postgres constraint violation would be."""
+
+
+def _check_caption_length(caption: str | None) -> None:
+    """``Evidence.caption``'s 255-char ``CharField`` limit, Django's exact wording —
+    shared by ``uploadEvidence`` AND ``update_evidence_by_pk`` (a caption-only edit
+    hits the same server-side validation as a fresh upload; enforcing it in only one
+    of the two would make the fake lie about the other)."""
+    if len(caption or "") > EVIDENCE_CAPTION_MAX_CHARS:
+        raise GhostwriterFakeError(
+            f"caption: Ensure this value has at most {EVIDENCE_CAPTION_MAX_CHARS} "
+            f"characters (it has {len(caption or '')})."
+        )
 
 
 class GWStore:
@@ -687,6 +704,8 @@ class FakeGhostwriter:
             row = store._by_id(store.evidence, args["pk_columns"]["id"])
             if row is None:
                 return None
+            if "caption" in args["_set"]:
+                _check_caption_length(args["_set"]["caption"])
             row.update(args["_set"])
             return row
         if name == "delete_evidence_by_pk":
@@ -767,6 +786,16 @@ class FakeGhostwriter:
                 f'insert or update on table "evidence" violates foreign key constraint '
                 f'"evidence_report_id_fkey" — report {report} does not exist'
             )
+        # Real Ghostwriter (ghostwriter/reporting/validators.py's
+        # EVIDENCE_ALLOWED_EXTENSIONS, models.py's Evidence.caption max_length=255)
+        # rejects both of these server-side, with this exact wording — confirmed
+        # against a real 7.2.x error response. grison must catch both offline
+        # (REF-009/REF-010, grison.validator.core.reports) before ever reaching here;
+        # this is what a sync that skipped validation would actually hit.
+        ext = PurePosixPath(filename).suffix.lstrip(".").lower()
+        if ext not in EVIDENCE_ALLOWED_EXTENSIONS:
+            raise GhostwriterFakeError(f'filename: File extension ".{ext}" is not allowed')
+        _check_caption_length(caption)
         if any(
             e["reportId"] == report and e["friendlyName"] == friendly_name for e in store.evidence
         ):

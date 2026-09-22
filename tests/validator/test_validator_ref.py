@@ -1,4 +1,4 @@
-"""Failing-case tests for REF-001..REF-007 (D1 evidence / D9 wiki-image references)."""
+"""Failing-case tests for REF-001..REF-010 (D1 evidence / D9 wiki-image references)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from grison.remote.ghostwriter.limits import EVIDENCE_CAPTION_MAX_CHARS
 from grison.validator import validate_workspace
 from tests._ws2_helpers import copy_fixture, edit, rule_ids
 
@@ -186,3 +187,120 @@ def test_ref008_non_ascii_and_uppercase_names_are_fine(tmp_path: Path) -> None:
     fails = validate_workspace(root)
     assert "WS-001" not in rule_ids(fails)
     assert "REF-008" not in rule_ids(fails)
+
+
+@pytest.mark.rule("REF-009")
+def test_ref009_bad_evidence_extension(tmp_path: Path) -> None:
+    """Real-workspace defect (2026-09-22): Ghostwriter's own
+    ``EVIDENCE_ALLOWED_EXTENSIONS`` (``txt``, ``md``, ``log``, ``jpg``, ``jpeg``,
+    ``png``) rejects anything else server-side — this must fail offline first."""
+    root = copy_fixture(tmp_path)
+    ev = root / "findings" / "reports" / "14-acme-corp" / "evidence"
+    (ev / "capture.gif").write_bytes(b"GIF89a")
+    (ev / "notes.html").write_bytes(b"<html></html>")
+
+    fails = validate_workspace(root)
+    ref009 = {f.path: f.message for f in fails if f.rule_id == "REF-009"}
+    assert "findings/reports/14-acme-corp/evidence/capture.gif" in ref009
+    assert ".png" in ref009["findings/reports/14-acme-corp/evidence/capture.gif"]
+    assert "findings/reports/14-acme-corp/evidence/notes.html" in ref009
+    assert ".txt" in ref009["findings/reports/14-acme-corp/evidence/notes.html"]
+
+
+@pytest.mark.rule_ok("REF-009")
+def test_ref009_case_insensitive_and_images_exempt(tmp_path: Path) -> None:
+    """The extension check is case-insensitive (``.PNG`` is fine), and never applies
+    to a wiki ``images/`` file at all — Ghostwriter's evidence-extension allow-list
+    has nothing to do with BookStack."""
+    root = copy_fixture(tmp_path)
+    ev = root / "findings" / "reports" / "14-acme-corp" / "evidence"
+    (ev / "Shout.PNG").write_bytes(b"\x89PNG")
+    img = root / "methodology" / "library" / "network-testing" / "images"
+    (img / "diagram.gif").write_bytes(b"GIF89a")
+
+    fails = validate_workspace(root)
+    assert "REF-009" not in rule_ids(fails)
+
+
+@pytest.mark.rule("REF-010")
+def test_ref010_caption_too_long(tmp_path: Path) -> None:
+    """Real-workspace defect (2026-09-22): Ghostwriter's ``Evidence.caption`` is a
+    255-char ``CharField`` — an over-long embed caption must fail offline first."""
+    root = copy_fixture(tmp_path)
+    narrative = (
+        root / "findings" / "reports" / "14-acme-corp" / "narrative" / "executive_summary.md"
+    )
+    long_caption = "A" * 300
+    edit(
+        narrative,
+        "One critical and one high finding",
+        f"![{long_caption}](evidence/raw-request.txt)\n\nOne critical and one high finding",
+    )
+    fails = validate_workspace(root)
+    ref010 = [f for f in fails if f.rule_id == "REF-010"]
+    assert len(ref010) == 1
+    assert "300" in ref010[0].message
+    assert "255" in ref010[0].message
+
+
+def test_ref010_caption_too_long_in_a_note(tmp_path: Path) -> None:
+    """Review finding: a note's embeds were checked for position/resolution
+    (``_check_narrative_body``) but never joined the report-wide caption scan, so
+    a note's own over-long caption passed ``grison validate`` — only findings and
+    narrative sections were caught. ``notes/follow-up.md`` is a real, unindexed
+    (frontmatter-less) note in the fixture; ``raw-request.txt`` is a real,
+    otherwise-unreferenced evidence file, so this exercises nothing but REF-010."""
+    root = copy_fixture(tmp_path)
+    note = root / "findings" / "reports" / "14-acme-corp" / "notes" / "follow-up.md"
+    long_caption = "A" * 300
+    edit(
+        note,
+        "Ask the client whether the staging environment is in scope too.",
+        f"![{long_caption}](evidence/raw-request.txt)\n\n"
+        "Ask the client whether the staging environment is in scope too.",
+    )
+    fails = validate_workspace(root)
+    ref010 = [f for f in fails if f.rule_id == "REF-010"]
+    assert len(ref010) == 1
+    assert ref010[0].path == "findings/reports/14-acme-corp/notes/follow-up.md"
+    assert "300" in ref010[0].message
+    assert "255" in ref010[0].message
+
+
+@pytest.mark.rule_ok("REF-010")
+def test_ref010_caption_at_the_limit_is_fine(tmp_path: Path) -> None:
+    """A caption of exactly ``EVIDENCE_CAPTION_MAX_CHARS`` characters is still
+    within Ghostwriter's ``Evidence.caption`` field limit — the boundary itself
+    must not fail."""
+    root = copy_fixture(tmp_path)
+    narrative = (
+        root / "findings" / "reports" / "14-acme-corp" / "narrative" / "executive_summary.md"
+    )
+    at_limit_caption = "A" * EVIDENCE_CAPTION_MAX_CHARS
+    edit(
+        narrative,
+        "One critical and one high finding",
+        f"![{at_limit_caption}](evidence/raw-request.txt)\n\nOne critical and one high finding",
+    )
+    fails = validate_workspace(root)
+    assert "REF-010" not in rule_ids(fails)
+
+
+@pytest.mark.rule("REF-010")
+def test_ref010_caption_one_over_the_limit_fails(tmp_path: Path) -> None:
+    """One character past ``EVIDENCE_CAPTION_MAX_CHARS`` must fail, exactly once."""
+    root = copy_fixture(tmp_path)
+    narrative = (
+        root / "findings" / "reports" / "14-acme-corp" / "narrative" / "executive_summary.md"
+    )
+    over_limit_caption = "A" * (EVIDENCE_CAPTION_MAX_CHARS + 1)
+    edit(
+        narrative,
+        "One critical and one high finding",
+        f"![{over_limit_caption}](evidence/raw-request.txt)\n\nOne critical and one high finding",
+    )
+    fails = validate_workspace(root)
+    ref010 = [f for f in fails if f.rule_id == "REF-010"]
+    assert len(ref010) == 1
+    assert str(EVIDENCE_CAPTION_MAX_CHARS + 1) in ref010[0].message
+    assert str(EVIDENCE_CAPTION_MAX_CHARS) in ref010[0].message

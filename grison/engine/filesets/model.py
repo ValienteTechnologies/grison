@@ -43,6 +43,12 @@ class FileSetAdapter(Protocol):
 
     kind: str
     supports_caption: bool
+    #: The remote's own max caption length, when it has one (``None`` — the
+    #: default — means no limit this engine package knows or cares about; stays
+    #: record-type-agnostic by construction, never hardcoding any one remote's
+    #: number). Only meaningful when ``supports_caption`` is true; an adapter
+    #: with a real limit sets this from its own remote client's constants.
+    caption_max_chars: int | None
 
     def list_remote(self, ctx: Any) -> dict[int, RemoteRecord]: ...
 

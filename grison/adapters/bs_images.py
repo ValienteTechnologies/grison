@@ -90,6 +90,7 @@ class BsImagesAdapter:
     anchor_for: dict[str, int] = field(default_factory=dict)
     kind: str = "bs.image"
     supports_caption: bool = False
+    caption_max_chars: int | None = None  # BookStack has no such field limit
 
     def list_remote(self, ctx: BSContext) -> dict[int, RemoteRecord]:
         rows = ctx.client.fetch_gallery_images()

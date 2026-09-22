@@ -1,4 +1,5 @@
-"""WS-001 (path segment charset) and REF-008 (a fileset entry's own bare name)."""
+"""WS-001 (path segment charset), REF-008 (a fileset entry's own bare name), and
+REF-009 (a report evidence/ file's own extension)."""
 
 from __future__ import annotations
 
@@ -6,6 +7,12 @@ from pathlib import PurePosixPath
 
 from grison.engine.sidecar import is_sidecar_name
 from grison.formats.common import NAME_RE
+from grison.remote.ghostwriter.limits import (
+    EVIDENCE_ALLOWED_EXTENSIONS,
+    EVIDENCE_EXTENSION_SUGGESTIONS,
+    evidence_extension,
+    is_allowed_evidence_extension,
+)
 from grison.validator import registry
 from grison.validator.registry import Failure, fail
 
@@ -84,3 +91,32 @@ def _check_fileset_name(folder: PurePosixPath, name: str) -> list[Failure]:
             )
         ]
     return []
+
+
+def _check_evidence_extension(folder: PurePosixPath, name: str) -> list[Failure]:
+    """``REF-009`` — a file directly inside a report's ``evidence/`` folder must have
+    one of Ghostwriter's own allowed extensions (case-insensitive; see
+    :mod:`grison.remote.ghostwriter.limits`) — Ghostwriter's server rejects the
+    upload of anything else outright. Never applies to a wiki ``images/`` folder
+    (BookStack has no such extension restriction) — only reports.py's evidence scan
+    calls this. A collision sidecar (``<name>.remote.<ext>``) is never a real file
+    grison uploads (``REF-008`` already rejects its shape) so it is exempt here too,
+    the same way it is excluded from REF-003's stem comparison."""
+    if is_sidecar_name(name):
+        return []
+    if is_allowed_evidence_extension(name):
+        return []
+    ext = evidence_extension(name)
+    full = f"{folder.as_posix()}/{name}"
+    allowed = ", ".join(sorted(EVIDENCE_ALLOWED_EXTENSIONS))
+    ext_disp = f".{ext}" if ext else "(none)"
+    suggestion = EVIDENCE_EXTENSION_SUGGESTIONS.get(ext)
+    hint = f" — convert it to .{suggestion}" if suggestion else ""
+    return [
+        fail(
+            registry.REF_BAD_EVIDENCE_EXTENSION,
+            full,
+            f"{name!r} has extension {ext_disp!r}, not one of Ghostwriter's allowed "
+            f"evidence extensions ({allowed}){hint}",
+        )
+    ]

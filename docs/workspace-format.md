@@ -676,12 +676,35 @@ in that paragraph/list-item block). A plain link to an evidence path —
 - `REF-005` — a **library or inbox** finding contains an image line at all (neither
   has a report to hold evidence for).
 - `REF-006` — a cross-reference link's `evidence/…` target doesn't resolve.
+- `REF-009` — a file directly inside a report's `evidence/` directory has an
+  extension Ghostwriter's own server does not accept: only `txt`, `md`, `log`,
+  `jpg`, `jpeg`, `png` (case-insensitive; see
+  `grison.remote.ghostwriter.limits.EVIDENCE_ALLOWED_EXTENSIONS`). Convert the file
+  instead — `.gif` to `.png`, `.html`/`.csv` to `.txt`. Never applies to a wiki
+  `images/` file (§5.2) — BookStack has no such restriction.
+- `REF-010` — an embed's caption (the `![caption](...)` alt text) is longer than 255
+  characters, Ghostwriter's `Evidence.caption` field limit
+  (`grison.remote.ghostwriter.limits.EVIDENCE_CAPTION_MAX_CHARS`) — shorten it and
+  move the extra detail into the surrounding section text. `Evidence.description`
+  has no such limit, so a cross-reference's optional title text is never checked
+  this way.
 
 ```markdown
 ![Login form before the fix](evidence/login-before.png "captured 2026-08-03")
 
 See [Figure 1](evidence/login-before.png) for the vulnerable state.
 ```
+
+A file `grison validate` fails under `REF-009` is never created/re-uploaded by
+`grison sync` — the same "a document/file with failures is never pushed or
+created" gate every other record kind gets (§9, Appendix; ENGINE.md 'The apply
+loop', item 1); a bad extension has no auto-fix and is refused outright. A
+document `grison validate` fails under `REF-010` is not held back the same way:
+an over-long caption that reaches `grison sync` anyway self-heals the same way
+an `REF-004` caption conflict already does — the caption is dropped, the
+referencing document's on-disk caption is rewritten to match, and the document
+still pushes in the same run, with the emptied caption. Every other
+file/document still syncs normally.
 
 ### 5.2 Wiki images (D9)
 
@@ -1230,6 +1253,8 @@ IS a validator rule — see §1.10 (`WS-011`/`WS-012`).
 | REF-006 | a cross-reference link's target is not a resolvable evidence path |
 | REF-007 | a wiki image uses the wrong path spelling for its location |
 | REF-008 | an evidence/ or images/ file's own name is invalid (WS-001 does not apply there) |
+| REF-009 | a file in a report's evidence/ directory has an extension Ghostwriter's server does not accept |
+| REF-010 | an embed's caption is longer than Ghostwriter's evidence caption field allows |
 | TXT-001 | a built-in banned phrase appears in a document body |
 | TXT-002 | a per-workspace confidential term appears outside its allowed path |
 | IDX-001 | .grison/index.json is missing required structure or malformed |

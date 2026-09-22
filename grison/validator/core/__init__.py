@@ -29,6 +29,7 @@ from grison.validator.core.layout import (
     _check_shelves,
     _load_terms,
 )
+from grison.validator.core.names import _check_evidence_extension as _check_evidence_extension
 from grison.validator.core.names import _check_fileset_name as _check_fileset_name
 from grison.validator.core.names import _check_names
 from grison.validator.core.reports import _validate_report_dir

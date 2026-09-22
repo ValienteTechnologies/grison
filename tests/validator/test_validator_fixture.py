@@ -78,6 +78,8 @@ from tests._ws2_helpers import copy_fixture
     "REF-006",
     "REF-007",
     "REF-008",
+    "REF-009",
+    "REF-010",
     "TXT-001",
     "TXT-002",
     "IDX-001",
