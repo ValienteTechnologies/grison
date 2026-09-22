@@ -49,7 +49,7 @@ Top-level modules (`index.py`, `manifest.py`, `hashing.py`, `fsio.py`, `gitdrive
 
 - **Unit tests** (`tests/<area>/test_*.py`) — one module's own behavior, grouped into
   subpackages that mirror `grison/`'s own layout: `tests/cli/`, `tests/engine/`,
-  `tests/formats/`, `tests/markdown/`, `tests/migrate/`, `tests/model/`,
+  `tests/formats/`, `tests/markdown/`, `tests/model/`,
   `tests/remote/`, `tests/scaffold/`, `tests/scanners/`, `tests/sinks/`,
   `tests/validator/`. Cross-cutting, top-level `grison/` modules (`fsio`, `hashing`,
   `index`, `manifest`, `gitdrive`, `settings`, `slug`, plus the `smoke` and
