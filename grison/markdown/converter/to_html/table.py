@@ -59,7 +59,7 @@ def _table_rows(node: SyntaxTreeNode) -> list[list[SyntaxTreeNode]]:
 
 
 def _refuse_split_code_span(inline: SyntaxTreeNode | None, line: int) -> None:
-    """Lab finding (converter-grammar-lab, 2026-09-21): an unescaped ``|`` inside
+    r"""Lab finding (converter-grammar-lab, 2026-09-21): an unescaped ``|`` inside
     a code span in a table cell is, per GFM, a cell separator — markdown-it
     splits the row there and the author's ``\`BusyBox|telnetd\``` silently
     becomes two cells with a dangling backtick each, which then round-trips as
