@@ -117,7 +117,10 @@ def _validate_report_dir(
         for md_path in sorted(notes_dir.glob("*.md")):
             rel = _rel(root, md_path)
             out.extend(_check_names(PurePosixPath(rel)))
-            out.extend(_validate_note_file(root, rel, index, cterms, evidence_dir))
+            note_failures, note_body = _validate_note_file(root, rel, index, cterms, evidence_dir)
+            out.extend(note_failures)
+            for ref in embeds(note_body, prefix="evidence"):
+                embed_hits.append(_EmbedHit(ref.path, ref.path, ref.caption, rel, ref.line))
 
     if evidence_dir.is_dir():
         # A live collision sidecar (`<name>.remote.<ext>`) is never a document/file
@@ -264,17 +267,23 @@ def _validate_note_file(
     index: Index | None,
     cterms: list[ConfidentialTerm],
     evidence_dir: Path,
-) -> list[Failure]:
+) -> tuple[list[Failure], str]:
+    """Returns ``(failures, body)`` — ``body`` is the note's parsed markdown body
+    (``""`` when the file couldn't be read/parsed at all), so the caller can fold
+    this note's own embeds into the report-wide ``embed_hits`` list (REF-004/
+    REF-010 — a note's embeds used to be checked for position/resolution here via
+    :func:`_check_narrative_body`, but never joined the cross-document caption
+    scan, so a note's own over-long or conflicting caption passed validation)."""
     out: list[Failure] = []
     text, read_fail = _read_text(root, rel, default_rule=registry.REP_BAD_NOTE)
     if text is None:
-        return [read_fail] if read_fail else []
+        return ([read_fail] if read_fail else []), ""
     out.extend(_check_txt(rel, text, cterms))
     try:
         doc = note_fmt.parse(text, path=Path(rel))
     except FormatError as e:
         out.append(fail(registry.REP_BAD_NOTE, rel, e.detail or e.kind, line=e.line))
-        return out
+        return out, ""
 
     is_indexed = index is not None and _entry_kind(index, rel) == IndexKind.GW_PROJECT_NOTE
     if index is not None:
@@ -296,4 +305,4 @@ def _validate_note_file(
             )
 
     out.extend(_check_narrative_body(rel, doc.body, evidence_dir))
-    return out
+    return out, doc.body

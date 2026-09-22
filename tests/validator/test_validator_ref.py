@@ -240,3 +240,27 @@ def test_ref010_caption_too_long(tmp_path: Path) -> None:
     assert len(ref010) == 1
     assert "300" in ref010[0].message
     assert "255" in ref010[0].message
+
+
+def test_ref010_caption_too_long_in_a_note(tmp_path: Path) -> None:
+    """Review finding: a note's embeds were checked for position/resolution
+    (``_check_narrative_body``) but never joined the report-wide caption scan, so
+    a note's own over-long caption passed ``grison validate`` — only findings and
+    narrative sections were caught. ``notes/follow-up.md`` is a real, unindexed
+    (frontmatter-less) note in the fixture; ``raw-request.txt`` is a real,
+    otherwise-unreferenced evidence file, so this exercises nothing but REF-010."""
+    root = copy_fixture(tmp_path)
+    note = root / "findings" / "reports" / "14-acme-corp" / "notes" / "follow-up.md"
+    long_caption = "A" * 300
+    edit(
+        note,
+        "Ask the client whether the staging environment is in scope too.",
+        f"![{long_caption}](evidence/raw-request.txt)\n\n"
+        "Ask the client whether the staging environment is in scope too.",
+    )
+    fails = validate_workspace(root)
+    ref010 = [f for f in fails if f.rule_id == "REF-010"]
+    assert len(ref010) == 1
+    assert ref010[0].path == "findings/reports/14-acme-corp/notes/follow-up.md"
+    assert "300" in ref010[0].message
+    assert "255" in ref010[0].message

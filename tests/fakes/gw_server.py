@@ -195,6 +195,18 @@ class GhostwriterFakeError(RuntimeError):
     execution error, same as a real Hasura/Postgres constraint violation would be."""
 
 
+def _check_caption_length(caption: str | None) -> None:
+    """``Evidence.caption``'s 255-char ``CharField`` limit, Django's exact wording —
+    shared by ``uploadEvidence`` AND ``update_evidence_by_pk`` (a caption-only edit
+    hits the same server-side validation as a fresh upload; enforcing it in only one
+    of the two would make the fake lie about the other)."""
+    if len(caption or "") > EVIDENCE_CAPTION_MAX_CHARS:
+        raise GhostwriterFakeError(
+            f"caption: Ensure this value has at most {EVIDENCE_CAPTION_MAX_CHARS} "
+            f"characters (it has {len(caption or '')})."
+        )
+
+
 class GWStore:
     """The in-memory Ghostwriter database backing :class:`FakeGhostwriter`.
 
@@ -692,6 +704,8 @@ class FakeGhostwriter:
             row = store._by_id(store.evidence, args["pk_columns"]["id"])
             if row is None:
                 return None
+            if "caption" in args["_set"]:
+                _check_caption_length(args["_set"]["caption"])
             row.update(args["_set"])
             return row
         if name == "delete_evidence_by_pk":
@@ -781,11 +795,7 @@ class FakeGhostwriter:
         ext = PurePosixPath(filename).suffix.lstrip(".").lower()
         if ext not in EVIDENCE_ALLOWED_EXTENSIONS:
             raise GhostwriterFakeError(f'filename: File extension ".{ext}" is not allowed')
-        if len(caption or "") > EVIDENCE_CAPTION_MAX_CHARS:
-            raise GhostwriterFakeError(
-                f"caption: Ensure this value has at most {EVIDENCE_CAPTION_MAX_CHARS} "
-                f"characters (it has {len(caption)})."
-            )
+        _check_caption_length(caption)
         if any(
             e["reportId"] == report and e["friendlyName"] == friendly_name for e in store.evidence
         ):
