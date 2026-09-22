@@ -696,10 +696,15 @@ See [Figure 1](evidence/login-before.png) for the vulnerable state.
 ```
 
 A file `grison validate` fails under `REF-009` is never created/re-uploaded by
-`grison sync`, and a document `grison validate` fails under `REF-010` is never
-pushed — the same "a document/file with failures is never pushed or created" gate
-every other record kind gets (§9, Appendix; ENGINE.md 'The apply loop', item 1) —
-every other file/document still syncs normally.
+`grison sync` — the same "a document/file with failures is never pushed or
+created" gate every other record kind gets (§9, Appendix; ENGINE.md 'The apply
+loop', item 1); a bad extension has no auto-fix and is refused outright. A
+document `grison validate` fails under `REF-010` is not held back the same way:
+an over-long caption that reaches `grison sync` anyway self-heals the same way
+an `REF-004` caption conflict already does — the caption is dropped, the
+referencing document's on-disk caption is rewritten to match, and the document
+still pushes in the same run, with the emptied caption. Every other
+file/document still syncs normally.
 
 ### 5.2 Wiki images (D9)
 

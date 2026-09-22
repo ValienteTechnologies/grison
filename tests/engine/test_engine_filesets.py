@@ -565,6 +565,66 @@ def test_caption_conflict_degrades_only_that_file_and_does_not_abort_the_sync(
     assert other_row["filename"] == "other.png"
 
 
+# --- caption too long never aborts the sync (REF-010 defense in depth) ------
+
+
+def test_caption_too_long_degrades_only_that_file_and_does_not_abort_the_sync(
+    tmp_path: Path,
+) -> None:
+    """Same defense-in-depth reasoning as the caption-conflict test above, for
+    REF-010: when the adapter enforces its own ``caption_max_chars`` (a real
+    Ghostwriter evidence adapter passes its 255-char ``Evidence.caption`` limit
+    here; an adapter with no such limit passes ``None`` and none of this
+    applies), a single over-long caption that reaches ``collect_captions``
+    anyway (module docstring: defense in depth, not primary enforcement — the
+    validator should already have rejected it) is left OUT of its returned
+    ``captions`` and degrades to "no local caption opinion" instead of ever
+    being pushed — the file gets its own FAILED record naming REF-010, and
+    every other file in the same folder still syncs normally."""
+    store = FakeFileStore()
+    adapter = FakeFileSetAdapter(store, caption_max_chars=10)
+    index, state, snapshot = _env(tmp_path)
+    (tmp_path / FOLDER).mkdir(parents=True)
+    (tmp_path / FOLDER / "shot.png").write_bytes(b"v1")
+    (tmp_path / FOLDER / "other.png").write_bytes(b"v2")
+
+    doc_a = PurePosixPath("findings/reports/r1/a.md")
+    long_caption = "A" * 11  # one character over adapter.caption_max_chars
+    doc_bodies = {
+        doc_a: f"# A\n\n![{long_caption}](evidence/shot.png)\n\n![ok](evidence/other.png)\n",
+    }
+
+    result = sync_fileset(
+        tmp_path,
+        store,
+        adapter,
+        FOLDER,
+        index=index,
+        state=state,
+        snapshot=snapshot,
+        doc_bodies=doc_bodies,
+    )
+
+    plans_by_path = [(p.path, p.outcome) for p in result.plans]
+    assert (FOLDER / "shot.png", Outcome.FAILED) in plans_by_path  # the too-long caption, isolated
+    assert (FOLDER / "shot.png", Outcome.CREATE) in plans_by_path  # ...never blocks its own sync
+    assert (FOLDER / "other.png", Outcome.CREATE) in plans_by_path  # ...or any other file's
+    assert store.upload_calls == 2  # both files still uploaded — the sync was never aborted
+    assert result.summary.counts.get("failed") == 1
+
+    failed_events = [e for e in result.events if e.verb == "failed"]
+    assert len(failed_events) == 1
+    assert "REF-010" in failed_events[0].detail
+    assert str(len(long_caption)) in failed_events[0].detail
+    assert "10" in failed_events[0].detail
+
+    # the over-long caption was never pushed -- degrades to "no opinion"
+    shot_row = next(r for r in store.rows.values() if r["filename"] == "shot.png")
+    assert shot_row["caption"] == ""
+    other_row = next(r for r in store.rows.values() if r["filename"] == "other.png")
+    assert other_row["caption"] == "ok"  # unaffected file's own short caption still pushes
+
+
 # --- collision sidecars for file-set bytes (BRIEF fix-b task 3) -------------
 
 

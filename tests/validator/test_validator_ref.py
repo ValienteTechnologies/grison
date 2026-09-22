@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from grison.remote.ghostwriter.limits import EVIDENCE_CAPTION_MAX_CHARS
 from grison.validator import validate_workspace
 from tests._ws2_helpers import copy_fixture, edit, rule_ids
 
@@ -264,3 +265,42 @@ def test_ref010_caption_too_long_in_a_note(tmp_path: Path) -> None:
     assert ref010[0].path == "findings/reports/14-acme-corp/notes/follow-up.md"
     assert "300" in ref010[0].message
     assert "255" in ref010[0].message
+
+
+@pytest.mark.rule_ok("REF-010")
+def test_ref010_caption_at_the_limit_is_fine(tmp_path: Path) -> None:
+    """A caption of exactly ``EVIDENCE_CAPTION_MAX_CHARS`` characters is still
+    within Ghostwriter's ``Evidence.caption`` field limit — the boundary itself
+    must not fail."""
+    root = copy_fixture(tmp_path)
+    narrative = (
+        root / "findings" / "reports" / "14-acme-corp" / "narrative" / "executive_summary.md"
+    )
+    at_limit_caption = "A" * EVIDENCE_CAPTION_MAX_CHARS
+    edit(
+        narrative,
+        "One critical and one high finding",
+        f"![{at_limit_caption}](evidence/raw-request.txt)\n\nOne critical and one high finding",
+    )
+    fails = validate_workspace(root)
+    assert "REF-010" not in rule_ids(fails)
+
+
+@pytest.mark.rule("REF-010")
+def test_ref010_caption_one_over_the_limit_fails(tmp_path: Path) -> None:
+    """One character past ``EVIDENCE_CAPTION_MAX_CHARS`` must fail, exactly once."""
+    root = copy_fixture(tmp_path)
+    narrative = (
+        root / "findings" / "reports" / "14-acme-corp" / "narrative" / "executive_summary.md"
+    )
+    over_limit_caption = "A" * (EVIDENCE_CAPTION_MAX_CHARS + 1)
+    edit(
+        narrative,
+        "One critical and one high finding",
+        f"![{over_limit_caption}](evidence/raw-request.txt)\n\nOne critical and one high finding",
+    )
+    fails = validate_workspace(root)
+    ref010 = [f for f in fails if f.rule_id == "REF-010"]
+    assert len(ref010) == 1
+    assert str(EVIDENCE_CAPTION_MAX_CHARS + 1) in ref010[0].message
+    assert str(EVIDENCE_CAPTION_MAX_CHARS) in ref010[0].message
