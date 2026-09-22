@@ -352,7 +352,7 @@ def _visible_text(html: str) -> str:
 
 
 def _tags_used(html: str) -> set[str]:
-    # "p" wrapping is a documented normalization (see grison/migrate/bodies.py);
+    # "p" wrapping is a documented normalization (a v1-era normalization, kept);
     # "span" is BY DESIGN always unwrapped/dropped (cosmetic-only — see the
     # converter's module docstring), never a round-trip failure.
     p = _TextExtractor()
