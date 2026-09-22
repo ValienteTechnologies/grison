@@ -380,6 +380,19 @@ REF_BAD_FILESET_NAME = _r(
     "rename it: no path separator, no leading dot, not a <name>.remote.<ext> "
     "collision-sidecar shape, valid UTF-8, at most 255 bytes",
 )
+REF_BAD_EVIDENCE_EXTENSION = _r(
+    "REF-009",
+    "a file in a report's evidence/ directory has an extension Ghostwriter's "
+    "server does not accept",
+    "rename/convert it to one of Ghostwriter's allowed evidence extensions (txt, "
+    "md, log, jpg, jpeg, png) — e.g. .gif -> .png, .html/.csv -> .txt",
+)
+REF_CAPTION_TOO_LONG = _r(
+    "REF-010",
+    "an embed's caption is longer than Ghostwriter's evidence caption field allows",
+    "shorten the caption to at most 255 characters (move extra detail into the "
+    "surrounding section text instead)",
+)
 
 # --- TXT: banned text ----------------------------------------------------------------
 

@@ -121,6 +121,7 @@ from __future__ import annotations
 
 from .captions import (
     CaptionConflict,
+    CaptionTooLong,
     ReferenceCaption,
     collect_captions,
     rewrite_captions,
@@ -142,6 +143,7 @@ from .sync import sync_fileset
 
 __all__ = [
     "CaptionConflict",
+    "CaptionTooLong",
     "FileSetAdapter",
     "FileSetResult",
     "ReferenceCaption",

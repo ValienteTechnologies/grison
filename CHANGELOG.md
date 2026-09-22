@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   A malformed table, an unmatched backtick in a cell, a nested blockquote, or a
   table/blockquote inside a list item are refused with a plain message. Proven
   against the lab Ghostwriter (`proofs/converter-grammar-lab.md`).
+- `grison validate` now catches two Ghostwriter server-side evidence rejections
+  offline, before any push: `REF-009` (a file in a report's `evidence/` directory
+  has an extension outside Ghostwriter's own allow-list — `txt`, `md`, `log`,
+  `jpg`, `jpeg`, `png` — case-insensitive; the message suggests `.gif` -> `.png`,
+  `.html`/`.csv` -> `.txt`) and `REF-010` (an embed's caption is over
+  Ghostwriter's 255-character `Evidence.caption` limit). Both limits live in one
+  place, `grison.remote.ghostwriter.limits`, imported by the validator, the
+  evidence adapter (a defense-in-depth check at push time) and the fake
+  Ghostwriter test server (same rejection wording as the real one). An over-long
+  caption that reaches `grison sync` anyway degrades to "no local caption
+  opinion" and self-heals the same way an `REF-004` caption conflict already
+  does — the evidence file still uploads, the referencing document's on-disk
+  caption is rewritten to match, and its push still goes through in the same
+  run; a bad extension has no such repair and is refused outright.
 
 ### Changed
 

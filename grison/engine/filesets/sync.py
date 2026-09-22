@@ -58,8 +58,12 @@ def sync_fileset(  # noqa: PLR0913
 
     local_files = _local_files(root, folder)
     remote_rows = adapter.list_remote(ctx)
-    captions, caption_conflicts = (
-        collect_captions(doc_bodies or {}, folder=folder) if adapter.supports_caption else ({}, [])
+    captions, caption_conflicts, caption_too_long = (
+        collect_captions(
+            doc_bodies or {}, folder=folder, caption_max_chars=adapter.caption_max_chars
+        )
+        if adapter.supports_caption
+        else ({}, [], [])
     )
 
     indexed = indexed_for_kind(index, kind, under=folder)
@@ -92,6 +96,19 @@ def sync_fileset(  # noqa: PLR0913
                 outcome=Outcome.FAILED,
                 path=folder / conflict.name,
                 reason=conflict.detail,
+            )
+        )
+    # REF-010, same reasoning: an over-long single (non-conflicting) caption also
+    # slipped past the validator degrades to "no local caption opinion" — the file
+    # itself still creates/pushes normally, just without pushing the offending
+    # caption text.
+    for issue in caption_too_long:
+        plans.append(
+            Plan(
+                kind=kind,
+                outcome=Outcome.FAILED,
+                path=folder / issue.name,
+                reason=issue.detail,
             )
         )
 

@@ -63,6 +63,7 @@ class FakeFileSetAdapter:
     store: FakeFileStore
     kind: str = "gw.evidence"
     supports_caption: bool = True
+    caption_max_chars: int | None = None
 
     def list_remote(self, ctx: Any) -> dict[int, RemoteRecord]:
         del ctx

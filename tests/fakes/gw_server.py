@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import httpx
@@ -47,6 +47,11 @@ from graphql import (
 )
 from graphql.error import GraphQLSyntaxError
 from graphql.language import OperationDefinitionNode
+
+from grison.remote.ghostwriter.limits import (
+    EVIDENCE_ALLOWED_EXTENSIONS,
+    EVIDENCE_CAPTION_MAX_CHARS,
+)
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "gw-schema-7.2.6.graphql"
 
@@ -766,6 +771,20 @@ class FakeGhostwriter:
             raise GhostwriterFakeError(
                 f'insert or update on table "evidence" violates foreign key constraint '
                 f'"evidence_report_id_fkey" — report {report} does not exist'
+            )
+        # Real Ghostwriter (ghostwriter/reporting/validators.py's
+        # EVIDENCE_ALLOWED_EXTENSIONS, models.py's Evidence.caption max_length=255)
+        # rejects both of these server-side, with this exact wording — confirmed
+        # against a real 7.2.x error response. grison must catch both offline
+        # (REF-009/REF-010, grison.validator.core.reports) before ever reaching here;
+        # this is what a sync that skipped validation would actually hit.
+        ext = PurePosixPath(filename).suffix.lstrip(".").lower()
+        if ext not in EVIDENCE_ALLOWED_EXTENSIONS:
+            raise GhostwriterFakeError(f'filename: File extension ".{ext}" is not allowed')
+        if len(caption or "") > EVIDENCE_CAPTION_MAX_CHARS:
+            raise GhostwriterFakeError(
+                f"caption: Ensure this value has at most {EVIDENCE_CAPTION_MAX_CHARS} "
+                f"characters (it has {len(caption)})."
             )
         if any(
             e["reportId"] == report and e["friendlyName"] == friendly_name for e in store.evidence

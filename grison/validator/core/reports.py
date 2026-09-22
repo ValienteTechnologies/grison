@@ -14,6 +14,7 @@ from grison.formats import note as note_fmt
 from grison.formats.common import FormatError
 from grison.index import Index, IndexKind
 from grison.markdown.converter import ConverterError, md_to_html
+from grison.remote.ghostwriter.limits import EVIDENCE_CAPTION_MAX_CHARS
 from grison.validator import registry
 from grison.validator.core.common import (
     _check_mirror,
@@ -24,7 +25,7 @@ from grison.validator.core.common import (
 )
 from grison.validator.core.findings import _validate_finding_file
 from grison.validator.core.index_rules import _check_index_kind, _entry_kind
-from grison.validator.core.names import _check_fileset_name, _check_names
+from grison.validator.core.names import _check_evidence_extension, _check_fileset_name, _check_names
 from grison.validator.refs import OfflineEvidenceResolver, cross_refs, embeds, stems
 from grison.validator.registry import Failure, fail
 from grison.validator.terms import ConfidentialTerm
@@ -146,8 +147,25 @@ def _validate_report_dir(
             if p.is_file():
                 out.extend(_check_names(PurePosixPath(_rel(root, p)), skip_last=True))
                 out.extend(_check_fileset_name(evidence_dir_rel, p.name))
+                out.extend(_check_evidence_extension(evidence_dir_rel, p.name))
                 if not is_sidecar_name(p.name) and index is not None:
                     out.extend(_check_index_kind(root, p, index, IndexKind.GW_EVIDENCE))
+
+    # REF-010: a single embed's own caption, longer than Ghostwriter's evidence
+    # caption field allows — checked per hit (unlike REF-004 below, which only
+    # fires on a cross-embed disagreement, an over-long caption is wrong even
+    # with just one embed of the file).
+    for hit in embed_hits:
+        if len(hit.caption) > EVIDENCE_CAPTION_MAX_CHARS:
+            out.append(
+                fail(
+                    registry.REF_CAPTION_TOO_LONG,
+                    hit.doc_rel,
+                    f"{hit.path!r} caption is {len(hit.caption)} characters, over "
+                    f"Ghostwriter's {EVIDENCE_CAPTION_MAX_CHARS}-character limit",
+                    line=hit.line,
+                )
+            )
 
     # REF-004: disagreeing non-empty captions for the same referenced file
     by_path: dict[str, list[_EmbedHit]] = {}

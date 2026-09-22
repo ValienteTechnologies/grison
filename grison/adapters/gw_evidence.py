@@ -33,6 +33,44 @@ from grison.adapters._gw_common import GWContext
 from grison.engine.filesets import caption_only_canonical
 from grison.engine.model import RemoteRecord
 from grison.errors import GrisonError
+from grison.remote.ghostwriter.limits import (
+    EVIDENCE_ALLOWED_EXTENSIONS,
+    EVIDENCE_CAPTION_MAX_CHARS,
+    evidence_extension,
+    is_allowed_evidence_extension,
+)
+
+
+def _check_caption_length(caption: str) -> None:
+    """Defense in depth, not the primary gate: ``grison validate`` (REF-010,
+    :mod:`grison.validator.core.reports`) already refuses to push an over-long caption
+    via the ordinary validation gate (ENGINE.md 'Apply loop' item 1) — a well-behaved
+    sync never reaches this. This only fires for a caller that skipped validation (a
+    hand-built preimage, a stale plan replayed by ``grison undo``, ...); it turns what
+    would otherwise be Ghostwriter's own opaque rejection into a clear, local error
+    naming the same limit :mod:`grison.remote.ghostwriter.limits` and the validator
+    both check."""
+    if len(caption) > EVIDENCE_CAPTION_MAX_CHARS:
+        raise GrisonError(
+            f"evidence caption is {len(caption)} characters, over Ghostwriter's "
+            f"{EVIDENCE_CAPTION_MAX_CHARS}-character limit — grison validate (REF-010) "
+            "should have refused this before push"
+        )
+
+
+def _check_uploadable(filename: str, caption: str) -> None:
+    """Like :func:`_check_caption_length`, but also checks ``filename``'s extension
+    (REF-009) — used by :meth:`GwEvidenceAdapter.upload`/``restore`` (which both send
+    a fresh file), never by :meth:`GwEvidenceAdapter.update_caption` (which never
+    touches the uploaded file itself)."""
+    if not is_allowed_evidence_extension(filename):
+        raise GrisonError(
+            f"evidence file {filename!r} has extension {evidence_extension(filename)!r}, "
+            f"not one of Ghostwriter's allowed evidence extensions "
+            f"({', '.join(sorted(EVIDENCE_ALLOWED_EXTENSIONS))}) — grison validate (REF-009) "
+            "should have refused this before push"
+        )
+    _check_caption_length(caption)
 
 
 def _row_to_data(row: dict[str, Any]) -> dict[str, Any]:
@@ -56,6 +94,7 @@ class GwEvidenceAdapter:
     report_id: int
     kind: str = "gw.evidence"
     supports_caption: bool = True
+    caption_max_chars: int | None = EVIDENCE_CAPTION_MAX_CHARS
 
     def list_remote(self, ctx: GWContext) -> dict[int, RemoteRecord]:
         rows = ctx.all_evidence()
@@ -79,6 +118,7 @@ class GwEvidenceAdapter:
         caption: str,
         description: str,
     ) -> RemoteRecord:
+        _check_uploadable(filename, caption)
         friendly = self._dedupe_friendly_name(ctx, PurePosixPath(filename).stem)
         eid = ctx.client.upload_evidence(
             report_id=self.report_id,
@@ -123,6 +163,10 @@ class GwEvidenceAdapter:
         description: str,
     ) -> RemoteRecord:
         # D1: friendlyName is NEVER part of this call's `_set` — see module docstring.
+        # Extension is never re-checked here (unlike upload()/restore()): a caption
+        # edit never touches the uploaded file itself, only REF-010's caption limit
+        # applies.
+        _check_caption_length(caption)
         ctx.client.update_evidence(id, {"caption": caption, "description": description})
         row = ctx.client.evidence_by_pk(id)
         assert row is not None
@@ -155,6 +199,7 @@ class GwEvidenceAdapter:
                 f"evidence snapshot for {preimage.get('filename', '(unknown file)')!r} has "
                 "no reportId recorded — cannot determine which report to restore it into"
             )
+        _check_uploadable(preimage["filename"], preimage.get("caption", ""))
         body = base64.b64decode(preimage["body_b64"])
         friendly = self._dedupe_friendly_name_for(
             ctx, report_id, PurePosixPath(preimage["filename"]).stem

@@ -42,17 +42,51 @@ class CaptionConflict:
         )
 
 
+@dataclass(frozen=True)
+class CaptionTooLong:
+    """One file whose single, non-conflicting resolved caption is longer than the
+    remote's own caption field allows (REF-010, when the calling adapter has such
+    a limit at all — see :func:`collect_captions`'s ``caption_max_chars``)
+    slipping past the validator — the exact same defense-in-depth reasoning as
+    :class:`CaptionConflict` (module docstring): the file gets no entry in
+    :func:`collect_captions`'s other return value (degrades to "no local caption
+    opinion" — mirrors the remote, never pushed, so the file's own upload/push
+    still proceeds with whatever caption it already had), and
+    :func:`sync_fileset` turns this into its own ``failed`` event/
+    :class:`~grison.engine.model.Plan` too."""
+
+    name: str
+    caption: str
+    doc: str
+    max_chars: int
+
+    @property
+    def detail(self) -> str:
+        return (
+            f"{self.doc}: caption is {len(self.caption)} characters, over the "
+            f"{self.max_chars}-character limit (REF-010)"
+        )
+
+
 def collect_captions(
-    doc_bodies: dict[PurePosixPath, str], *, folder: PurePosixPath
-) -> tuple[dict[str, ReferenceCaption], list[CaptionConflict]]:
+    doc_bodies: dict[PurePosixPath, str],
+    *,
+    folder: PurePosixPath,
+    caption_max_chars: int | None = None,
+) -> tuple[dict[str, ReferenceCaption], list[CaptionConflict], list[CaptionTooLong]]:
     """Scan every document in ``doc_bodies`` for embeds whose path resolves inside
     ``folder`` (``<folder-name>/name`` or, one level down, ``../<folder-name>/name``
     — callers pass whichever spellings their own REF rule accepts), keyed by
-    filename. Returns ``(captions, conflicts)``: a name whose referencing documents
-    disagree on a non-empty caption is left OUT of ``captions`` and reported in
-    ``conflicts`` instead — a disagreement the validator should already have
-    rejected (defense in depth, not primary enforcement — see module docstring),
-    never guessed at and never raised past the one file it concerns."""
+    filename. Returns ``(captions, conflicts, too_long)``: a name whose referencing
+    documents disagree on a non-empty caption is left OUT of ``captions`` and
+    reported in ``conflicts`` instead, and — only when the caller passes a real
+    ``caption_max_chars`` (this module has no opinion of its own on any one
+    remote's limit; the caller's adapter supplies it, or omits it for a remote
+    with no such limit) — a name whose single agreed-on caption is over that limit
+    is left OUT of ``captions`` and reported in ``too_long`` instead. Both are
+    problems the validator should already have rejected (REF-004/REF-010; defense
+    in depth, not primary enforcement — see module docstring), never guessed at
+    and never raised past the one file each concerns."""
     by_name: dict[str, list[tuple[PurePosixPath, str, str]]] = {}
     prefix = f"{folder.name}/"
     for doc_path, body in doc_bodies.items():
@@ -66,6 +100,7 @@ def collect_captions(
 
     out: dict[str, ReferenceCaption] = {}
     conflicts: list[CaptionConflict] = []
+    too_long: list[CaptionTooLong] = []
     for name, entries in by_name.items():
         captions = {c for _d, c, _t in entries if c}
         descriptions = {t for _d, _c, t in entries if t}
@@ -83,11 +118,19 @@ def collect_captions(
             )
             continue
         caption = next(iter(captions), "")
+        if caption_max_chars is not None and len(caption) > caption_max_chars:
+            doc_path = next(d for d, c, _t in entries if c == caption)
+            too_long.append(
+                CaptionTooLong(
+                    name=name, caption=caption, doc=str(doc_path), max_chars=caption_max_chars
+                )
+            )
+            continue
         description = next(iter(descriptions), "") if len(descriptions) <= 1 else ""
         out[name] = ReferenceCaption(
             caption=caption, description=description, has_opinion=bool(captions)
         )
-    return out, conflicts
+    return out, conflicts, too_long
 
 
 def _match_folder(ref_path: str, *, folder_name: str, prefix: str) -> str | None:

@@ -257,6 +257,46 @@ def test_upload_evidence_friendly_name_unique_per_report() -> None:
         )
 
 
+def test_upload_evidence_rejects_a_disallowed_extension() -> None:
+    """Real-workspace defect (2026-09-22): Ghostwriter's server-side
+    ``EVIDENCE_ALLOWED_EXTENSIONS`` (``ghostwriter/reporting/validators.py``) rejects
+    a ``.gif`` upload with this exact wording — grison must catch it offline first
+    (REF-009), but the fake still enforces it so a sync that somehow skipped
+    validation gets the same rejection a real server would give."""
+    gw = FakeGhostwriter()
+    gw.store.seed_report(id=1)
+    with pytest.raises(
+        GhostwriterFakeError, match=r'filename: File extension "\.gif" is not allowed'
+    ):
+        gw._upload_evidence(
+            report=1,
+            filename="capture.gif",
+            caption="",
+            friendly_name="capture",
+            file_base64=base64.b64encode(b"GIF89a").decode(),
+        )
+
+
+def test_upload_evidence_rejects_an_over_long_caption() -> None:
+    """Real-workspace defect (2026-09-22): Ghostwriter's ``Evidence.caption`` is a
+    255-char ``CharField`` — grison must catch this offline first (REF-010), but the
+    fake still enforces it with the real server's exact Django wording."""
+    gw = FakeGhostwriter()
+    gw.store.seed_report(id=1)
+    caption = "A" * 300
+    with pytest.raises(
+        GhostwriterFakeError,
+        match=r"caption: Ensure this value has at most 255 characters \(it has 300\)\.",
+    ):
+        gw._upload_evidence(
+            report=1,
+            filename="shot.png",
+            caption=caption,
+            friendly_name="shot",
+            file_base64=base64.b64encode(b"\x89PNG").decode(),
+        )
+
+
 def test_deleting_a_reported_finding_does_not_delete_its_reports_evidence() -> None:
     gw = FakeGhostwriter()
     gw.store.seed_report(id=1)
