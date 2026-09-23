@@ -20,7 +20,7 @@ def load(name: str) -> bytes:
 
 
 def test_parses_findings() -> None:
-    findings = QualysScanner().parse(load("qualys_sample.xml"), ImportOptions())
+    findings = QualysScanner().parse(load("qualys/qualys_sample.xml"), ImportOptions())
     assert len(findings) == 1
     assert findings[0].title == "Outdated Apache Version"
     # severity="3" (unset on this VULN) is the _SEVERITY_MAP default -> Medium.
@@ -33,7 +33,7 @@ def test_parses_findings() -> None:
 
 
 def test_was_cvss_v3_vector_string_bare_gets_prefixed() -> None:
-    findings = QualysScanner().parse(load("qualys_was_sample.xml"), ImportOptions())
+    findings = QualysScanner().parse(load("qualys/qualys_was_sample.xml"), ImportOptions())
     by_title = {f.title: f for f in findings}
 
     xss = by_title["Reflected Cross-Site Scripting"]
@@ -42,7 +42,7 @@ def test_was_cvss_v3_vector_string_bare_gets_prefixed() -> None:
 
 
 def test_was_cvss_v3_vector_string_already_prefixed_untouched() -> None:
-    findings = QualysScanner().parse(load("qualys_was_sample.xml"), ImportOptions())
+    findings = QualysScanner().parse(load("qualys/qualys_was_sample.xml"), ImportOptions())
     by_title = {f.title: f for f in findings}
 
     sqli = by_title["SQL Injection"]

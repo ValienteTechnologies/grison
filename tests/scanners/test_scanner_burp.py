@@ -15,7 +15,7 @@ def load(name: str) -> bytes:
 
 
 def test_parses_findings() -> None:
-    findings = BurpScanner().parse(load("burp_sample.xml"), ImportOptions())
+    findings = BurpScanner().parse(load("burp/burp_sample.xml"), ImportOptions())
     assert len(findings) == 1
     assert findings[0].title == "SQL injection"
     assert findings[0].severity == Severity.HIGH
@@ -24,7 +24,7 @@ def test_parses_findings() -> None:
 def test_reference_anchor_text_preserved() -> None:
     # The references field carries HTML-escaped <a> tags; the rebuild must keep the
     # original anchor text instead of collapsing it down to the bare URL.
-    findings = BurpScanner().parse(load("burp_sample.xml"), ImportOptions())
+    findings = BurpScanner().parse(load("burp/burp_sample.xml"), ImportOptions())
     assert (
         '<a href="https://portswigger.net/kb/issues/00100200_sql-injection">'
         "SQL injection</a>" in findings[0].references

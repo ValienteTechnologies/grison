@@ -13,11 +13,26 @@ from grison.sinks import ParsePathNotFound, run_parse
 _FIX = Path(__file__).parent.parent / "fixtures" / "scanners"
 _ALL_SCANNERS = {"acunetix", "burp", "nessus", "nmap", "openvas", "qualys", "sslyze", "zap"}
 
+# One hand-made sample per scanner (not the whole vendored corpus — this test is
+# about mixed-directory auto-detection, not corpus coverage; see
+# tests/scanners/test_golden.py and tests/scanners/test_contract.py for that).
+_ONE_SAMPLE_PER_SCANNER = (
+    "acunetix/acunetix_sample.xml",
+    "burp/burp_sample.xml",
+    "nessus/nessus_sample.xml",
+    "nmap/nmap_sample.xml",
+    "openvas/openvas_sample.xml",
+    "qualys/qualys_sample.xml",
+    "sslyze/sslyze_sample.json",
+    "zap/zap_sample.xml",
+)
+
 
 def _input_dir(tmp_path: Path) -> Path:
     inp = tmp_path / "in"
     inp.mkdir()
-    for f in _FIX.iterdir():
+    for rel in _ONE_SAMPLE_PER_SCANNER:
+        f = _FIX / rel
         shutil.copy(f, inp / f.name)
     (inp / "notes.txt").write_text("just some notes, not a scan\n")
     return inp
@@ -62,7 +77,7 @@ def test_rerun_is_idempotent(tmp_path: Path) -> None:
 
 def test_dry_run_touches_nothing(tmp_path: Path) -> None:
     out = _out_dir(tmp_path)
-    summary = run_parse([_FIX / "burp_sample.xml"], out, dry_run=True)
+    summary = run_parse([_FIX / "burp/burp_sample.xml"], out, dry_run=True)
 
     assert summary.sink is not None and summary.sink.written  # would-write is reported
     assert list(out.glob("*.md")) == []  # but nothing landed on disk
@@ -71,7 +86,7 @@ def test_dry_run_touches_nothing(tmp_path: Path) -> None:
 def test_single_file_and_min_severity(tmp_path: Path) -> None:
     out = _out_dir(tmp_path)
     # filter out everything below critical — the synthetic burp finding is lower
-    summary = run_parse([_FIX / "burp_sample.xml"], out, min_severity="critical")
+    summary = run_parse([_FIX / "burp/burp_sample.xml"], out, min_severity="critical")
     assert summary.files_parsed == {"burp": 1}
     assert summary.findings == []  # filtered out by severity
     assert summary.errors == []  # zero findings from a recognized file is not a failure
@@ -93,7 +108,7 @@ def test_missing_path_raises_before_any_file_is_touched(tmp_path: Path) -> None:
     # `skipped_files` and the run proceeded (and exited 0) — it must instead refuse
     # to run at all, so a typo'd path never comes back as a quiet success.
     out = _out_dir(tmp_path)
-    good = _FIX / "burp_sample.xml"
+    good = _FIX / "burp/burp_sample.xml"
     missing = tmp_path / "no-such-file.xml"
 
     with pytest.raises(ParsePathNotFound, match="no-such-file.xml"):

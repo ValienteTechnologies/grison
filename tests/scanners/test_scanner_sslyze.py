@@ -33,35 +33,35 @@ def test_scanner_metadata() -> None:
 
 
 def test_ssl2_detected(scanner: SslyzeScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("sslyze_sample.json"), opts)
+    findings = scanner.parse(load("sslyze/sslyze_sample.json"), opts)
     f = next((f for f in findings if f.plugin_id == "sslyze:ssl_2_0"), None)
     assert f is not None
     assert f.severity == Severity.CRITICAL
 
 
 def test_tls10_detected(scanner: SslyzeScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("sslyze_sample.json"), opts)
+    findings = scanner.parse(load("sslyze/sslyze_sample.json"), opts)
     f = next((f for f in findings if f.plugin_id == "sslyze:tls_1_0"), None)
     assert f is not None
     assert f.severity == Severity.MEDIUM
 
 
 def test_heartbleed_detected(scanner: SslyzeScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("sslyze_sample.json"), opts)
+    findings = scanner.parse(load("sslyze/sslyze_sample.json"), opts)
     f = next((f for f in findings if f.plugin_id == "sslyze:heartbleed"), None)
     assert f is not None
     assert f.severity == Severity.CRITICAL
 
 
 def test_cert_expired_detected(scanner: SslyzeScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("sslyze_sample.json"), opts)
+    findings = scanner.parse(load("sslyze/sslyze_sample.json"), opts)
     f = next((f for f in findings if f.plugin_id == "sslyze:cert_expired"), None)
     assert f is not None
     assert f.severity == Severity.HIGH
 
 
 def test_cert_untrusted_detected(scanner: SslyzeScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("sslyze_sample.json"), opts)
+    findings = scanner.parse(load("sslyze/sslyze_sample.json"), opts)
     f = next((f for f in findings if f.plugin_id == "sslyze:cert_untrusted"), None)
     assert f is not None
 
@@ -125,7 +125,7 @@ def test_errored_server_skipped(scanner: SslyzeScanner) -> None:
 
 def test_severity_filter(scanner: SslyzeScanner) -> None:
     findings = scanner.parse(
-        load("sslyze_sample.json"),
+        load("sslyze/sslyze_sample.json"),
         ImportOptions(severity_filter={Severity.CRITICAL}),
     )
     assert all(f.severity == Severity.CRITICAL for f in findings)
@@ -170,7 +170,7 @@ def test_affected_components_aggregated(scanner: SslyzeScanner) -> None:
 
 
 def test_findings_sorted_by_severity(scanner: SslyzeScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("sslyze_sample.json"), opts)
+    findings = scanner.parse(load("sslyze/sslyze_sample.json"), opts)
     if len(findings) > 1:
         sev_order = list(Severity)
         indices = [sev_order.index(f.severity) for f in findings]
@@ -184,7 +184,7 @@ def test_empty_input(scanner: SslyzeScanner) -> None:
 
 def test_plugin_exclude(scanner: SslyzeScanner) -> None:
     findings = scanner.parse(
-        load("sslyze_sample.json"),
+        load("sslyze/sslyze_sample.json"),
         ImportOptions(exclude_plugins=["sslyze:ssl_2_0"]),
     )
     assert all(f.plugin_id != "sslyze:ssl_2_0" for f in findings)

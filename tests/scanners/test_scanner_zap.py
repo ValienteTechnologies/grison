@@ -15,7 +15,7 @@ def load(name: str) -> bytes:
 
 
 def test_parses_findings() -> None:
-    findings = ZapScanner().parse(load("zap_sample.xml"), ImportOptions())
+    findings = ZapScanner().parse(load("zap/zap_sample.xml"), ImportOptions())
     assert len(findings) == 1
     assert findings[0].title == "Cross Site Scripting (Reflected)"
     # _RISKCODE_MAP maps riskcode "3" -> HIGH, matching ZAP's own High/Medium/Low scale

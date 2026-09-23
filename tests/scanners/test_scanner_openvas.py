@@ -40,7 +40,7 @@ def _result(nvt_tags: str, description: str = "", severity: str = "5.0") -> byte
 
 
 def test_parses_findings() -> None:
-    findings = OpenVASScanner().parse(load("openvas_sample.xml"), ImportOptions())
+    findings = OpenVASScanner().parse(load("openvas/openvas_sample.xml"), ImportOptions())
     assert len(findings) == 1
     assert findings[0].title == "Weak SSH Host Key"
     # CVSS base score 6.5 maps to Medium (per cvss_to_severity: 3.9 < x <= 6.9).

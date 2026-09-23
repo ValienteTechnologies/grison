@@ -119,8 +119,8 @@ def test_parse_bootstraps_and_status_reports_valid(
     # before `status`/`validate` can run.
     scans = tmp_path / "scans"
     scans.mkdir()
-    for name in ("burp_sample.xml", "nessus_sample.xml", "sslyze_sample.json"):
-        shutil.copy(_FIX / name, scans / name)
+    for name in ("burp/burp_sample.xml", "nessus/nessus_sample.xml", "sslyze/sslyze_sample.json"):
+        shutil.copy(_FIX / name, scans / Path(name).name)
     monkeypatch.chdir(tmp_path)  # workspace root = tmp_path
 
     r = _runner.invoke(app, ["parse", str(scans)])
@@ -150,7 +150,7 @@ def test_parse_in_empty_dir_then_validate_exits_clean(
     frontmatter block (D3: documents carry no machine fields, inbox included)."""
     monkeypatch.chdir(tmp_path)
 
-    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml")])
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp/burp_sample.xml")])
     assert r.exit_code == 0, r.output
 
     inbox_files = list((tmp_path / "findings" / "inbox").glob("*.md"))
@@ -199,7 +199,7 @@ def test_parse_zero_findings_from_recognized_file_exits_0(
     monkeypatch.chdir(tmp_path)
     r = _runner.invoke(
         app,
-        ["parse", str(_FIX / "burp_sample.xml"), "--min-severity", "critical"],
+        ["parse", str(_FIX / "burp/burp_sample.xml"), "--min-severity", "critical"],
     )
     assert r.exit_code == 0, r.output
     assert list((tmp_path / "findings" / "inbox").glob("*.md")) == []
@@ -207,7 +207,7 @@ def test_parse_zero_findings_from_recognized_file_exits_0(
 
 def test_parse_dry_run_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml"), "--dry-run"])
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp/burp_sample.xml"), "--dry-run"])
     assert r.exit_code == 0
     assert "Would write" in r.output
     assert list((tmp_path / "findings" / "inbox").glob("*.md")) == []
@@ -221,7 +221,7 @@ def test_parse_summary_uses_words_not_an_arrow_glyph(
     out in words (ENGINE.md 'Events': "No arrow glyphs"). ``parse``'s own summary
     line is not an engine event, but the same house style applies."""
     monkeypatch.chdir(tmp_path)
-    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml")])
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp/burp_sample.xml")])
     assert r.exit_code == 0
     assert "→" not in r.output
     assert "to " in r.output
@@ -589,7 +589,7 @@ def test_parse_commits_when_git_enabled(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setenv("GRISON_GIT", "commit")
     _init_repo(tmp_path)
 
-    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml")])
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp/burp_sample.xml")])
     assert r.exit_code == 0, r.output
     assert _log_subjects(tmp_path)[0].startswith("grison: parse burp")
 
@@ -599,7 +599,7 @@ def test_parse_no_commit_when_git_disabled(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.delenv("GRISON_GIT", raising=False)
     _init_repo(tmp_path)
 
-    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml")])
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp/burp_sample.xml")])
     assert r.exit_code == 0, r.output
     assert _rev_count(tmp_path) == "1"  # only the seed commit
 
@@ -609,7 +609,7 @@ def test_parse_dry_run_never_commits(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("GRISON_GIT", "commit")
     _init_repo(tmp_path)
 
-    r = _runner.invoke(app, ["parse", str(_FIX / "burp_sample.xml"), "--dry-run"])
+    r = _runner.invoke(app, ["parse", str(_FIX / "burp/burp_sample.xml"), "--dry-run"])
     assert r.exit_code == 0, r.output
     assert _rev_count(tmp_path) == "1"
 

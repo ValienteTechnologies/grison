@@ -1,10 +1,16 @@
-"""Shared e2e fixtures: fake remotes, a scratch workspace, and a CLI runner wired to
-both through the ``grison.cli.clients`` transport seam
+"""Root pytest config plus shared e2e fixtures: fake remotes, a scratch workspace,
+and a CLI runner wired to both through the ``grison.cli.clients`` transport seam
 (``_make_gw_client``/``_make_bs_client``).
 
 No test under ``tests/e2e/`` needs the network: ``run_grison`` invokes the real CLI
 (``typer.testing.CliRunner`` against ``grison.cli.app``) with both remote clients'
 ``httpx`` transports monkeypatched to the in-memory fakes in ``tests/fakes/``.
+
+Also registers ``--update-golden`` (used by ``tests/scanners/test_golden.py`` to
+rewrite ``tests/fixtures/scanners/expected/**/*.ir.json`` instead of asserting
+against it) at the repo root, since a pytest option must be registered in a
+``conftest.py`` at or above every path it's invoked against — ``pytest
+--update-golden`` (no path restriction) only works from a root-level conftest.
 """
 
 from __future__ import annotations
@@ -26,6 +32,20 @@ from grison.remote.ghostwriter import GhostwriterClient
 from tests.fakes.bs_server import FakeBookStack
 from tests.fakes.gw_server import FakeGhostwriter
 from tests.fakes.gw_server import load_schema as load_fake_gw_schema
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-golden",
+        action="store_true",
+        default=False,
+        help="Rewrite tests/scanners/test_golden.py's expected files instead of asserting.",
+    )
+
+
+@pytest.fixture
+def update_golden(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption("--update-golden"))
 
 
 @pytest.fixture

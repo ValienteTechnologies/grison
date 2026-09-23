@@ -66,6 +66,20 @@ Top-level modules (`index.py`, `manifest.py`, `hashing.py`, `fsio.py`, `gitdrive
   transport swapped out — no real network, no real credentials. `tests/conftest.py`
   wires the `workspace`/`gw_server`/`bs_server` fixtures together and applies across
   every subpackage.
+- **Scanner golden/contract tests** (`tests/scanners/`) — `tests/fixtures/scanners/<scanner>/`
+  vendors a real corpus of scanner exports from DefectDojo and reptor alongside the
+  hand-made `*_sample.*` fixtures (provenance and licenses in
+  `tests/fixtures/scanners/ATTRIBUTION.md`). `test_golden.py` runs detection and
+  parsing over every fixture and compares the serialized IR against a committed
+  `tests/fixtures/scanners/expected/<scanner>/<file>.ir.json` — a behaviour
+  recorder, not a correctness check, so it also pins current parser bugs. After an
+  intentional parser change, regenerate the goldens with
+  `uv run pytest tests/scanners/test_golden.py --update-golden` (the flag is
+  registered in the root `tests/conftest.py` and also works against the whole
+  suite). `test_contract.py` runs the real `grison parse` → `grison validate`
+  pipeline (one invocation per scanner, batched) over every fixture the golden
+  records as detected/ok/non-empty, and `test_detect.py` asserts detection
+  against the golden for every corpus fixture individually.
 - **Spec↔rule coverage** (`tests/core/test_spec_coverage.py`) — every rule id
   registered in `grison/validator/registry.py` must appear in
   `docs/workspace-format.md`, and must have both a `@pytest.mark.rule("XXX-nnn")`

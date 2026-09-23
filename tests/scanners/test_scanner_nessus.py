@@ -35,7 +35,7 @@ def _report_item(inner: str) -> bytes:
 
 
 def test_parses_findings() -> None:
-    findings = NessusScanner().parse(load("nessus_sample.xml"), ImportOptions())
+    findings = NessusScanner().parse(load("nessus/nessus_sample.xml"), ImportOptions())
     assert len(findings) == 1
     assert findings[0].title == "Outdated TLS Version"
     assert findings[0].severity == Severity.MEDIUM
