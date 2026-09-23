@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -92,6 +93,43 @@ def test_single_file_and_min_severity(tmp_path: Path) -> None:
     assert summary.errors == []  # zero findings from a recognized file is not a failure
 
 
+def test_detected_file_whose_parser_raises_is_recorded_as_an_error(tmp_path: Path) -> None:
+    # Bug fix: a detected file whose parser raises used to land only in
+    # `skipped_files`, never `errors` — the CLI only looks at `errors` to decide
+    # the exit code, so `grison parse` exited 0 having silently discarded a
+    # broken scan file. Root tag alone ("SCAN") is enough for detect_bytes to
+    # recognize this as qualys without needing the rest of the document to be
+    # well-formed, but the qualys parser fully re-parses the XML and blows up on
+    # the truncated, unclosed <VULN> tag below.
+    out = _out_dir(tmp_path)
+    bad = tmp_path / "broken.xml"
+    bad.write_bytes(b'<SCAN><VULN_LIST><VULN number="1"')
+
+    summary = run_parse([bad], out)
+
+    assert any(
+        p.name == "broken.xml" and "parse error" in reason for p, reason in summary.skipped_files
+    )
+    assert any("broken.xml" in e and "parse error" in e for e in summary.errors)
+    assert "ParseError" in "".join(summary.errors)  # exception type recorded, not swallowed
+
+
+def test_other_files_in_the_same_run_still_get_processed(tmp_path: Path) -> None:
+    # One bad file must not kill the batch: a broken qualys file alongside a
+    # good burp file still yields the burp finding.
+    out = _out_dir(tmp_path)
+    inp = tmp_path / "in"
+    inp.mkdir()
+    (inp / "broken.xml").write_bytes(b'<SCAN><VULN_LIST><VULN number="1"')
+    shutil.copy(_FIX / "burp/burp_sample.xml", inp / "burp_sample.xml")
+
+    summary = run_parse([inp], out)
+
+    assert summary.files_parsed == {"burp": 1}
+    assert summary.findings  # the good file's findings still landed
+    assert any("broken.xml" in e for e in summary.errors)
+
+
 def test_unrecognized_file_is_recorded_as_an_error_too(tmp_path: Path) -> None:
     # Bug fix: an unrecognized file used to only land in `skipped_files`, never
     # `errors` — the CLI only looks at `errors` to decide the exit code, so `grison
@@ -101,6 +139,79 @@ def test_unrecognized_file_is_recorded_as_an_error_too(tmp_path: Path) -> None:
     notes.write_text("not a scan\n")
     summary = run_parse([notes], out)
     assert any("notes.txt" in e and "unrecognized" in e for e in summary.errors)
+
+
+def test_invalid_utf16_is_recorded_as_an_error(tmp_path: Path) -> None:
+    # A UTF-16-BOM'd file whose bytes don't actually decode as UTF-16 (a lone
+    # surrogate here) must be skipped with an errors entry, like the OSError
+    # read-failure path, not raise out of run_parse.
+    out = _out_dir(tmp_path)
+    bad = tmp_path / "bad-utf16.xml"
+    bad.write_bytes(b"\xfe\xff\xd8\x00" + "<SCAN></SCAN>".encode("utf-16-be"))
+
+    summary = run_parse([bad], out)
+
+    assert any(
+        p.name == "bad-utf16.xml" and "invalid UTF-16" in reason
+        for p, reason in summary.skipped_files
+    )
+    assert any("bad-utf16.xml" in e and "invalid UTF-16" in e for e in summary.file_errors)
+
+
+def test_odd_length_utf16_buffer_is_recorded_as_an_error(tmp_path: Path) -> None:
+    out = _out_dir(tmp_path)
+    bad = tmp_path / "bad-utf16-odd.xml"
+    bad.write_bytes(b"\xff\xfe" + "<SCAN></SCAN>".encode("utf-16-le") + b"\x41")
+
+    summary = run_parse([bad], out)
+
+    assert any("bad-utf16-odd.xml" in e and "invalid UTF-16" in e for e in summary.file_errors)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permission bits")
+def test_unreadable_file_is_recorded_as_a_read_error(tmp_path: Path) -> None:
+    out = _out_dir(tmp_path)
+    unreadable = tmp_path / "unreadable.xml"
+    unreadable.write_bytes(b"<SCAN></SCAN>")
+    unreadable.chmod(0o000)
+    try:
+        summary = run_parse([unreadable], out)
+    finally:
+        unreadable.chmod(0o644)  # restore so tmp_path cleanup can remove it
+
+    assert any(
+        p.name == "unreadable.xml" and "read error" in reason for p, reason in summary.skipped_files
+    )
+    assert any("unreadable.xml" in e and "read error" in e for e in summary.file_errors)
+    assert summary.finding_errors == []
+
+
+def test_finding_validation_failure_is_kept_apart_from_file_level_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A finding-level failure (the file parsed fine, but one of its findings
+    # failed FindingDoc validation) must land in `finding_errors`, never
+    # `file_errors` — the CLI (grison.cli.render) prints the two under separate
+    # headers, and conflating them would mislabel a perfectly-parsed file as
+    # "could not be parsed".
+    from grison.formats.finding import FindingDoc
+    from grison.sinks import pipeline as pipeline_mod
+
+    def _always_fails_validation(ir, *, finding_type, tier="inbox"):  # noqa: ARG001
+        FindingDoc.model_validate({}, context={"tier": tier})  # raises: missing fields
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(pipeline_mod, "ir_to_finding", _always_fails_validation)
+
+    out = _out_dir(tmp_path)
+    good = _FIX / "burp/burp_sample.xml"
+
+    summary = run_parse([good], out)
+
+    assert summary.files_parsed == {"burp": 1}  # the file itself parsed fine
+    assert summary.file_errors == []
+    assert summary.finding_errors  # but its finding(s) failed validation
+    assert summary.errors == summary.finding_errors  # combined list still carries it
 
 
 def test_missing_path_raises_before_any_file_is_touched(tmp_path: Path) -> None:

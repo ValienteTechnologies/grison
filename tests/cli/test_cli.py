@@ -167,14 +167,90 @@ def test_parse_unrecognized_file_exits_1_naming_the_file(
 ) -> None:
     # Bug fix: a file no scanner recognizes used to only land in skipped_files
     # (never `errors`), so `grison parse` exited 0 having done nothing useful with
-    # it. Policy: exit 1, with the file named.
+    # it. Policy: exit 1, with the file named under the file-level header (not
+    # mislabeled as a finding validation failure).
     scans = tmp_path / "scans"
     scans.mkdir()
     (scans / "notes.txt").write_text("not a scan\n")
     monkeypatch.chdir(tmp_path)
     r = _runner.invoke(app, ["parse", str(scans)])
     assert r.exit_code == 1
-    assert "skipped" in r.output and "notes.txt" in r.output
+    assert "file(s) could not be parsed" in r.output and "notes.txt" in r.output
+    assert "failed validation" not in r.output  # file-level, not a finding validation failure
+    assert r.output.count("notes.txt") == 1  # named once, not once per header
+
+
+def test_parse_detected_file_that_fails_to_parse_exits_1_naming_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Bug fix: a detected file whose parser raises used to only land in
+    # skipped_files (never `errors`), so `grison parse` exited 0 having silently
+    # dropped a broken scan file. Policy: exit 1, with the file named under the
+    # file-level header, same as an unrecognized file — and named only once, not
+    # once as "skipped" and again under a finding-validation header. "SCAN" alone
+    # is enough for detection (qualys); the truncated body then blows up the real
+    # parser.
+    scans = tmp_path / "scans"
+    scans.mkdir()
+    (scans / "broken.xml").write_bytes(b'<SCAN><VULN_LIST><VULN number="1"')
+    monkeypatch.chdir(tmp_path)
+    r = _runner.invoke(app, ["parse", str(scans)])
+    assert r.exit_code == 1
+    assert "file(s) could not be parsed" in r.output and "broken.xml" in r.output
+    assert "failed validation" not in r.output
+    assert r.output.count("broken.xml") == 1
+
+
+def test_parse_file_and_finding_failures_get_separate_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One run with BOTH failure kinds at once: an unrecognized file (file-level)
+    # alongside a real scanner export whose finding fails validation (finding-
+    # level). Each must appear exactly once, under its own accurate header —
+    # never mislabeled, never doubled.
+    from grison.formats.finding import FindingDoc
+    from grison.sinks import pipeline as pipeline_mod
+
+    def _always_fails_validation(ir, *, finding_type, tier="inbox"):  # noqa: ARG001
+        FindingDoc.model_validate({}, context={"tier": tier})
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(pipeline_mod, "ir_to_finding", _always_fails_validation)
+
+    scans = tmp_path / "scans"
+    scans.mkdir()
+    (scans / "notes.txt").write_text("not a scan\n")
+    shutil.copy(_FIX / "burp/burp_sample.xml", scans / "burp_sample.xml")
+    monkeypatch.chdir(tmp_path)
+
+    r = _runner.invoke(app, ["parse", str(scans)])
+
+    assert r.exit_code == 1
+    assert "file(s) could not be parsed" in r.output
+    assert "finding(s) failed validation" in r.output
+    assert r.output.count("notes.txt") == 1  # named once, under the file-level header
+    # notes.txt must never appear under the finding-validation header
+    fail_idx = r.output.index("file(s) could not be parsed")
+    valid_idx = r.output.index("finding(s) failed validation")
+    assert "notes.txt" in r.output[fail_idx:valid_idx]
+
+
+def test_parse_invalid_utf16_file_exits_1_naming_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A lone UTF-16 surrogate is a hard decode failure, not a silently-tolerated
+    # one — same "could not be parsed, exit 1, file named" treatment as an
+    # unreadable or unrecognized file.
+    scans = tmp_path / "scans"
+    scans.mkdir()
+    (scans / "bad.xml").write_bytes(b"\xfe\xff\xd8\x00" + "<SCAN></SCAN>".encode("utf-16-be"))
+    monkeypatch.chdir(tmp_path)
+
+    r = _runner.invoke(app, ["parse", str(scans)])
+
+    assert r.exit_code == 1
+    assert "file(s) could not be parsed" in r.output
+    assert "bad.xml" in r.output and "invalid UTF-16" in r.output
 
 
 def test_parse_nonexistent_path_exits_2_before_any_work(
