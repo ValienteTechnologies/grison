@@ -17,7 +17,11 @@ class NmapScanner(Scanner):
         findings = self._parse_grepable(data) if opts.fmt == "grepable" else self._parse_xml(data)
         # Every finding here is INFO (open-port reporting has no other severity),
         # but --min-severity should still be able to suppress it like other scanners.
-        return [f for f in findings if self._severity_allowed(f.severity, opts)]
+        allowed = [f for f in findings if self._severity_allowed(f.severity, opts)]
+        # Same sort call as every other parser, for consistency — a no-op today
+        # since every nmap finding is INFO, but keeps this parser from silently
+        # diverging if that ever changes.
+        return self.sort_by_severity(allowed)
 
     def _parse_xml(self, data: bytes) -> list[ScanFinding]:
         root = ET.fromstring(data)

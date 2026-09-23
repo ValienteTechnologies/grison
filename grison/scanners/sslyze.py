@@ -6,7 +6,7 @@ from typing import Any
 
 from grison.scanners.ir import ScanFinding, Severity
 
-from .base import ImportOptions, Scanner
+from .base import Aggregator, ImportOptions, RawOccurrence, Scanner
 
 
 @dataclass
@@ -89,7 +89,7 @@ class SslyzeScanner(Scanner):
         doc = json.loads(data)
         server_results = doc.get("server_scan_results", [])
 
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]] = {}
+        agg = Aggregator()
 
         for server in server_results:
             if server.get("scan_status") == "ERROR":
@@ -102,29 +102,29 @@ class SslyzeScanner(Scanner):
 
             scan_result: dict[str, Any] = server.get("scan_result") or {}
 
-            self._check_protocols(scan_result, host_label, aggregated, opts)
-            self._check_heartbleed(scan_result, host_label, aggregated, opts)
-            self._check_robot(scan_result, host_label, aggregated, opts)
-            self._check_ccs(scan_result, host_label, aggregated, opts)
-            self._check_compression(scan_result, host_label, aggregated, opts)
-            self._check_certificates(scan_result, host_label, aggregated, opts)
+            self._check_protocols(scan_result, host_label, agg, opts)
+            self._check_heartbleed(scan_result, host_label, agg, opts)
+            self._check_robot(scan_result, host_label, agg, opts)
+            self._check_ccs(scan_result, host_label, agg, opts)
+            self._check_compression(scan_result, host_label, agg, opts)
+            self._check_certificates(scan_result, host_label, agg, opts)
 
         findings = [
             ScanFinding(
-                title=spec.title,
-                plugin_id=plugin_id,
-                severity=spec.severity,
-                description=spec.description,
-                mitigation=spec.mitigation,
-                affected_components=list(dict.fromkeys(hosts)),
+                title=rec.title,
+                plugin_id=rec.key,
+                severity=rec.severity,
+                description=rec.description,
+                mitigation=rec.mitigation,
+                affected_components=rec.affected_components,
             )
-            for plugin_id, (spec, hosts) in aggregated.items()
+            for rec in agg.records()
         ]
         return self.sort_by_severity(findings)
 
     def _add(
         self,
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]],
+        agg: Aggregator,
         spec: _VulnSpec,
         host: str,
         opts: ImportOptions,
@@ -133,12 +133,16 @@ class SslyzeScanner(Scanner):
             return
         if not self._plugin_allowed(spec.plugin_id, opts):
             return
-        if spec.plugin_id not in aggregated:
-            aggregated[spec.plugin_id] = (spec, [host])
-        else:
-            hosts = aggregated[spec.plugin_id][1]
-            if host not in hosts:
-                hosts.append(host)
+        agg.add(
+            RawOccurrence(
+                key=spec.plugin_id,
+                title=spec.title,
+                severity=spec.severity,
+                affected_component=host,
+                description=spec.description,
+                mitigation=spec.mitigation,
+            )
+        )
 
     def _safe_result(self, scan_result: dict[str, Any], key: str) -> dict[str, Any] | None:
         entry = scan_result.get(key)
@@ -152,7 +156,7 @@ class SslyzeScanner(Scanner):
         self,
         scan_result: dict[str, Any],
         host: str,
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]],
+        agg: Aggregator,
         opts: ImportOptions,
     ) -> None:
         for key, spec in _PROTOCOL_VULNS:
@@ -160,19 +164,19 @@ class SslyzeScanner(Scanner):
             if result is None:
                 continue
             if result.get("accepted_cipher_suites"):
-                self._add(aggregated, spec, host, opts)
+                self._add(agg, spec, host, opts)
 
     def _check_heartbleed(
         self,
         scan_result: dict[str, Any],
         host: str,
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]],
+        agg: Aggregator,
         opts: ImportOptions,
     ) -> None:
         result = self._safe_result(scan_result, "heartbleed")
         if result and result.get("is_vulnerable_to_heartbleed"):
             self._add(
-                aggregated,
+                agg,
                 _VulnSpec(
                     plugin_id="sslyze:heartbleed",
                     title="Heartbleed (CVE-2014-0160)",
@@ -197,7 +201,7 @@ class SslyzeScanner(Scanner):
         self,
         scan_result: dict[str, Any],
         host: str,
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]],
+        agg: Aggregator,
         opts: ImportOptions,
     ) -> None:
         result = self._safe_result(scan_result, "robot")
@@ -206,7 +210,7 @@ class SslyzeScanner(Scanner):
         robot_enum = result.get("robot_attack_enum") or ""
         if robot_enum.startswith("VULNERABLE"):
             self._add(
-                aggregated,
+                agg,
                 _VulnSpec(
                     plugin_id="sslyze:robot",
                     title="ROBOT Attack",
@@ -230,13 +234,13 @@ class SslyzeScanner(Scanner):
         self,
         scan_result: dict[str, Any],
         host: str,
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]],
+        agg: Aggregator,
         opts: ImportOptions,
     ) -> None:
         result = self._safe_result(scan_result, "openssl_ccs_injection")
         if result and result.get("is_vulnerable_to_ccs_injection"):
             self._add(
-                aggregated,
+                agg,
                 _VulnSpec(
                     plugin_id="sslyze:openssl_ccs",
                     title="OpenSSL CCS Injection (CVE-2014-0224)",
@@ -260,13 +264,13 @@ class SslyzeScanner(Scanner):
         self,
         scan_result: dict[str, Any],
         host: str,
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]],
+        agg: Aggregator,
         opts: ImportOptions,
     ) -> None:
         result = self._safe_result(scan_result, "tls_compression")
         if result and result.get("supports_compression"):
             self._add(
-                aggregated,
+                agg,
                 _VulnSpec(
                     plugin_id="sslyze:tls_compression",
                     title="TLS Compression Enabled (CRIME)",
@@ -291,7 +295,7 @@ class SslyzeScanner(Scanner):
         self,
         scan_result: dict[str, Any],
         host: str,
-        aggregated: dict[str, tuple[_VulnSpec, list[str]]],
+        agg: Aggregator,
         opts: ImportOptions,
     ) -> None:
         result = self._safe_result(scan_result, "certificate_info")
@@ -301,7 +305,7 @@ class SslyzeScanner(Scanner):
         for deployment in result.get("certificate_deployments", []):
             if not deployment.get("leaf_certificate_is_within_validity_period", True):
                 self._add(
-                    aggregated,
+                    agg,
                     _VulnSpec(
                         plugin_id="sslyze:cert_expired",
                         title="Expired TLS Certificate",
@@ -324,7 +328,7 @@ class SslyzeScanner(Scanner):
 
             if not deployment.get("leaf_certificate_subject_matches_hostname", True):
                 self._add(
-                    aggregated,
+                    agg,
                     _VulnSpec(
                         plugin_id="sslyze:cert_hostname_mismatch",
                         title="TLS Certificate Hostname Mismatch",
@@ -347,7 +351,7 @@ class SslyzeScanner(Scanner):
             path_val_errs = deployment.get("path_validation_results", [])
             if any(not pv.get("verified_certificate_chain") for pv in path_val_errs):
                 self._add(
-                    aggregated,
+                    agg,
                     _VulnSpec(
                         plugin_id="sslyze:cert_untrusted",
                         title="Untrusted or Self-Signed TLS Certificate",
@@ -375,7 +379,7 @@ class SslyzeScanner(Scanner):
             weak = (pk_type == "RSA" and pk_size < 2048) or (pk_type == "EC" and pk_size < 256)
             if weak:
                 self._add(
-                    aggregated,
+                    agg,
                     _VulnSpec(
                         plugin_id="sslyze:cert_weak_key",
                         title="Weak TLS Certificate Public Key",

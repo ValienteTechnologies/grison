@@ -48,12 +48,9 @@ _runner = CliRunner()
 # the exclusion silently going stale (the file would then just be skipped forever,
 # with no contract coverage and no signal that it could be un-excluded).
 _KNOWN_PIPELINE_BUGS: dict[str, dict[str, str]] = {
-    # openvas: NVT <name>/<insight> text carries embedded literal newlines +
-    # indentation (parser doesn't normalize internal whitespace), which lands
-    # verbatim in the IR title. In three of this file's findings that breaks the
-    # title into more than one line once rendered, and the wrapped remainder
-    # renders as body text outside a '##' section (FND-016).
-    "openvas": {"dojo-many_vuln.xml": "FND-016"},
+    # Empty as of the parser-convergence branch: the openvas FND-016 (embedded
+    # newlines in NVT titles) and burp FND-014 (unescaped fallback text) entries
+    # were both fixed and dropped by the canary below.
 }
 
 
