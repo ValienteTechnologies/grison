@@ -32,40 +32,40 @@ def test_scanner_metadata() -> None:
 
 
 def test_parses_findings(scanner: AcunetixScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     assert len(findings) > 0
 
 
 def test_aggregation_by_vuln_id(scanner: AcunetixScanner, opts: ImportOptions) -> None:
     # sqli-001 appears in both scans — should merge into one finding with 2 components
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     sqli = next(f for f in findings if f.plugin_id == "sqli-001")
     assert len(sqli.affected_components) == 2
 
 
 def test_severity_text_high(scanner: AcunetixScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     sqli = next(f for f in findings if f.plugin_id == "sqli-001")
     assert sqli.severity == Severity.HIGH
 
 
 def test_severity_numeric_medium(scanner: AcunetixScanner, opts: ImportOptions) -> None:
     # xss-001 has Severity=2 (numeric medium)
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     xss = next(f for f in findings if f.plugin_id == "xss-001")
     assert xss.severity == Severity.MEDIUM
 
 
 def test_severity_numeric_critical(scanner: AcunetixScanner, opts: ImportOptions) -> None:
     # rce-001 has Severity=4 (numeric critical)
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     rce = next(f for f in findings if f.plugin_id == "rce-001")
     assert rce.severity == Severity.CRITICAL
 
 
 def test_severity_numeric_info(scanner: AcunetixScanner, opts: ImportOptions) -> None:
     # info-001 has Severity=0 (numeric info)
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     info = next(f for f in findings if f.plugin_id == "info-001")
     assert info.severity == Severity.INFO
 
@@ -89,27 +89,55 @@ def test_inline_severity_numeric_critical(scanner: AcunetixScanner) -> None:
 
 def test_cwe_numeric_normalised(scanner: AcunetixScanner, opts: ImportOptions) -> None:
     # sqli-001 has CWE=89 (no prefix)
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     sqli = next(f for f in findings if f.plugin_id == "sqli-001")
     assert sqli.cwe == "CWE-89"
 
 
 def test_cwe_with_prefix_stripped(scanner: AcunetixScanner, opts: ImportOptions) -> None:
     # xss-001 has CWE=CWE-79 (with prefix)
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     xss = next(f for f in findings if f.plugin_id == "xss-001")
     assert xss.cwe == "CWE-79"
 
 
+def test_cwe_from_cwelist_id_attr(scanner: AcunetixScanner, opts: ImportOptions) -> None:
+    # dojo-one_finding.xml: real Acunetix shape, <CWEList><CWE id="352">CWE-352</CWE>
+    # </CWEList>, not a flat <CWE> — DefectDojo's own test asserts cwe 352 for it.
+    findings = scanner.parse(load("acunetix/dojo-one_finding.xml"), opts)
+    assert len(findings) == 1
+    assert findings[0].cwe == "CWE-352"
+
+
+def test_cwe_from_cwelist_across_many_findings(
+    scanner: AcunetixScanner, opts: ImportOptions
+) -> None:
+    findings = scanner.parse(load("acunetix/dojo-many_findings.xml"), opts)
+    cwes = {f.cwe for f in findings}
+    assert "CWE-200" in cwes
+    assert "CWE-310" in cwes
+    assert "CWE-16" in cwes
+
+
+def test_cwe_falls_back_to_flat_cwe_when_no_cwelist_child(
+    scanner: AcunetixScanner, opts: ImportOptions
+) -> None:
+    # acunetix_sample.xml is a hand-made fixture with a flat <CWE> and no
+    # <CWEList> at all — the fallback path must still work.
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
+    sqli = next(f for f in findings if f.plugin_id == "sqli-001")
+    assert sqli.cwe == "CWE-89"
+
+
 def test_cve_tag_in_references(scanner: AcunetixScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     sqli = next(f for f in findings if f.plugin_id == "sqli-001")
     assert "CVE-2023-1234" in sqli.references
 
 
 def test_severity_filter_critical_only(scanner: AcunetixScanner) -> None:
     findings = scanner.parse(
-        load("acunetix_sample.xml"),
+        load("acunetix/acunetix_sample.xml"),
         ImportOptions(severity_filter={Severity.CRITICAL}),
     )
     assert all(f.severity == Severity.CRITICAL for f in findings)
@@ -119,7 +147,7 @@ def test_severity_filter_critical_only(scanner: AcunetixScanner) -> None:
 
 def test_plugin_exclude(scanner: AcunetixScanner) -> None:
     findings = scanner.parse(
-        load("acunetix_sample.xml"),
+        load("acunetix/acunetix_sample.xml"),
         ImportOptions(exclude_plugins=["sqli-001"]),
     )
     assert not any(f.plugin_id == "sqli-001" for f in findings)
@@ -127,7 +155,7 @@ def test_plugin_exclude(scanner: AcunetixScanner) -> None:
 
 def test_plugin_include(scanner: AcunetixScanner) -> None:
     findings = scanner.parse(
-        load("acunetix_sample.xml"),
+        load("acunetix/acunetix_sample.xml"),
         ImportOptions(include_plugins=["rce-001"]),
     )
     assert len(findings) == 1
@@ -135,7 +163,7 @@ def test_plugin_include(scanner: AcunetixScanner) -> None:
 
 
 def test_findings_sorted_by_severity(scanner: AcunetixScanner, opts: ImportOptions) -> None:
-    findings = scanner.parse(load("acunetix_sample.xml"), opts)
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     if len(findings) > 1:
         sev_order = list(Severity)
         indices = [sev_order.index(f.severity) for f in findings]

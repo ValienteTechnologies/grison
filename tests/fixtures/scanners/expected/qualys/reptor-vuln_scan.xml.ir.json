@@ -1,0 +1,41 @@
+{
+  "detected": "qualys",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "34.249.203.140"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Successful exploitation of this vulnerability results in the disclosure of your internal IP address or internal network name, which could then be used in further attacks against the target host.",
+      "impact": "Some Web servers contain a vulnerability giving remote attackers the ability to attain your internal IP address or internal network name. \n<P>\nAn attacker connected to a host on your network using HTTPS (typically on port 443) could craft a specially formed GET request from the Web server resulting in a 3XX Object Moved error message containing the internal IP address or internal network name of the Web server. \n<P>\nA target host using HTTP may also be vulnerable to this issue.\n<P>\nQID Detection Logic:<BR>\nThe remote check for the web server internal IP address sends a HTTP GET request to the target web server. The QID is flagged if a &quot;Content-location:&quot; header or a 3xx redirect address in an HTTP response contains an RFC1918 IP address.\n<P>",
+      "mitigation": "There are no patches available at this time. Please contact your vendor for updates.\n<P>\n\n\n\n\n\n\n\n\n\n\n\n\n\nWorkaround:<BR><P>\nFor IIS Web Server 6.x  and prior:<BR>\nCheck the Microsoft article on <A HREF=\"https://support.microsoft.com/en-us/kb/218180\" TARGET=\"_blank\">how to set the Hostname instead of internal IP address for IIS</A>.\n<P>\nFor IIS 7.0 or newer<BR>\nThe release version of IIS7 by default includes the functionality of masking the IP address. Refer to <A HREF=\"https://techcommunity.microsoft.com/t5/iis-support-blog/removing-an-iis-server-s-ip-address-from-http-responses/ba-p/347669\" TARGET=\"_blank\">Removing an IIS server's IP address from HTTP responses</A> and <A HREF=\"https://support.microsoft.com/en-us/help/218180/internet-information-server-returns-ip-address-in-http-header-content\" TARGET=\"_blank\">Internet Information Server returns IP address in HTTP header (Content-Location)</A> for more information.\n<P>\nFor Apache Web Server:<BR>\nModify the Apache configuration file as follows:<BR>\n- Set &quot;ServerName&quot; to a proper FQDN.\n<BR>\n or\n<BR>\n- Use module mod_rewrite to modify the 3xx error message returned by the server.\n<P>\nNo workaround information is available for other Web servers at this time. Refer to your vendor for an appropriate workaround.",
+      "notes": [],
+      "plugin_id": "86247",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2000-0649\">CVE-2000-0649</a></li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Application Server Internal IP Address/Internal Network Name Disclosure Vulnerability"
+    },
+    {
+      "affected_components": [
+        "34.249.203.140"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Depending on the vulnerability being exploited, an unauthenticated remote attacker could conduct cross-site scripting, clickjacking or MIME-type sniffing attacks.",
+      "impact": "This QID reports the absence of the following <A HREF=\"https://www.owasp.org/index.php/OWASP_Secure_Headers_Project#tab=Headers\" TARGET=\"_blank\">HTTP headers</A> according to <A HREF=\"https://cwe.mitre.org/data/definitions/693.html\" TARGET=\"_blank\">CWE-693: Protection Mechanism Failure</A>:<BR>\n\nX-Content-Type-Options: This HTTP header will prevent the browser from interpreting files as a different MIME type to what is specified in the Content-Type HTTP header. <BR>\nStrict-Transport-Security: The HTTP Strict-Transport-Security response header (HSTS) allows web servers to declare that web browsers (or other complying user agents) should only interact with it using secure HTTPS connections, and never via the insecure HTTP protocol.<P>\n\n<P>QID Detection Logic:<BR>\nThis unauthenticated QID looks for the presence of the following HTTP responses:<BR>\nThe Valid directives are as belows:\nX-Content-Type-Options: nosniff<P>\nStrict-Transport-Security: max-age=&lt; [;includeSubDomains]<P>",
+      "mitigation": "<B>Note:</B> To better debug the results of this QID, it is requested that customers execute commands to simulate the following functionality: curl -lkL --verbose.<P>\nCWE-693: Protection Mechanism Failure mentions the following - The product does not use or incorrectly uses a protection mechanism that provides sufficient defense against directed attacks against the product. A &quot;missing&quot; protection mechanism occurs when the application does not define any mechanism against a certain class of attack. An &quot;insufficient&quot; protection mechanism might provide some defenses - for example, against the most common attacks - but it does not protect against everything that is intended. Finally, an &quot;ignored&quot; mechanism occurs when a mechanism is available and in active use within the product, but the developer has not applied it in some code path.<P>\nCustomers are advised to set proper <A HREF=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options\" TARGET=\"_blank\">X-Content-Type-Options</A> and <A HREF=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security\" TARGET=\"_blank\">Strict-Transport-Security</A> HTTP response headers.<P>\nDepending on their server software, customers can set directives in their site configuration or Web.config files. Few examples are:<P>\nX-Content-Type-Options:<BR>\nApache: Header always set X-Content-Type-Options: nosniff<P>\nHTTP Strict-Transport-Security:<BR>\nApache: Header always set Strict-Transport-Security &quot;max-age=31536000; includeSubDomains&quot;<BR>\nNginx: add_header Strict-Transport-Security max-age=31536000;<P>\n<B>Note: Network devices that include a HTTP/HTTPS console for administrative/management purposes often do not include all/some of the security headers. This is a known issue and it is recommend to contact the vendor for a solution. </B><P>",
+      "notes": [],
+      "plugin_id": "11827",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "HTTP Security Header Not Detected"
+    }
+  ],
+  "outcome": "ok"
+}

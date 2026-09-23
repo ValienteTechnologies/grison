@@ -1,0 +1,222 @@
+{
+  "detected": "nessus",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "10.15.10.11:443/tcp (cifs)"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "It is possible to execute code on the remote host through Samba.\n\nThe version of the Samba server installed on the remote host is affected by multiple heap\n                    overflow vulnerabilities, which can be exploited remotely to execute code with the privileges of the\n                    Samba daemon.",
+      "impact": "",
+      "mitigation": "Upgrade to Samba version 3.0.25 or later.",
+      "notes": [],
+      "plugin_id": "25216",
+      "references": "<ul><li><a href=\"http://www.samba.org/samba/security/CVE-2007-2446.html\">http://www.samba.org/samba/security/CVE-2007-2446.html</a></li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Samba NDR MS-RPC Request Heap-Based Remote Buffer Overflow"
+    },
+    {
+      "affected_components": [
+        "10.15.10.11:443/tcp (cifs)"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+      "cwe": "",
+      "description": "It is possible to access a network share.\n\nThe remote has one or more Windows shares that can be accessed through the network with the\n                    given credentials.\n\n                    Depending on the share rights, it may allow an attacker to read/write confidential data.",
+      "impact": "",
+      "mitigation": "To restrict access under Windows, open Explorer, do a right click on each share, go to the\n                    'sharing' tab, and click on 'permissions'.",
+      "notes": [],
+      "plugin_id": "42411",
+      "references": "",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Microsoft Windows SMB Shares Unprivileged Access"
+    },
+    {
+      "affected_components": [
+        "192.168.1.112:5353/udp (mdns)",
+        "192.168.1.111:5353/udp (mdns)"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "cwe": "",
+      "description": "It is possible to obtain information about the remote host.\n\nThe remote service understands the Bonjour (also known as ZeroConf or mDNS) protocol, which\n                    allows anyone to uncover information from the remote host such as its operating system type and\n                    exact version, its hostname, and the list of services it is running.\n\n                    This plugin attempts to discover mDNS used by hosts that are not on the network segment on which\n                    Nessus resides.",
+      "impact": "",
+      "mitigation": "Filter incoming traffic to UDP port 5353, if desired.",
+      "notes": [],
+      "plugin_id": "12218",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "mDNS Detection (Remote Network)"
+    },
+    {
+      "affected_components": [
+        "10.15.10.14:8180/tcp (www)",
+        "10.15.10.14:6667/tcp (irc)",
+        "10.15.10.14:5900/tcp (vnc)",
+        "10.15.10.14:25/tcp (smtp)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The remote service could be identified.\n\nIt was possible to identify the remote service by its banner or by looking at the error\n                    message it sends when it receives an HTTP request.",
+      "impact": "",
+      "mitigation": "n/a",
+      "notes": [],
+      "plugin_id": "22964",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Service Detection"
+    },
+    {
+      "affected_components": [
+        "10.15.10.14:443/icmp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-200",
+      "description": "It is possible to determine the exact time set on the remote host.\n\nThe remote host answers to an ICMP timestamp request. This allows an attacker to know the\n                    date that is set on the targeted machine, which may assist an unauthenticated, remote attacker in\n                    defeating time-based authentication protocols.\n\n                    Timestamps returned from machines running Windows Vista / 7 / 2008 / 2008 R2 are deliberately\n                    incorrect, but usually within 1000 seconds of the actual system time.",
+      "impact": "",
+      "mitigation": "Filter out the ICMP timestamp requests (13), and the outgoing ICMP timestamp replies (14).",
+      "notes": [],
+      "plugin_id": "10114",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "ICMP Timestamp Request Remote Date Disclosure"
+    },
+    {
+      "affected_components": [
+        "10.15.10.14:53/udp (dns)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to obtain the version number of the remote DNS server.\n\nThe remote host is running BIND or another DNS server that reports its version number when\n                    it receives a special request for the text 'version.bind' in the domain 'chaos'.\n\n                    This version is not necessarily accurate and could even be forged, as some DNS servers send the\n                    information based on a configuration file.",
+      "impact": "",
+      "mitigation": "It is possible to hide the version number of BIND by using the 'version' directive\n                    in the 'options' section in named.conf.",
+      "notes": [],
+      "plugin_id": "10028",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "DNS Server BIND version Directive Remote Version Detection"
+    },
+    {
+      "affected_components": [
+        "10.15.10.14:53/udp (dns)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The DNS server discloses the remote host name.\n\nIt is possible to learn the remote host name by querying the remote DNS server for 'hostname.bind'\n                    in the CHAOS domain.",
+      "impact": "",
+      "mitigation": "It may be possible to disable this feature. Consult the vendor's documentation for more\n                    information.",
+      "notes": [],
+      "plugin_id": "35371",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "DNS Server hostname.bind Map Hostname Disclosure"
+    },
+    {
+      "affected_components": [
+        "10.15.10.14:8180/tcp (www)",
+        "10.15.10.14:111/tcp (rpc-portmapper)",
+        "10.15.10.11:2049/tcp (rpc-nfs)",
+        "10.15.10.11:445/tcp (cifs)",
+        "10.15.10.11:53/tcp (dns)",
+        "10.15.10.11:6000/tcp (x11)",
+        "10.15.10.11:139/tcp (smb)",
+        "10.15.10.11:111/tcp (rpc-portmapper)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to determine which TCP ports are open.\n\nThis plugin is a SYN 'half-open' port scanner. It shall be reasonably quick even\n                    against a firewalled target.\n\n                    Note that SYN scans are less intrusive than TCP (full connect) scans against broken services, but\n                    they might cause problems for less robust firewalls and also leave unclosed connections on the\n                    remote target, if the network is loaded.",
+      "impact": "",
+      "mitigation": "Protect your target with an IP filter.",
+      "notes": [],
+      "plugin_id": "11219",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Nessus SYN scanner"
+    },
+    {
+      "affected_components": [
+        "10.15.10.11:53/udp (dns)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "A DNS server is listening on the remote host.\n\nThe remote service is a Domain Name System (DNS) server, which provides a mapping between\n                    hostnames and IP addresses.",
+      "impact": "",
+      "mitigation": "Disable this service if it is not needed or restrict access to internal hosts only if the\n                    service is available externally.",
+      "notes": [],
+      "plugin_id": "11002",
+      "references": "<ul><li><a href=\"http://en.wikipedia.org/wiki/Domain_Name_System\">http://en.wikipedia.org/wiki/Domain_Name_System</a></li></ul>",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "DNS Server Detection"
+    },
+    {
+      "affected_components": [
+        "10.15.10.11:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The remote service implements TCP timestamps.\n\nThe remote host implements TCP timestamps, as defined by RFC1323. A side effect of this\n                    feature is that the uptime of the remote host can sometimes be computed.",
+      "impact": "",
+      "mitigation": "n/a",
+      "notes": [],
+      "plugin_id": "25220",
+      "references": "<ul><li><a href=\"http://www.ietf.org/rfc/rfc1323.txt\">http://www.ietf.org/rfc/rfc1323.txt</a></li></ul>",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "TCP/IP Timestamps Supported"
+    },
+    {
+      "affected_components": [
+        "10.15.10.11:0/udp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It was possible to obtain traceroute information.\n\nMakes a traceroute to the remote host.",
+      "impact": "",
+      "mitigation": "n/a",
+      "notes": [],
+      "plugin_id": "10287",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Traceroute Information"
+    },
+    {
+      "affected_components": [
+        "10.15.10.11:445/tcp (cifs)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to obtain network information.\n\nIt was possible to obtain the browse list of the remote Windows system by sending a request\n                    to the LANMAN pipe. The browse list is the list of the nearest Windows systems of the remote host.",
+      "impact": "",
+      "mitigation": "n/a",
+      "notes": [],
+      "plugin_id": "10397",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Microsoft Windows SMB LanMan Pipe Server Listing Disclosure"
+    }
+  ],
+  "outcome": "ok"
+}

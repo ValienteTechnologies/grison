@@ -1,0 +1,24 @@
+{
+  "detected": "acunetix",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "https://vijaytest.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-352",
+      "description": "Vijay Test Description",
+      "impact": "Vijay Test Imapact",
+      "mitigation": "Vijay Test Recommendation",
+      "notes": [],
+      "plugin_id": "VijayReportItem1",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "VijayReportItem1"
+    }
+  ],
+  "outcome": "ok"
+}

@@ -1,0 +1,149 @@
+{
+  "detected": "burp",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "http://bwa/bodgeit/search.jsp [q parameter] (192.168.187.137)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Reflected cross-site scripting vulnerabilities arise when data is copied from a request and echoed into the application's immediate response in an unsafe way. An attacker can use the vulnerability to construct a request which, if issued by another application user, will cause JavaScript code supplied by the attacker to execute within the user's browser in the context of that user's session with the application.<br><br>The attacker-supplied code can perform a wide variety of actions, such as stealing the victim's session token or login credentials, performing arbitrary actions on the victim's behalf, and logging their keystrokes.<br><br>Users can be induced to issue the attacker's crafted request in various ways. For example, the attacker can send a victim a link containing a malicious URL in an email or instant message. They can submit the link to popular web sites that allow content authoring, for example in blog comments. And they can create an innocuous looking web site which causes anyone viewing it to make arbitrary cross-domain requests to the vulnerable application (using either the GET or the POST method).<br><br>The security impact of cross-site scripting vulnerabilities is dependent upon the nature of the vulnerable application, the kinds of data and functionality which it contains, and the other applications which belong to the same domain and organization. If the application is used only to display non-sensitive public content, with no authentication or access control functionality, then a cross-site scripting flaw may be considered low risk. However, if the same application resides on a domain which can access cookies for other more security-critical applications, then the vulnerability could be used to attack those other applications, and so may be considered high risk. Similarly, if the organization which owns the application is a likely target for phishing attacks, then the vulnerability could be leveraged to lend credibility to such attacks, by injecting Trojan functionality into the vulnerable application, and exploiting users' trust in the organization in order to capture credentials for other applications which it owns. In many kinds of application, such as those providing online banking functionality, cross-site scripting should always be considered high risk.\n\nThe value of the <b>q</b> request parameter is copied into the HTML document as plain text between tags. The payload <b>5d4ff&lt;script&gt;alert(1)&lt;/script&gt;18327</b> was submitted in the q parameter. This input was echoed unmodified in the application's response.<br><br>This proof-of-concept attack demonstrates that it is possible to inject arbitrary JavaScript into the application's response.",
+      "impact": "",
+      "mitigation": "In most situations where user-controllable data is copied into application responses, cross-site scripting attacks can be prevented using two layers of defenses:<ul><li>Input should be validated as strictly as possible on arrival, given the kind of content which it is expected to contain. For example, personal names should consist of alphabetical and a small range of typographical characters, and be relatively short; a year of birth should consist of exactly four numerals; email addresses should match a well-defined regular expression. Input which fails the validation should be rejected, not sanitized.</li><li>User input should be HTML-encoded at any point where it is copied into application responses. All HTML metacharacters, including &lt; &gt; \" ' and =, should be replaced with the corresponding HTML entities (&amp;lt; &amp;gt; etc).</li></ul>In cases where the application's functionality allows users to author content using a restricted subset of HTML tags and attributes (for example, blog comments which allow limited formatting and linking), it is necessary to parse the supplied HTML to validate that it does not use any dangerous syntax; this is a non-trivial task.",
+      "notes": [],
+      "plugin_id": "2097920",
+      "references": "",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [
+        "confidence:certain"
+      ],
+      "title": "Cross-site scripting (reflected)"
+    },
+    {
+      "affected_components": [
+        "http://bwa/bodgeit/basket.jsp [b_id cookie] (192.168.187.137)",
+        "http://bwa/bodgeit/login.jsp [username parameter] (192.168.187.137)",
+        "http://bwa/bodgeit/login.jsp [password parameter] (192.168.187.137)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "SQL injection vulnerabilities arise when user-controllable data is incorporated into database SQL queries in an unsafe manner. An attacker can supply crafted input to break out of the data context in which their input appears and interfere with the structure of the surrounding query.<br><br>Various attacks can be delivered via SQL injection, including reading or modifying critical application data, interfering with application logic, escalating privileges within the database and executing operating system commands.\n\nThe <b>b_id</b> cookie appears to be vulnerable to SQL injection attacks. The payload <b>'</b> was submitted in the b_id cookie, and a database error message was returned. You should review the contents of the error message, and the application's handling of other input, to confirm whether a vulnerability is present.<br><br>The database appears to be Microsoft SQL Server.",
+      "impact": "",
+      "mitigation": "The most effective way to prevent SQL injection attacks is to use parameterized queries (also known as prepared statements) for all database access. This method uses two steps to incorporate potentially tainted data into SQL queries: first, the application specifies the structure of the query, leaving placeholders for each item of user input; second, the application specifies the contents of each placeholder. Because the structure of the query has already been defined in the first step, it is not possible for malformed data in the second step to interfere with the query structure. You should review the documentation for your database and application platform to determine the appropriate APIs which you can use to perform parameterized queries. It is strongly recommended that you parameterize <i>every</i> variable data item that is incorporated into database queries, even if it is not obviously tainted, to prevent oversights occurring and avoid vulnerabilities being introduced by changes elsewhere within the code base of the application.<br><br>You should be aware that some commonly employed and recommended mitigations for SQL injection vulnerabilities are not always effective:<ul><li>One common defense is to double up any single quotation marks appearing within user input before incorporating that input into a SQL query. This defense is designed to prevent malformed data from terminating the string in which it is inserted. However, if the data being incorporated into queries is numeric, then the defense may fail, because numeric data may not be encapsulated within quotes, in which case only a space is required to break out of the data context and interfere with the query. Further, in second-order SQL injection attacks, data that has been safely escaped when initially inserted into the database is subsequently read from the database and then passed back to it again. Quotation marks that have been doubled up initially will return to their original form when the data is reused, allowing the defense to be bypassed.</li><li>Another often cited defense is to use stored procedures for database access. While stored procedures can provide security benefits, they are not guaranteed to prevent SQL injection attacks. The same kinds of vulnerabilities that arise within standard dynamic SQL queries can arise if any SQL is dynamically constructed within stored procedures. Further, even if the procedure is sound, SQL injection can arise if the procedure is invoked in an unsafe manner using user-controllable data.</li></ul>\n\nThe application should handle errors gracefully and prevent SQL error messages from being returned in responses.",
+      "notes": [],
+      "plugin_id": "1049088",
+      "references": "",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [
+        "confidence:firm"
+      ],
+      "title": "SQL injection"
+    },
+    {
+      "affected_components": [
+        "http://bwa/bodgeit/login.jsp (192.168.187.137)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Passwords submitted over an unencrypted connection are vulnerable to capture by an attacker who is suitably positioned on the network. This includes any malicious party located on the user's own network, within their ISP, within the ISP used by the application, and within the application's hosting infrastructure. Even if switched networks are employed at some of these locations, techniques exist to circumvent this defense and monitor the traffic passing through switches.\n\nThe page contains a form with the following action URL, which is submitted over clear-text HTTP:<ul><li>http://bwa/bodgeit/login.jsp</li></ul>The form contains the following password field:<ul><li>password</li></ul>",
+      "impact": "",
+      "mitigation": "The application should use transport-level encryption (SSL or TLS) to protect all sensitive communications passing between the client and the server. Communications that should be protected include the login mechanism and related functionality, and any functions where sensitive data can be accessed or privileged actions can be performed. These areas of the application should employ their own session handling mechanism, and the session tokens used should never be transmitted over unencrypted communications. If HTTP cookies are used for transmitting session tokens, then the secure flag should be set to prevent transmission over clear-text HTTP.",
+      "notes": [],
+      "plugin_id": "3145984",
+      "references": "",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [
+        "confidence:certain"
+      ],
+      "title": "Cleartext submission of password"
+    },
+    {
+      "affected_components": [
+        "http://bwa/bodgeit/login.jsp (192.168.187.137)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Most browsers have a facility to remember user credentials that are entered into HTML forms. This function can be configured by the user and also by applications which employ user credentials. If the function is enabled, then credentials entered by the user are stored on their local computer and retrieved by the browser on future visits to the same application.<br><br>The stored credentials can be captured by an attacker who gains access to the computer, either locally or through some remote compromise. Further, methods have existed whereby a malicious web site can retrieve the stored credentials for other applications, by exploiting browser vulnerabilities or through application-level cross-domain attacks.\n\nThe page contains a form with the following action URL:<ul><li>http://bwa/bodgeit/login.jsp</li></ul>The form contains the following password field with autocomplete enabled:<ul><li>password</li></ul>",
+      "impact": "",
+      "mitigation": "To prevent browsers from storing credentials entered into HTML forms, you should include the attribute <b>autocomplete=\"off\"</b> within the FORM tag (to protect all form fields) or within the relevant INPUT tags (to protect specific individual fields).",
+      "notes": [],
+      "plugin_id": "5244928",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [
+        "confidence:certain"
+      ],
+      "title": "Password field with autocomplete enabled"
+    },
+    {
+      "affected_components": [
+        "http://bwa/bodgeit/ (192.168.187.137)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "If the HttpOnly attribute is set on a cookie, then the cookie's value cannot be read or set by client-side JavaScript. This measure can prevent certain client-side attacks, such as cross-site scripting, from trivially capturing the cookie's value via an injected script.\n\nThe following cookie was issued by the application and does not have the HttpOnly flag set:<ul><li><b>JSESSIONID=AD00240A932835EDD60B3F7487A9D15D; Path=/</b></li></ul>The cookie appears to contain a session token, which may increase the risk associated with this issue. You should review the contents of the cookie to determine its function.",
+      "impact": "",
+      "mitigation": "There is usually no good reason not to set the HttpOnly flag on all cookies. Unless you specifically require legitimate client-side scripts within your application to read or set a cookie's value, you should set the HttpOnly flag by including this attribute within the relevant Set-cookie directive.<br><br>You should be aware that the restrictions imposed by the HttpOnly flag can potentially be circumvented in some circumstances, and that numerous other serious attacks can be delivered by client-side script injection, aside from simple cookie stealing.",
+      "notes": [],
+      "plugin_id": "5244416",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [
+        "confidence:firm"
+      ],
+      "title": "Cookie without HttpOnly flag set"
+    },
+    {
+      "affected_components": [
+        "http://bwa/bodgeit/ (192.168.187.137)",
+        "http://bwa/bodgeit/search.jsp (192.168.187.137)",
+        "http://bwa/bodgeit/product.jsp (192.168.187.137)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It might be possible for a web page controlled by an attacker to load the content of this response within an iframe on the attacker's page. This may enable a \"clickjacking\" attack, in which the attacker's page overlays the target application's interface with a different interface provided by the attacker. By inducing victim users to perform actions such as mouse clicks and keystrokes, the attacker can cause them to unwittingly carry out actions within the application that is being targeted. This technique allows the attacker to circumvent defenses against cross-site request forgery, and may result in unauthorized actions.<br><br>Note that this issue is being reported because the application's response does not set a suitable <b>X-Frame-Options</b> header in order to prevent framing attacks. Some applications attempt to prevent these attacks from within the HTML page itself, using \"framebusting\" code. However, this type of defense is normally ineffective and can usually be circumvented by a skilled attacker.",
+      "impact": "",
+      "mitigation": "You should review the application functions that are accessible from within the response, and determine whether they can be used by application users to perform any sensitive actions within the application. If so, then a framing attack targeting this response may result in unauthorized actions.<br><br>To effectively prevent framing attacks, the application should return a response header with the name <b>X-Frame-Options</b> and the value <b>DENY</b> to prevent framing altogether, or the value <b>SAMEORIGIN</b> to allow framing only by pages on the same origin as the response itself.",
+      "notes": [],
+      "plugin_id": "5245344",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [
+        "confidence:firm"
+      ],
+      "title": "Frameable response (potential Clickjacking)"
+    },
+    {
+      "affected_components": [
+        "http://bwa/bodgeit/login.jsp (192.168.187.137)",
+        "http://bwa/bodgeit/contact.jsp (192.168.187.137)",
+        "http://bwa/bodgeit/search.jsp (192.168.187.137)",
+        "http://bwa/bodgeit/basket.jsp (192.168.187.137)",
+        "http://bwa/bodgeit/product.jsp (192.168.187.137)",
+        "http://bwa/bodgeit/ (192.168.187.137)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "If a web response states that it contains HTML content but does not specify a character set, then the browser may analyze the HTML and attempt to determine which character set it appears to be using. Even if the majority of the HTML actually employs a standard character set such as UTF-8, the presence of non-standard characters anywhere in the response may cause the browser to interpret the content using a different character set. This can have unexpected results, and can lead to cross-site scripting vulnerabilities in which non-standard encodings like UTF-7 can be used to bypass the application's defensive filters.<br><br>In most cases, the absence of a charset directive does not constitute a security flaw, particularly if the response contains static content. You should review the contents of the response and the context in which it appears to determine whether any vulnerability exists.",
+      "impact": "",
+      "mitigation": "For every response containing HTML content, the application should include within the Content-type header a directive specifying a standard recognized character set, for example <b>charset=ISO-8859-1</b>.",
+      "notes": [],
+      "plugin_id": "8389120",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [
+        "confidence:certain"
+      ],
+      "title": "HTML does not specify charset"
+    }
+  ],
+  "outcome": "ok"
+}

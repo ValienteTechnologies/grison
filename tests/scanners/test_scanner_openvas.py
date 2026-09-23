@@ -40,7 +40,7 @@ def _result(nvt_tags: str, description: str = "", severity: str = "5.0") -> byte
 
 
 def test_parses_findings() -> None:
-    findings = OpenVASScanner().parse(load("openvas_sample.xml"), ImportOptions())
+    findings = OpenVASScanner().parse(load("openvas/openvas_sample.xml"), ImportOptions())
     assert len(findings) == 1
     assert findings[0].title == "Weak SSH Host Key"
     # CVSS base score 6.5 maps to Medium (per cvss_to_severity: 3.9 < x <= 6.9).
@@ -55,6 +55,16 @@ def test_bare_v2_cvss_base_vector_gets_converted() -> None:
     findings = OpenVASScanner().parse(xml, ImportOptions())
     assert findings[0].cvss_vector == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"
     assert parse_cvss(findings[0].cvss_vector).base_score > 0
+
+
+def test_malformed_cvss_base_vector_drops_and_warns_instead_of_defaulting() -> None:
+    # Not a real CVSS2 vector (no "KEY:VALUE" pairs) and not "CVSS:"-prefixed
+    # either, so it's routed into the v2 converter, which must refuse it rather
+    # than silently emit an all-defaults CVSS3 vector.
+    xml = _result("summary=Test|cvss_base_vector=garbage")
+    findings = OpenVASScanner().parse(xml, ImportOptions())
+    assert findings[0].cvss_vector == ""
+    assert findings[0].notes == ["CVSS v2 vector garbage could not be converted, dropped"]
 
 
 def test_empty_summary_falls_back_to_description() -> None:

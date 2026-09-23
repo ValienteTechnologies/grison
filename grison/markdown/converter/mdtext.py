@@ -89,6 +89,41 @@ def _wrap_delim(
     return f"{lead}{marker}{core}{marker}{trail}"
 
 
+def escape_literal_text_to_md(text: str) -> str:
+    """Turn a blob of literal, already-HTML-unescaped plain text (one or more
+    physical lines, ``\\n``-joined) into markdown that round-trips back to
+    this text: each line goes through :func:`_md_escape_run` (protects a run
+    that would otherwise be reparsed as emphasis/code/a link/raw inline HTML —
+    e.g. a literal ``<script>...</script>`` string sitting in running text)
+    and then :func:`_finalize_line` — the SAME finishing step the converter's
+    own ``html->markdown`` direction applies to every rendered line (see
+    below) — which strips leading AND trailing whitespace per line (4+
+    leading spaces would otherwise read back as an indented-code-block
+    attempt on the next push; see :func:`_finalize_line`'s own docstring for
+    the full reasoning, including why the strip is Unicode-aware) and then
+    escapes a line-leading run that would otherwise be reparsed as a block
+    sigil — heading/list marker/blockquote/fence/GFM table row/thematic
+    break. The round-trip guarantee is against that STRIPPED text, not
+    necessarily the exact original whitespace — matching what the very next
+    ``md_to_html``/``html_to_md`` pass would do to whitespace at a line edge
+    regardless.
+
+    The converter's own ``html->markdown`` direction gets this guarantee for
+    free (every text node it emits goes through the same two primitives — see
+    ``from_html/inline.py``'s ``_render_text_run`` and this module's own
+    :func:`_finalize_line`, called from ``from_html/blocks.py``). This
+    function exists for callers OUTSIDE the HTML<->markdown converter that
+    still need to hand it plain text destined for a markdown field:
+    ``grison.markdown.mapping._prose_to_md``'s ``ConverterError`` fallback
+    degrades HTML falling outside the converter's closed vocabulary (e.g. a
+    scanner-sourced ``<b>``/``<i>`` tag) down to flat text — that text still
+    lands in a real markdown field and needs the exact same round-trip-safety
+    guarantee as everything the converter itself emits, not a hand-rolled
+    substitute (a bare ``<script>...</script>`` left unescaped there is real
+    inline HTML once re-parsed, rejected by the validator's FND-014 rule)."""
+    return "\n".join(_finalize_line(_md_escape_run(line)) for line in text.split("\n"))
+
+
 def _md_escape_quotes(text: str) -> str:
     """Backslash-escape a literal ``"`` in a link title so it can't prematurely
     close the title's own quoted markdown syntax."""
@@ -96,14 +131,38 @@ def _md_escape_quotes(text: str) -> str:
 
 
 _LINE_START_SIGIL_RE = re.compile(r"^(#{1,6}(?=[ \t]|$)|[-*+](?=[ \t]|$)|\d+\.(?=[ \t]|$)|>|```)")
+# CommonMark's thematic-break shape: 0-3 leading spaces (never actually present
+# here — callers always strip first), then 3+ of the SAME ``-``/``*``/``_``
+# character with only spaces/tabs allowed between occurrences, and nothing else
+# on the line. A run of just 1-2 is ordinary text (or, for ``-``, already
+# caught by ``_LINE_START_SIGIL_RE`` as a list marker when followed by a
+# space); this only needs to catch the 3-or-more case that rule doesn't.
+_THEMATIC_BREAK_RE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 
 
-def _md_escape_line_start(line: str) -> str:
+def _md_escape_line_start(line: str, *, escape_pipe_and_thematic_break: bool = True) -> str:
     """Escape a line-leading sequence that would otherwise be read as a block
-    sigil (heading/list marker/blockquote/fence) once this text starts a fresh
-    output line. Only the first matched character needs the backslash — CommonMark
-    treats an escaped punctuation character as ordinary text, which is enough to
-    stop the whole-line pattern from matching."""
+    sigil (heading/list marker/blockquote/fence/GFM table row/thematic break)
+    once this text starts a fresh output line. Only the first matched
+    character needs the backslash in every case — CommonMark treats an
+    escaped punctuation character as ordinary text, which is enough to stop
+    the whole-line pattern from matching.
+
+    ``escape_pipe_and_thematic_break`` gates the last two cases only — a
+    leading ``|`` (GFM table row shape) and a thematic-break-shaped line
+    (``---``/``***``/``___``, optionally space-separated, 3+ characters,
+    CommonMark's own definition, see :data:`_THEMATIC_BREAK_RE`). A caller
+    that's about to embed this text INSIDE a GFM table cell — never written
+    out as its own top-level line — passes ``False``: a table cell already
+    backslash-escapes every ``|`` in its content on its own (see
+    ``from_html/table.py``'s ``_render_cell``; escaping a leading one again
+    here would double the backslash instead of protecting it), and cell
+    content can never be misread as a thematic break in the first place,
+    since it never starts a markdown line of its own."""
+    if escape_pipe_and_thematic_break and (
+        line.startswith("|") or _THEMATIC_BREAK_RE.match(line) is not None
+    ):
+        return "\\" + line
     m = _LINE_START_SIGIL_RE.match(line)
     if not m:
         return line
@@ -111,7 +170,12 @@ def _md_escape_line_start(line: str) -> str:
     return line[:pos] + "\\" + line[pos:]
 
 
-def _finalize_line(text: str, on_loss: Callable[[str], None] | None = None) -> str:
+def _finalize_line(
+    text: str,
+    on_loss: Callable[[str], None] | None = None,
+    *,
+    escape_pipe_and_thematic_break: bool = True,
+) -> str:
     """Finalize each physical line of already-rendered inline content (a
     paragraph, or one list item's own line) before it's written out as its own
     markdown line: strip leading AND trailing whitespace (HTML collapses/
@@ -123,7 +187,10 @@ def _finalize_line(text: str, on_loss: Callable[[str], None] | None = None) -> s
     the next push — either way exactly backwards for content that was never
     meant to carry that whitespace), then escape a leading block-sigil-looking
     sequence so it can never be misread as a heading/list marker/blockquote/
-    fence either.
+    fence/GFM table row/thematic break either (the last two are gated by
+    ``escape_pipe_and_thematic_break`` — see :func:`_md_escape_line_start`;
+    ``from_html/table.py``'s ``_render_cell`` passes ``False`` since a table
+    cell's own pipe-escaping and line-embedding already make both moot).
 
     The strip uses Python's full (Unicode-aware) whitespace definition, matching
     markdown-it-py's own ``rules_block/paragraph.py`` (``state.getLines(...).strip()``
@@ -145,7 +212,11 @@ def _finalize_line(text: str, on_loss: Callable[[str], None] | None = None) -> s
                 "non-breaking or other non-ASCII whitespace at a line edge dropped "
                 "(normalization; matches CommonMark's own paragraph-content trim)",
             )
-        lines.append(_md_escape_line_start(stripped))
+        lines.append(
+            _md_escape_line_start(
+                stripped, escape_pipe_and_thematic_break=escape_pipe_and_thematic_break
+            )
+        )
     return "\n".join(lines)
 
 

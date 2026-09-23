@@ -1,0 +1,41 @@
+{
+  "detected": "nessus",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "www.syslifters.com:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "This plugin displays information about the Nessus scan.\n\nThis plugin displays, for each tested host, information about the scan itself :\n\n  - The version of the plugin set.\n  - The type of scanner (Nessus or Nessus Home).\n  - The version of the Nessus Engine.\n  - The port scanner(s) used.\n  - The port range scanned.\n  - The ping round trip time \n  - Whether credentialed or third-party patch management     checks are possible.\n  - Whether the display of superseded patches is enabled\n  - The date of the scan.\n  - The duration of the scan.\n  - The number of hosts scanned in parallel.\n  - The number of checks done in parallel.",
+      "impact": "",
+      "mitigation": "n/a",
+      "notes": [],
+      "plugin_id": "19506",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Nessus Scan Information"
+    },
+    {
+      "affected_components": [
+        "www.syslifters.com:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It was possible to identify the status of the remote host (alive or dead).\n\nNessus was able to determine if the remote host is alive using one or more of the following ping types :\n\n  - An ARP ping, provided the host is on the local subnet     and Nessus is running over Ethernet.\n\n  - An ICMP ping.\n\n  - A TCP ping, in which the plugin sends to the remote host     a packet with the flag SYN, and the host will reply with     a RST or a SYN/ACK.\n\n  - A UDP ping (e.g., DNS, RPC, and NTP).",
+      "impact": "",
+      "mitigation": "n/a",
+      "notes": [],
+      "plugin_id": "10180",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Ping the remote host"
+    }
+  ],
+  "outcome": "ok"
+}

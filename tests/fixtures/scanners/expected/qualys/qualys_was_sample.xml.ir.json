@@ -1,0 +1,41 @@
+{
+  "detected": "qualys",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "https://example.com/login?id=1"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "The page is vulnerable to SQL injection.",
+      "impact": "",
+      "mitigation": "Use parameterized queries.",
+      "notes": [],
+      "plugin_id": "150010",
+      "references": "",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "SQL Injection"
+    },
+    {
+      "affected_components": [
+        "https://example.com/search?q=1"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+      "cwe": "",
+      "description": "The page reflects unsanitized user input in the response.",
+      "impact": "An attacker could execute script in a victim's browser.",
+      "mitigation": "Sanitize all user input before reflecting it in the response.",
+      "notes": [],
+      "plugin_id": "150004",
+      "references": "<ul><li>CVE-2023-1234</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Reflected Cross-Site Scripting"
+    }
+  ],
+  "outcome": "ok"
+}

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import defusedxml.ElementTree as ET
 
-from grison.scanners.ir import ScanFinding, Severity
+from grison.scanners.ir import ScanFinding
+from grison.scanners.ir.cvss2 import CvssConversionError, ensure_cvss3_prefix
 from grison.scanners.ir.cvss2 import cvss2_to_cvss3 as _cvss2_to_cvss3
+from grison.scanners.ir.cwe import normalize_cwe
+from grison.scanners.ir.severity import severity_or_info
 
-from .base import ImportOptions, Scanner
+from .base import AggregatedRecord, Aggregator, ImportOptions, RawOccurrence, Scanner, refs_to_html
 
 
 class NessusScanner(Scanner):
@@ -14,8 +17,7 @@ class NessusScanner(Scanner):
 
     def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
-        # Aggregate: plugin_id -> {meta, affected_components, refs}
-        aggregated: dict[str, dict] = {}
+        agg = Aggregator()
 
         for host in root.findall(".//ReportHost"):
             hostname = host.get("name", "")
@@ -33,12 +35,7 @@ class NessusScanner(Scanner):
                     continue
 
                 risk_raw = (item.findtext("risk_factor") or "none").strip().lower()
-                if risk_raw == "none":
-                    risk_raw = "informational"
-                try:
-                    severity = Severity.from_str(risk_raw)
-                except ValueError:
-                    severity = Severity.INFO
+                severity = severity_or_info(risk_raw)
 
                 if not self._severity_allowed(severity, opts):
                     continue
@@ -47,66 +44,67 @@ class NessusScanner(Scanner):
                 if svc:
                     component += f" ({svc})"
 
-                if plugin_id not in aggregated:
-                    # Prefer cvss3_vector by provenance, not by prefix-sniffing the
-                    # (possibly v2) cvss_vector field: real-world exports sometimes
-                    # populate both, and cvss3_vector sometimes lacks its "CVSS:3.x/"
-                    # prefix — either way it's already v3 and must never be routed
-                    # through the v2 converter, which would silently zero its impact.
-                    cvss3_raw = (item.findtext("cvss3_vector") or "").strip()
-                    if cvss3_raw:
-                        cvss_raw = (
-                            cvss3_raw if cvss3_raw.startswith("CVSS:3") else f"CVSS:3.0/{cvss3_raw}"
-                        )
-                    else:
-                        cvss2_raw = (item.findtext("cvss_vector") or "").strip()
-                        cvss_raw = _cvss2_to_cvss3(cvss2_raw) if cvss2_raw else ""
-
-                    cwe_raw = (item.findtext("cwe") or "").strip()
-                    cwe = f"CWE-{cwe_raw}" if cwe_raw.isdigit() else ""
-
-                    see_also_raw = (item.findtext("see_also") or "").strip()
-                    refs = [u.strip() for u in see_also_raw.splitlines() if u.strip()]
-
-                    aggregated[plugin_id] = {
-                        "title": item.get("pluginName", f"Plugin {plugin_id}"),
-                        "severity": severity,
-                        "cvss_vector": cvss_raw,
-                        "cwe": cwe,
-                        "description": (item.findtext("description") or "").strip(),
-                        "mitigation": (item.findtext("solution") or "").strip(),
-                        "synopsis": (item.findtext("synopsis") or "").strip(),
-                        "refs": refs,
-                        "affected": [component],
-                    }
+                # Prefer cvss3_vector by provenance, not by prefix-sniffing the
+                # (possibly v2) cvss_vector field: real-world exports sometimes
+                # populate both, and cvss3_vector sometimes lacks its "CVSS:3.x/"
+                # prefix — either way it's already v3 and must never be routed
+                # through the v2 converter, which would silently zero its impact.
+                cvss3_raw = (item.findtext("cvss3_vector") or "").strip()
+                notes: list[str] = []
+                if cvss3_raw:
+                    cvss_raw = ensure_cvss3_prefix(cvss3_raw)
                 else:
-                    if component not in aggregated[plugin_id]["affected"]:
-                        aggregated[plugin_id]["affected"].append(component)
+                    cvss2_raw = (item.findtext("cvss_vector") or "").strip()
+                    if cvss2_raw:
+                        try:
+                            cvss_raw = _cvss2_to_cvss3(cvss2_raw)
+                        except CvssConversionError:
+                            cvss_raw = ""
+                            notes.append(
+                                f"CVSS v2 vector {cvss2_raw} could not be converted, dropped"
+                            )
+                    else:
+                        cvss_raw = ""
 
-        findings: list[ScanFinding] = []
-        for plugin_id, meta in aggregated.items():
-            refs_html = (
-                "<ul>" + "".join(f'<li><a href="{r}">{r}</a></li>' for r in meta["refs"]) + "</ul>"
-                if meta["refs"]
-                else ""
-            )
-            description = (
-                meta["synopsis"] + "\n\n" + meta["description"]
-                if meta["synopsis"]
-                else meta["description"]
-            )
-            findings.append(
-                ScanFinding(
-                    title=meta["title"],
-                    plugin_id=plugin_id,
-                    severity=meta["severity"],
-                    cvss_vector=meta["cvss_vector"],
-                    cwe=meta["cwe"],
-                    description=description.strip(),
-                    mitigation=meta["mitigation"],
-                    references=refs_html,
-                    affected_components=meta["affected"],
+                cwe = normalize_cwe((item.findtext("cwe") or "").strip())
+
+                see_also_raw = (item.findtext("see_also") or "").strip()
+                refs: list[str | tuple[str, str]] = [
+                    u.strip() for u in see_also_raw.splitlines() if u.strip()
+                ]
+
+                synopsis = (item.findtext("synopsis") or "").strip()
+                raw_description = (item.findtext("description") or "").strip()
+                description = f"{synopsis}\n\n{raw_description}" if synopsis else raw_description
+
+                agg.add(
+                    RawOccurrence(
+                        key=plugin_id,
+                        title=item.get("pluginName", f"Plugin {plugin_id}"),
+                        severity=severity,
+                        affected_component=component,
+                        cvss_vector=cvss_raw,
+                        cwe=cwe,
+                        description=description.strip(),
+                        mitigation=(item.findtext("solution") or "").strip(),
+                        references=refs,
+                        notes=notes,
+                    )
                 )
-            )
 
+        findings = [self._to_finding(rec) for rec in agg.records()]
         return self.sort_by_severity(findings)
+
+    def _to_finding(self, rec: AggregatedRecord) -> ScanFinding:
+        return ScanFinding(
+            title=rec.title,
+            plugin_id=rec.key,
+            severity=rec.severity,
+            cvss_vector=rec.cvss_vector,
+            cwe=rec.cwe,
+            description=rec.description,
+            mitigation=rec.mitigation,
+            references=refs_to_html(rec.references),
+            affected_components=rec.affected_components,
+            notes=rec.notes,
+        )

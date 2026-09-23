@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import html
-
 import defusedxml.ElementTree as ET
 
 from grison.scanners.ir import ScanFinding, Severity
+from grison.scanners.ir.cwe import normalize_cwe
+from grison.scanners.ir.severity import severity_or_info
 
-from .base import ImportOptions, Scanner
+from .base import AggregatedRecord, Aggregator, ImportOptions, RawOccurrence, Scanner, refs_to_html
 
 _NUMERIC_SEV: dict[str, Severity] = {
     "0": Severity.INFO,
@@ -17,21 +17,11 @@ _NUMERIC_SEV: dict[str, Severity] = {
 }
 
 
-def _ref_li(ref: str) -> str:
-    """One reference as a list item; http(s) references become links."""
-    if ref.startswith("http"):
-        return f'<li><a href="{html.escape(ref, quote=True)}">{html.escape(ref)}</a></li>'
-    return f"<li>{html.escape(ref)}</li>"
-
-
 def _parse_severity(raw: str) -> Severity:
     raw = raw.strip().lower()
     if raw in _NUMERIC_SEV:
         return _NUMERIC_SEV[raw]
-    try:
-        return Severity.from_str(raw)
-    except ValueError:
-        return Severity.INFO
+    return severity_or_info(raw)
 
 
 class AcunetixScanner(Scanner):
@@ -43,7 +33,12 @@ class AcunetixScanner(Scanner):
 
         scans = root.findall(".//Scan") if root.tag != "Scan" else [root]
 
-        aggregated: dict[str, dict] = {}
+        agg = Aggregator()
+        # Whether the FIRST occurrence of a vuln_id had a CVSS v4 vector but no v3
+        # one — matches cvss_vector's own "first occurrence wins" merge semantics
+        # (Aggregator only keeps the first occurrence's non-severity fields), so
+        # this stays correct however later occurrences of the same key look.
+        v4_only: dict[str, bool] = {}
 
         for scan in scans:
             start_url = (scan.findtext("StartURL") or "").strip()
@@ -65,71 +60,76 @@ class AcunetixScanner(Scanner):
                 affected_item = (item.findtext("AffectedItem") or "").strip()
                 component = f"{start_url}{affected_item}" if affected_item else start_url
 
-                if vuln_id not in aggregated:
-                    cwe_raw = (item.findtext("CWE") or "").strip()
-                    if cwe_raw.upper().startswith("CWE-"):
-                        cwe_raw = cwe_raw[4:]
-                    cwe_str = f"CWE-{cwe_raw}" if cwe_raw.isdigit() else ""
-
-                    tags = [
-                        t.text.strip()
-                        for t in item.findall(".//Tags/Tag")
-                        if t.text and t.text.strip()
-                    ]
-
-                    refs: list[str] = []
-                    for tag in tags:
-                        if tag.upper().startswith("CVE-"):
-                            refs.append(tag)
-                    for ref_el in item.findall(".//References/Reference"):
-                        ref_text = (ref_el.text or "").strip()
-                        if ref_text:
-                            refs.append(ref_text)
-
-                    if refs:
-                        refs_html = "<ul>" + "".join(_ref_li(r) for r in refs) + "</ul>"
-                    else:
-                        refs_html = ""
-
-                    # Salvage patch: gw-import's parser dropped CVSS. Real Acunetix
-                    # exports carry a clean `CVSS:3.1/…` descriptor in <CVSS3><Descriptor>
-                    # (alongside legacy <CVSS> v2 and <CVSS4> blocks we ignore).
-                    cvss_vector = (item.findtext("CVSS3/Descriptor") or "").strip()
-
-                    aggregated[vuln_id] = {
-                        "title": (item.findtext("Name") or f"Finding {vuln_id}").strip(),
-                        "severity": severity,
-                        "cwe": cwe_str,
-                        "cvss_vector": cvss_vector,
-                        "description": (item.findtext("Description") or "").strip(),
-                        "impact": (item.findtext("Impact") or "").strip(),
-                        "mitigation": (item.findtext("Recommendation") or "").strip(),
-                        "references": refs_html,
-                        "tags": tags,
-                        "affected": [component] if component else [],
-                    }
+                # Real exports carry <CWEList><CWE id="200">CWE-200</CWE></CWEList>,
+                # not a flat <CWE> (gw-import's salvage source only ever saw the
+                # latter, which real Acunetix XML doesn't emit — hence the always-
+                # empty cwe bug this replaces). Read the first CWEList/CWE's id,
+                # falling back to a flat <CWE> if present.
+                cwe_list_el = item.find("CWEList/CWE")
+                if cwe_list_el is not None:
+                    cwe_raw = cwe_list_el.get("id") or cwe_list_el.text or ""
                 else:
-                    aggregated[vuln_id]["severity"] = self.max_severity(
-                        aggregated[vuln_id]["severity"], severity
+                    cwe_raw = item.findtext("CWE") or ""
+                cwe = normalize_cwe(cwe_raw.strip())
+
+                tags = [
+                    t.text.strip() for t in item.findall(".//Tags/Tag") if t.text and t.text.strip()
+                ]
+
+                refs: list[str | tuple[str, str]] = [
+                    t for t in tags if t.upper().startswith("CVE-")
+                ]
+                for ref_el in item.findall(".//References/Reference"):
+                    ref_text = (ref_el.text or "").strip()
+                    if ref_text:
+                        refs.append(ref_text)
+
+                # Salvage patch: gw-import's parser dropped CVSS. Real Acunetix
+                # exports carry a clean `CVSS:3.1/…` descriptor in <CVSS3><Descriptor>
+                # (alongside a legacy <CVSS> v2 block we ignore). Extraction stays
+                # v3-first: a v4-only descriptor (<CVSS4><Descriptor>) is recorded
+                # as a note instead (workspace format 2 has no v4 support) — see
+                # v4_only above and _to_finding below.
+                cvss_vector = (item.findtext("CVSS3/Descriptor") or "").strip()
+                cvss4_vector = (item.findtext("CVSS4/Descriptor") or "").strip()
+                v4_only.setdefault(vuln_id, bool(cvss4_vector) and not cvss_vector)
+
+                agg.add(
+                    RawOccurrence(
+                        key=vuln_id,
+                        title=(item.findtext("Name") or f"Finding {vuln_id}").strip(),
+                        severity=severity,
+                        affected_component=component,
+                        cwe=cwe,
+                        cvss_vector=cvss_vector,
+                        description=(item.findtext("Description") or "").strip(),
+                        impact=(item.findtext("Impact") or "").strip(),
+                        mitigation=(item.findtext("Recommendation") or "").strip(),
+                        references=refs,
+                        tags=tags,
                     )
-                    if component and component not in aggregated[vuln_id]["affected"]:
-                        aggregated[vuln_id]["affected"].append(component)
+                )
 
-        findings: list[ScanFinding] = [
-            ScanFinding(
-                title=meta["title"],
-                plugin_id=vuln_id,
-                severity=meta["severity"],
-                cwe=meta["cwe"],
-                cvss_vector=meta["cvss_vector"],
-                description=meta["description"],
-                impact=meta["impact"],
-                mitigation=meta["mitigation"],
-                references=meta["references"],
-                tags=meta["tags"],
-                affected_components=meta["affected"],
-            )
-            for vuln_id, meta in aggregated.items()
-        ]
-
+        findings = [self._to_finding(rec, v4_only.get(rec.key, False)) for rec in agg.records()]
         return self.sort_by_severity(findings)
+
+    def _to_finding(self, rec: AggregatedRecord, v4_only: bool = False) -> ScanFinding:
+        notes = (
+            ["only a CVSS v4 vector was present, dropped (v4 not supported in workspace format 2)"]
+            if v4_only and not rec.cvss_vector
+            else []
+        )
+        return ScanFinding(
+            title=rec.title,
+            plugin_id=rec.key,
+            severity=rec.severity,
+            cwe=rec.cwe,
+            cvss_vector=rec.cvss_vector,
+            description=rec.description,
+            impact=rec.impact,
+            mitigation=rec.mitigation,
+            references=refs_to_html(rec.references),
+            tags=rec.tags,
+            affected_components=rec.affected_components,
+            notes=notes,
+        )

@@ -1,0 +1,92 @@
+{
+  "detected": "sslyze",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "vulnhost.example.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>SSL 2.0 is enabled on the target. SSL 2.0 is a severely flawed protocol vulnerable to multiple attacks including DROWN and POODLE. It has been formally deprecated since 2011 (RFC 6176).</p>",
+      "impact": "",
+      "mitigation": "<p>Disable SSL 2.0 in the server configuration. Configure a minimum TLS version of TLS 1.2.</p>",
+      "notes": [],
+      "plugin_id": "sslyze:ssl_2_0",
+      "references": "",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "SSL 2.0 Enabled"
+    },
+    {
+      "affected_components": [
+        "vulnhost.example.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>The server is vulnerable to Heartbleed (CVE-2014-0160). This critical OpenSSL vulnerability allows an attacker to read up to 64 KB of server memory per request, potentially exposing private keys, session tokens, and credentials.</p>",
+      "impact": "",
+      "mitigation": "<p>Upgrade OpenSSL to a version that includes the fix for CVE-2014-0160. Revoke and reissue all TLS certificates after patching. Invalidate all active session tokens.</p>",
+      "notes": [],
+      "plugin_id": "sslyze:heartbleed",
+      "references": "",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Heartbleed (CVE-2014-0160)"
+    },
+    {
+      "affected_components": [
+        "vulnhost.example.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>The server presents an expired TLS certificate. Clients may reject the connection or display security warnings. Expired certificates indicate a lapse in certificate lifecycle management.</p>",
+      "impact": "",
+      "mitigation": "<p>Renew the TLS certificate immediately. Implement automated certificate renewal (e.g., Let's Encrypt with Certbot or the ACME protocol).</p>",
+      "notes": [],
+      "plugin_id": "sslyze:cert_expired",
+      "references": "",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Expired TLS Certificate"
+    },
+    {
+      "affected_components": [
+        "vulnhost.example.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>TLS 1.0 is enabled on the target. TLS 1.0 is vulnerable to BEAST (CVE-2011-3389) and POODLE-over-TLS. It has been deprecated by RFC 8996 and is prohibited by PCI DSS since June 2018.</p>",
+      "impact": "",
+      "mitigation": "<p>Disable TLS 1.0 and TLS 1.1. Accept only TLS 1.2 and TLS 1.3.</p>",
+      "notes": [],
+      "plugin_id": "sslyze:tls_1_0",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "TLS 1.0 Enabled"
+    },
+    {
+      "affected_components": [
+        "vulnhost.example.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>The TLS certificate is not trusted by one or more evaluated trust stores. This may indicate a self-signed certificate, an internal CA not in the system trust store, or a broken certificate chain.</p>",
+      "impact": "",
+      "mitigation": "<p>Replace self-signed certificates with ones signed by a trusted public CA. Ensure the full certificate chain (including intermediates) is served by the server.</p>",
+      "notes": [],
+      "plugin_id": "sslyze:cert_untrusted",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Untrusted or Self-Signed TLS Certificate"
+    }
+  ],
+  "outcome": "ok"
+}

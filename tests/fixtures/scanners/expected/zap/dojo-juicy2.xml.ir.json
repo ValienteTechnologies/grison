@@ -1,0 +1,186 @@
+{
+  "detected": "zap",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "https://juice-shop.herokuapp.com/assets/assets/public/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/polyfills-es5.js",
+        "https://juice-shop.herokuapp.com/assets/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/main-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/vendor-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/polyfills-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/main-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/styles.css",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/favicon_js.ico",
+        "https://juice-shop.herokuapp.com/assets/",
+        "https://juice-shop.herokuapp.com/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/styles.css",
+        "https://juice-shop.herokuapp.com/main-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/favicon_js.ico",
+        "https://juice-shop.herokuapp.com/assets/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/polyfills-es2018.js"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-264",
+      "description": "<p>Web browser data loading may be possible, due to a Cross Origin Resource Sharing (CORS) misconfiguration on the web server</p>",
+      "impact": "",
+      "mitigation": "<p>Ensure that sensitive data is not available in an unauthenticated manner (using IP address white-listing, for instance).</p><p>Configure the \"Access-Control-Allow-Origin\" HTTP header to a more restrictive set of domains, or remove all CORS headers entirely, to allow the web browser to enforce the Same Origin Policy (SOP) in a more restrictive manner.</p>",
+      "notes": [],
+      "plugin_id": "10098",
+      "references": "<ul><li>&lt;p&gt;http://www.hpenterprisesecurity.com/vulncat/en/vulncat/vb/html5_overly_permissive_cors_policy.html&lt;/p&gt;</li></ul>",
+      "replication_steps": "<ul><li>https://juice-shop.herokuapp.com/assets/assets/public/runtime-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/polyfills-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/runtime-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/main-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/polyfills-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/main-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/styles.css [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/runtime-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/favicon_js.ico [GET]</li><li>https://juice-shop.herokuapp.com/assets/ [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/assets/public/styles.css [GET]</li><li>https://juice-shop.herokuapp.com/main-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/favicon_js.ico [GET]</li><li>https://juice-shop.herokuapp.com/assets/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/assets/polyfills-es2018.js [GET]</li></ul>",
+      "severity": "medium",
+      "tags": [
+        "confidence:medium"
+      ],
+      "title": "Cross-Domain Misconfiguration"
+    },
+    {
+      "affected_components": [
+        "https://juice-shop.herokuapp.com/assets",
+        "https://juice-shop.herokuapp.com/assets/public"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-693",
+      "description": "<p>The following directives either allow wildcard sources (or ancestors), are not defined, or are overly broadly defined: </p><p>frame-ancestors, form-action</p><p></p><p>The directive(s): frame-ancestors, form-action are among the directives that do not fallback to default-src, missing/excluding them is the same as allowing anything.</p>",
+      "impact": "",
+      "mitigation": "<p>Ensure that your web server, application server, load balancer, etc. is properly configured to set the Content-Security-Policy header.</p>",
+      "notes": [],
+      "plugin_id": "10055",
+      "references": "<ul><li>&lt;p&gt;http://www.w3.org/TR/CSP2/&lt;/p&gt;&lt;p&gt;http://www.w3.org/TR/CSP/&lt;/p&gt;&lt;p&gt;http://caniuse.com/#search=content+security+policy&lt;/p&gt;&lt;p&gt;http://content-security-policy.com/&lt;/p&gt;&lt;p&gt;https://github.com/shapesecurity/salvation&lt;/p&gt;&lt;p&gt;https://developers.google.com/web/fundamentals/security/csp#policy_applies_to_a_wide_variety_of_resources&lt;/p&gt;</li></ul>",
+      "replication_steps": "<ul><li>https://juice-shop.herokuapp.com/assets [GET]</li><li>https://juice-shop.herokuapp.com/assets/public [GET]</li></ul>",
+      "severity": "medium",
+      "tags": [
+        "confidence:medium"
+      ],
+      "title": "CSP: Wildcard Directive"
+    },
+    {
+      "affected_components": [
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/main-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/public/polyfills-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/favicon_js.ico",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/favicon_js.ico",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/polyfills-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/",
+        "https://juice-shop.herokuapp.com/assets/public/main-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/robots.txt",
+        "https://juice-shop.herokuapp.com/assets/assets/public/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/favicon_js.ico",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/vendor-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/main-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/runtime-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/polyfills-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/polyfills-es5.js",
+        "https://juice-shop.herokuapp.com/assets/vendor-es5.js"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-525",
+      "description": "<p>The cache-control header has not been set properly or is missing, allowing the browser and proxies to cache content.</p>",
+      "impact": "",
+      "mitigation": "<p>Whenever possible ensure the cache-control HTTP header is set with no-cache, no-store, must-revalidate.</p>",
+      "notes": [],
+      "plugin_id": "10015",
+      "references": "<ul><li>&lt;p&gt;https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#web-content-caching&lt;/p&gt;&lt;p&gt;https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control&lt;/p&gt;</li></ul>",
+      "replication_steps": "<ul><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/main-es2018.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/polyfills-es2018.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/vendor-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/favicon_js.ico [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/vendor-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/favicon_js.ico [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/polyfills-es2018.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/vendor-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/ [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/main-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/vendor-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/robots.txt [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/runtime-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/favicon_js.ico [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/vendor-es2018.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/main-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/public/runtime-es2018.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/polyfills-es2018.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/polyfills-es5.js [GET] param: <code>Cache-Control</code></li><li>https://juice-shop.herokuapp.com/assets/vendor-es5.js [GET] param: <code>Cache-Control</code></li></ul>",
+      "severity": "low",
+      "tags": [
+        "confidence:medium"
+      ],
+      "title": "Incomplete or No Cache-control Header Set"
+    },
+    {
+      "affected_components": [
+        "https://juice-shop.herokuapp.com/assets/public/styles.css",
+        "https://juice-shop.herokuapp.com/assets/public/",
+        "https://juice-shop.herokuapp.com/assets/public/main-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/runtime-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/public/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/styles.css",
+        "https://juice-shop.herokuapp.com/assets/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/vendor-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/favicon_js.ico",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/main-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/main-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/main-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/runtime-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/polyfills-es5.js",
+        "https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/vendor-es2018.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/assets/assets/public/assets/public/main-es5.js",
+        "https://juice-shop.herokuapp.com/assets/styles.css"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-829",
+      "description": "<p>The page includes one or more script files from a third-party domain.</p>",
+      "impact": "",
+      "mitigation": "<p>Ensure JavaScript source files are loaded from only trusted sources, and the sources can't be controlled by end users of the application.</p>",
+      "notes": [],
+      "plugin_id": "10017",
+      "references": "<ul><li>&lt;p&gt;&lt;/p&gt;</li></ul>",
+      "replication_steps": "<ul><li>https://juice-shop.herokuapp.com/assets/public/styles.css [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/ [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/main-es2018.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/runtime-es2018.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/runtime-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/styles.css [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/vendor-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/vendor-es2018.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/favicon_js.ico [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/main-es2018.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/main-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/main-es2018.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/assets/public/runtime-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/runtime-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/runtime-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/polyfills-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/public/assets/public/assets/public/assets/public/vendor-es2018.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/vendor-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/assets/public/assets/public/main-es5.js [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/jquery/2.2.4/jquery.min.js</code></li><li>https://juice-shop.herokuapp.com/assets/styles.css [GET] param: <code>//cdnjs.cloudflare.com/ajax/libs/cookieconsent2/3.1.0/cookieconsent.min.js</code></li></ul>",
+      "severity": "low",
+      "tags": [
+        "confidence:medium"
+      ],
+      "title": "Cross-Domain JavaScript Source File Inclusion"
+    },
+    {
+      "affected_components": [
+        "https://juice-shop.herokuapp.com/vendor-es2018.js",
+        "https://juice-shop.herokuapp.com/polyfills-es2018.js",
+        "https://juice-shop.herokuapp.com/main-es2018.js",
+        "https://juice-shop.herokuapp.com/polyfills-es5.js",
+        "https://juice-shop.herokuapp.com/main-es5.js",
+        "https://juice-shop.herokuapp.com/vendor-es5.js"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-200",
+      "description": "<p>The response appears to contain suspicious comments which may help an attacker. Note: Matches made within script blocks or files are against the entire content not only comments.</p>",
+      "impact": "",
+      "mitigation": "<p>Remove all comments that return information that may help an attacker and fix any underlying problems they refer to.</p>",
+      "notes": [],
+      "plugin_id": "10027",
+      "references": "<ul><li>&lt;p&gt;&lt;/p&gt;</li></ul>",
+      "replication_steps": "<ul><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/polyfills-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/main-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/polyfills-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/main-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li></ul>",
+      "severity": "informational",
+      "tags": [
+        "confidence:low"
+      ],
+      "title": "Information Disclosure - Suspicious Comments"
+    },
+    {
+      "affected_components": [
+        "https://juice-shop.herokuapp.com/vendor-es2018.js",
+        "https://juice-shop.herokuapp.com/vendor-es5.js",
+        "https://juice-shop.herokuapp.com/polyfills-es5.js"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-200",
+      "description": "<p>A timestamp was disclosed by the application/web server - Unix</p>",
+      "impact": "",
+      "mitigation": "<p>Manually confirm that the timestamp data is not sensitive, and that the data cannot be aggregated to disclose exploitable patterns.</p>",
+      "notes": [],
+      "plugin_id": "10096",
+      "references": "<ul><li>&lt;p&gt;http://projects.webappsec.org/w/page/13246936/Information%20Leakage&lt;/p&gt;</li></ul>",
+      "replication_steps": "<ul><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/polyfills-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es5.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/vendor-es2018.js [GET]</li><li>https://juice-shop.herokuapp.com/polyfills-es5.js [GET]</li></ul>",
+      "severity": "informational",
+      "tags": [
+        "confidence:low"
+      ],
+      "title": "Timestamp Disclosure - Unix"
+    }
+  ],
+  "outcome": "ok"
+}

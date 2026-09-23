@@ -171,15 +171,39 @@ def _print_parse_summary(summary: ParseSummary, out_dir: Path, *, dry_run: bool)
         verb = "Would write" if dry_run else "Wrote"
         typer.echo(f"{verb} {len(sink.written)} to {out_dir}  ({len(sink.unchanged)} unchanged)")
 
-    for path, reason in summary.skipped_files:
-        typer.secho(f"skipped  {path.name}: {reason}", fg=typer.colors.YELLOW)
+    # Refused files (grison.scanners.base.RefusedInput — recognized input a
+    # parser deliberately declined, e.g. nmap recon output or pre-v5 sslyze
+    # JSON) get their own header and must not also show up under "could not be
+    # parsed" below, even though they're also counted in `file_errors` for the
+    # exit code (see ParseSummary.refused_files's docstring).
+    if summary.refused_files:
+        typer.secho(f"{len(summary.refused_files)} file(s) refused:", fg=typer.colors.RED)
+        for path, message in summary.refused_files:
+            typer.echo(f"  - {path.name}: {message}")
+
+    # Two distinct failure kinds, each printed once, under its own header — a
+    # file-level failure (unreadable/unrecognized/bad encoding/refused/parser
+    # raised; see ParseSummary.file_errors) is not the same claim as a
+    # finding-level one (a finding that DID parse but failed validation or
+    # failed to write; see ParseSummary.finding_errors). Mixing them into one
+    # "N finding(s) failed validation" block used to mislabel every file-level
+    # failure, and printing `skipped_files` AND `errors` both used to print each
+    # file-level failure twice.
+    refused_strs = {f"{path.name}: {message}" for path, message in summary.refused_files}
+    unparsed_errors = [e for e in summary.file_errors if e not in refused_strs]
+    if unparsed_errors:
+        typer.secho(f"{len(unparsed_errors)} file(s) could not be parsed:", fg=typer.colors.RED)
+        for e in unparsed_errors:
+            typer.echo(f"  - {e}")
 
     if summary.warnings:
         typer.secho(f"{len(summary.warnings)} warning(s):", fg=typer.colors.YELLOW)
         for w in summary.warnings:
             typer.echo(f"  - {w}")
 
-    if summary.errors:
-        typer.secho(f"{len(summary.errors)} finding(s) failed validation:", fg=typer.colors.RED)
-        for e in summary.errors:
+    if summary.finding_errors:
+        typer.secho(
+            f"{len(summary.finding_errors)} finding(s) failed validation:", fg=typer.colors.RED
+        )
+        for e in summary.finding_errors:
             typer.echo(f"  - {e}")

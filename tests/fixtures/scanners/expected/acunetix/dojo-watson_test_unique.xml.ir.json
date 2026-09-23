@@ -1,0 +1,24 @@
+{
+  "detected": "acunetix",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "https://watson-unique-test.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-79",
+      "description": "Watson Unique Test Description GHI000",
+      "impact": "Watson Unique Test Impact XYZ123",
+      "mitigation": "Watson Unique Test Recommendation DEF789",
+      "notes": [],
+      "plugin_id": "WatsonUniqueReportItem2025",
+      "references": "",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "WatsonUniqueReportItem2025"
+    }
+  ],
+  "outcome": "ok"
+}

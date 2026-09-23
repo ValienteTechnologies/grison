@@ -1,0 +1,92 @@
+{
+  "detected": "zap",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "https://example-domain.com/cpapi/api/account/verifypasswordless"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The given request has been identified as an authentication request. The 'Other Info' field contains a set of key=value lines which identify any relevant fields. If the request is in a context which has an Authentication Method set to \"Auto-Detect\" then this rule will change the authentication to match the request identified.",
+      "impact": "",
+      "mitigation": "This is an informational alert rather than a vulnerability and so there is nothing to fix.",
+      "notes": [],
+      "plugin_id": "10111",
+      "references": "<ul><li><a href=\"https://www.zaproxy.org/docs/desktop/addons/authentication-helper/auth-req-id/\">https://www.zaproxy.org/docs/desktop/addons/authentication-helper/auth-req-id/</a></li></ul>",
+      "replication_steps": "<ul><li>https://example-domain.com/cpapi/api/account/verifypasswordless [POST] param: <code>user_identifier</code></li></ul>",
+      "severity": "informational",
+      "tags": [
+        "confidence:low"
+      ],
+      "title": "Authentication Request Identified"
+    },
+    {
+      "affected_components": [
+        "https://example-domain.com/cpapi/api/redirect/getPrefillOtuTokenData?otuToken=otuToken&clearCache=true",
+        "https://example-domain.com/cpapi/api/consumer/dynamic/bundle?addToSession=true",
+        "https://example-domain.com/cpapi/api/consumer/ola/dynamic/PartialSave?allowPartialSave=true",
+        "https://example-domain.com/cpapi/api/InvalidateCacheByKey?rehydrate=true",
+        "https://example-domain.com/cpapi/api/consumer/dynamic/bundle?allowPartialSave=true&generateAppId=false"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-565",
+      "description": "This check looks at user-supplied input in query string parameters and POST data to identify where cookie parameters might be controlled. This is called a cookie poisoning attack, and becomes exploitable when an attacker can manipulate the cookie in various ways. In some cases this will not be exploitable, however, allowing URL parameters to set cookie values is generally considered a bug.",
+      "impact": "",
+      "mitigation": "Do not allow user input to control cookie names and values. If some query string parameters must be set in cookie values, be sure to filter out semicolon's that can serve as name/value pair delimiters.",
+      "notes": [],
+      "plugin_id": "10029",
+      "references": "<ul><li><a href=\"https://en.wikipedia.org/wiki/HTTP_cookie\">https://en.wikipedia.org/wiki/HTTP_cookie</a></li><li><a href=\"https://cwe.mitre.org/data/definitions/565.html\">https://cwe.mitre.org/data/definitions/565.html</a></li></ul>",
+      "replication_steps": "<ul><li>https://example-domain.com/cpapi/api/redirect/getPrefillOtuTokenData?otuToken=otuToken&amp;clearCache=true [GET] param: <code>clearCache</code></li><li>https://example-domain.com/cpapi/api/consumer/dynamic/bundle?addToSession=true [POST] param: <code>addToSession</code></li><li>https://example-domain.com/cpapi/api/consumer/ola/dynamic/PartialSave?allowPartialSave=true [POST] param: <code>allowPartialSave</code></li><li>https://example-domain.com/cpapi/api/InvalidateCacheByKey?rehydrate=true [POST] param: <code>rehydrate</code></li><li>https://example-domain.com/cpapi/api/consumer/dynamic/bundle?allowPartialSave=true&amp;generateAppId=false [PUT] param: <code>allowPartialSave</code></li></ul>",
+      "severity": "informational",
+      "tags": [
+        "confidence:low"
+      ],
+      "title": "Cookie Poisoning"
+    },
+    {
+      "affected_components": [
+        "https://example-domain.com/cpapi/api/oid/validateToken?accessToken=accessToken",
+        "https://example-domain.com/cpapi/api/redirect/getPrefillOtuTokenData?otuToken=otuToken&clearCache=true",
+        "https://example-domain.com/cpapi/api/consumer/dynamic/bundle?addToSession=true"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-598",
+      "description": "The request appeared to contain sensitive information leaked in the URL. This can violate PCI and most organizational compliance policies. You can configure the list of strings for this check to add or remove values specific to your environment.",
+      "impact": "",
+      "mitigation": "Do not pass sensitive information in URIs.",
+      "notes": [],
+      "plugin_id": "10024",
+      "references": "",
+      "replication_steps": "<ul><li>https://example-domain.com/cpapi/api/oid/validateToken?accessToken=accessToken [GET] param: <code>accessToken</code></li><li>https://example-domain.com/cpapi/api/redirect/getPrefillOtuTokenData?otuToken=otuToken&amp;clearCache=true [GET] param: <code>otuToken</code></li><li>https://example-domain.com/cpapi/api/consumer/dynamic/bundle?addToSession=true [POST] param: <code>addToSession</code></li></ul>",
+      "severity": "informational",
+      "tags": [
+        "confidence:medium"
+      ],
+      "title": "Information Disclosure - Sensitive Information in URL"
+    },
+    {
+      "affected_components": [
+        "https://example-domain.com/cpapi/api/workflow/config/json/tenant/product/topic/key?persistence=0",
+        "https://example-domain.com/cpapi/api/workflow/config/json/tenant/product/topic/key",
+        "https://example-domain.com/cpapi/api/workflow/config?products=products&topics=topics",
+        "https://example-domain.com/cpapi/api/workflow/config/json/tenant/product/topic/key?arrayHandling=0&persistence=0"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-525",
+      "description": "The cache-control header has not been set properly or is missing, allowing the browser and proxies to cache content. For static assets like css, js, or image files this might be intended, however, the resources should be reviewed to ensure that no sensitive content will be cached.",
+      "impact": "",
+      "mitigation": "For secure content, ensure the cache-control HTTP header is set with \"no-cache, no-store, must-revalidate\". If an asset should be cached consider setting the directives \"public, max-age, immutable\".",
+      "notes": [],
+      "plugin_id": "10015",
+      "references": "<ul><li><a href=\"https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#web-content-caching\">https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#web-content-caching</a></li><li><a href=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control\">https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control</a></li><li><a href=\"https://grayduck.mn/2021/09/13/cache-control-recommendations/\">https://grayduck.mn/2021/09/13/cache-control-recommendations/</a></li></ul>",
+      "replication_steps": "<ul><li>https://example-domain.com/cpapi/api/workflow/config/json/tenant/product/topic/key?persistence=0 [DELETE] param: <code>cache-control</code></li><li>https://example-domain.com/cpapi/api/workflow/config/json/tenant/product/topic/key [GET] param: <code>cache-control</code></li><li>https://example-domain.com/cpapi/api/workflow/config?products=products&amp;topics=topics [GET] param: <code>cache-control</code></li><li>https://example-domain.com/cpapi/api/workflow/config/json/tenant/product/topic/key?arrayHandling=0&amp;persistence=0 [PUT] param: <code>cache-control</code></li></ul>",
+      "severity": "informational",
+      "tags": [
+        "confidence:low"
+      ],
+      "title": "Re-examine Cache-control Directives"
+    }
+  ],
+  "outcome": "ok"
+}
