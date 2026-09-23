@@ -57,3 +57,45 @@ def test_merge_takes_max_severity() -> None:
     findings = BurpScanner().parse(xml, ImportOptions())
     assert len(findings) == 1
     assert findings[0].severity == Severity.HIGH
+
+
+def test_confidence_tag() -> None:
+    # burp_sample.xml's single issue has <confidence>Certain</confidence>.
+    findings = BurpScanner().parse(load("burp/burp_sample.xml"), ImportOptions())
+    assert findings[0].tags == ["confidence:certain"]
+
+
+def _issue(serial: str, severity: str, confidence: str) -> str:
+    return f"""
+      <issue>
+        <serialNumber>{serial}</serialNumber>
+        <type>1048832</type>
+        <name>SQL injection</name>
+        <host ip="192.0.2.10">https://example.com</host>
+        <path>/login</path>
+        <location>/login</location>
+        <severity>{severity}</severity>
+        <confidence>{confidence}</confidence>
+      </issue>"""
+
+
+def test_confidence_merge_keeps_highest_first_then_second() -> None:
+    # First occurrence Tentative, second Certain: merged finding keeps Certain
+    # (the highest/most-certain), not the first one seen.
+    xml = (
+        "<issues>" + _issue("1", "Low", "Tentative") + _issue("2", "High", "Certain") + "</issues>"
+    ).encode()
+    findings = BurpScanner().parse(xml, ImportOptions())
+    assert len(findings) == 1
+    assert findings[0].tags == ["confidence:certain"]
+
+
+def test_confidence_merge_keeps_highest_second_then_first() -> None:
+    # Reversed order: first occurrence Certain, second Tentative — still Certain,
+    # confirming the merge isn't "whichever occurrence sets it first" either.
+    xml = (
+        "<issues>" + _issue("1", "Low", "Certain") + _issue("2", "High", "Tentative") + "</issues>"
+    ).encode()
+    findings = BurpScanner().parse(xml, ImportOptions())
+    assert len(findings) == 1
+    assert findings[0].tags == ["confidence:certain"]

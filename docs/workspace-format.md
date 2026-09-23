@@ -325,6 +325,12 @@ Frontmatter fields, all optional except `severity` and `finding_type`:
 | `tags` | list of strings | no duplicates (case-insensitive), no surrounding whitespace |
 | `affected_entities` | free text | **instance/inbox tier only** |
 
+A scanner-derived tag uses a `<namespace>:<value>` shape — a colon-separated prefix
+naming what wrote the tag, then its value. `confidence:` is the first such namespace:
+`grison parse` for Burp and ZAP emits `confidence:<level>` (Burp: `certain`, `firm`,
+`tentative`; ZAP: `false-positive`, `low`, `medium`, `high`), lowercased, keeping the
+highest confidence seen when a finding is reported more than once.
+
 No other frontmatter key is allowed (`FND-001`) — in particular there is no `evidence:`
 list (D1: the only authored evidence form is an image line in the body, §5), and no
 `grison:` block on ANY tier, including `inbox`: `grison parse` writes plain v2

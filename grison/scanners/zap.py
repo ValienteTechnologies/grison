@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 
 import defusedxml.ElementTree as ET
@@ -29,6 +30,19 @@ _RISKDESC_WORD_MAP = {
     "high": "3",
 }
 
+# ZAP's own per-alert confidence scale (a `<confidence>` element distinct from
+# riskcode/severity): 0..3 -> false-positive/low/medium/high, ZAP's own scale
+# (see ZAP's Alert.Confidence and DefectDojo's zap parser MAPPING_CONFIDENCE).
+# Surfaced as a `confidence:<value>` tag rather than a new IR field — workspace
+# format v2 has no confidence field, and a tag is the least invasive carrier.
+_CONFIDENCE_MAP = {
+    "0": "false-positive",
+    "1": "low",
+    "2": "medium",
+    "3": "high",
+}
+_CONFIDENCE_RANK = {"false-positive": 0, "low": 1, "medium": 2, "high": 3}
+
 
 class ZapScanner(Scanner):
     name = "zap"
@@ -48,16 +62,18 @@ class ZapScanner(Scanner):
             sites = [sites]
 
         agg = Aggregator()
+        best_confidence: dict[str, str] = {}
         for site in sites:
             for alert in site.get("alerts", []):
-                self._collect(alert, agg, opts)
+                self._collect(alert, agg, opts, best_confidence)
 
-        findings = [self._to_finding(rec) for rec in agg.records()]
+        findings = [self._to_finding(rec, best_confidence.get(rec.key)) for rec in agg.records()]
         return self.sort_by_severity(findings)
 
     def _parse_xml(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
         agg = Aggregator()
+        best_confidence: dict[str, str] = {}
 
         for alert_el in root.findall(".//alertitem"):
             alert: dict = {}
@@ -69,12 +85,14 @@ class ZapScanner(Scanner):
                     ]
                 else:
                     alert[child.tag] = (child.text or "").strip()
-            self._collect(alert, agg, opts)
+            self._collect(alert, agg, opts, best_confidence)
 
-        findings = [self._to_finding(rec) for rec in agg.records()]
+        findings = [self._to_finding(rec, best_confidence.get(rec.key)) for rec in agg.records()]
         return self.sort_by_severity(findings)
 
-    def _collect(self, alert: dict, agg: Aggregator, opts: ImportOptions) -> None:
+    def _collect(
+        self, alert: dict, agg: Aggregator, opts: ImportOptions, best_confidence: dict[str, str]
+    ) -> None:
         alert_ref = alert.get("alertRef") or alert.get("pluginid") or alert.get("id", "")
         severity = self._severity_for(alert)
 
@@ -83,15 +101,32 @@ class ZapScanner(Scanner):
         if not self._plugin_allowed(alert_ref, opts):
             return
 
+        # Highest confidence seen per alert_ref — Aggregator itself only keeps the
+        # first occurrence's fields, so a later, more-confident occurrence of the
+        # same alert needs tracking separately (see module comment above).
+        conf_tag = _CONFIDENCE_MAP.get(str(alert.get("confidence", "")).strip())
+        if conf_tag is not None:
+            current = best_confidence.get(alert_ref)
+            if current is None or _CONFIDENCE_RANK[conf_tag] > _CONFIDENCE_RANK[current]:
+                best_confidence[alert_ref] = conf_tag
+
         instances = alert.get("instances", [])
         uris = [inst.get("uri", "") for inst in instances if inst.get("uri")]
 
+        # Every instance field lands in an HTML fragment below (<li>...) — a ZAP
+        # export's uri/method/param can themselves carry an XSS payload string
+        # (the vendor is faithfully quoting what it sent), which must not be
+        # allowed to become real markup here; html.escape every one of them.
         rep_steps = ""
         if instances:
             rows = "".join(
-                f"<li>{inst.get('uri', '')} "
-                f"[{inst.get('method', 'GET')}]"
-                + (f" param: <code>{inst.get('param', '')}</code>" if inst.get("param") else "")
+                f"<li>{html.escape(inst.get('uri', ''))} "
+                f"[{html.escape(inst.get('method', 'GET'))}]"
+                + (
+                    f" param: <code>{html.escape(inst.get('param', ''))}</code>"
+                    if inst.get("param")
+                    else ""
+                )
                 + "</li>"
                 for inst in instances[:20]
             )
@@ -142,7 +177,8 @@ class ZapScanner(Scanner):
             return _RISKCODE_MAP[mapped_code]
         return severity_or_info(word)
 
-    def _to_finding(self, rec: AggregatedRecord) -> ScanFinding:
+    def _to_finding(self, rec: AggregatedRecord, confidence: str | None = None) -> ScanFinding:
+        tags = [f"confidence:{confidence}"] if confidence else []
         return ScanFinding(
             title=rec.title,
             plugin_id=rec.key,
@@ -153,4 +189,5 @@ class ZapScanner(Scanner):
             references=refs_to_html(rec.references),
             replication_steps=rec.replication_steps,
             affected_components=rec.affected_components,
+            tags=tags,
         )

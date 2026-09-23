@@ -101,6 +101,34 @@ def test_cwe_with_prefix_stripped(scanner: AcunetixScanner, opts: ImportOptions)
     assert xss.cwe == "CWE-79"
 
 
+def test_cwe_from_cwelist_id_attr(scanner: AcunetixScanner, opts: ImportOptions) -> None:
+    # dojo-one_finding.xml: real Acunetix shape, <CWEList><CWE id="352">CWE-352</CWE>
+    # </CWEList>, not a flat <CWE> — DefectDojo's own test asserts cwe 352 for it.
+    findings = scanner.parse(load("acunetix/dojo-one_finding.xml"), opts)
+    assert len(findings) == 1
+    assert findings[0].cwe == "CWE-352"
+
+
+def test_cwe_from_cwelist_across_many_findings(
+    scanner: AcunetixScanner, opts: ImportOptions
+) -> None:
+    findings = scanner.parse(load("acunetix/dojo-many_findings.xml"), opts)
+    cwes = {f.cwe for f in findings}
+    assert "CWE-200" in cwes
+    assert "CWE-310" in cwes
+    assert "CWE-16" in cwes
+
+
+def test_cwe_falls_back_to_flat_cwe_when_no_cwelist_child(
+    scanner: AcunetixScanner, opts: ImportOptions
+) -> None:
+    # acunetix_sample.xml is a hand-made fixture with a flat <CWE> and no
+    # <CWEList> at all — the fallback path must still work.
+    findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
+    sqli = next(f for f in findings if f.plugin_id == "sqli-001")
+    assert sqli.cwe == "CWE-89"
+
+
 def test_cve_tag_in_references(scanner: AcunetixScanner, opts: ImportOptions) -> None:
     findings = scanner.parse(load("acunetix/acunetix_sample.xml"), opts)
     sqli = next(f for f in findings if f.plugin_id == "sqli-001")

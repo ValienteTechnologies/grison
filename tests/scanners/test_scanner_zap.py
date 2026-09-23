@@ -28,6 +28,8 @@ def test_parses_findings() -> None:
     # (ZAP has no Critical tier).
     assert findings[0].severity == Severity.HIGH
     assert findings[0].cwe == "CWE-79"
+    # <confidence>2</confidence> -> ZAP's own 0..3 scale, medium.
+    assert findings[0].tags == ["confidence:medium"]
 
 
 def test_missing_riskcode_falls_back_to_riskdesc_word() -> None:
@@ -97,3 +99,67 @@ def test_merge_takes_max_severity() -> None:
     findings = ZapScanner().parse(json.dumps(doc).encode(), ImportOptions())
     assert len(findings) == 1
     assert findings[0].severity == Severity.HIGH
+
+
+def test_confidence_tag_from_numeric_scale() -> None:
+    alert = {"alertRef": "40012", "name": "XSS", "riskcode": "3", "confidence": "3"}
+    findings = ZapScanner().parse(_alert_doc(alert), ImportOptions())
+    assert findings[0].tags == ["confidence:high"]
+
+
+def test_confidence_zero_is_false_positive_tag() -> None:
+    alert = {"alertRef": "40013", "name": "XSS", "riskcode": "0", "confidence": "0"}
+    findings = ZapScanner().parse(_alert_doc(alert), ImportOptions())
+    assert findings[0].tags == ["confidence:false-positive"]
+
+
+def test_confidence_merge_keeps_highest() -> None:
+    # Two alerts of the same alertRef, low confidence then high: the merged
+    # finding keeps the highest confidence seen, not the first one.
+    doc = {
+        "site": [
+            {
+                "alerts": [
+                    {"alertRef": "1", "name": "Dupe Alert", "riskcode": "1", "confidence": "1"},
+                    {"alertRef": "1", "name": "Dupe Alert", "riskcode": "1", "confidence": "3"},
+                ]
+            }
+        ]
+    }
+    findings = ZapScanner().parse(json.dumps(doc).encode(), ImportOptions())
+    assert len(findings) == 1
+    assert findings[0].tags == ["confidence:high"]
+
+    # Reversed order: still keeps the highest, not "whichever came first".
+    doc_reversed = {
+        "site": [
+            {
+                "alerts": [
+                    {"alertRef": "1", "name": "Dupe Alert", "riskcode": "1", "confidence": "3"},
+                    {"alertRef": "1", "name": "Dupe Alert", "riskcode": "1", "confidence": "1"},
+                ]
+            }
+        ]
+    }
+    findings_reversed = ZapScanner().parse(json.dumps(doc_reversed).encode(), ImportOptions())
+    assert findings_reversed[0].tags == ["confidence:high"]
+
+
+def test_instance_uri_is_escaped_in_replication_steps() -> None:
+    """A ZAP alert instance's uri (and method/param) is vendor-supplied text that
+    can itself be an XSS payload the scanner faithfully quotes back (real
+    fixture: dojo-zap-results-first-scan.xml's `</stYle/</titLe/...` uri).
+    Interpolated unescaped into replication_steps' <li> markup, it becomes real
+    tags instead of quoted text — html_to_md then refuses the malformed HTML and
+    the converter falls back, losing the payload from the rendered markdown.
+    Every interpolated instance field must be html-escaped."""
+    alert = {
+        "alertRef": "40012",
+        "name": "XSS",
+        "riskcode": "3",
+        "instances": [{"uri": "http://example.com/?q=<script>alert(1)</script>", "method": "GET"}],
+    }
+    findings = ZapScanner().parse(_alert_doc(alert), ImportOptions())
+    assert len(findings) == 1
+    assert "&lt;script&gt;" in findings[0].replication_steps
+    assert "<script>" not in findings[0].replication_steps

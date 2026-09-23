@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -386,7 +387,8 @@ class SslyzeScanner(Scanner):
                         severity=Severity.MEDIUM,
                         description=(
                             f"<p>The TLS certificate uses a weak public key "
-                            f"(<code>{pk_type} {pk_size}-bit</code>). "
+                            f"(<code>{html.escape(str(pk_type))} "
+                            f"{html.escape(str(pk_size))}-bit</code>). "
                             "Keys shorter than RSA-2048 or EC-256 are considered insufficient "
                             "for long-term security.</p>"
                         ),

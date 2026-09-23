@@ -11,6 +11,12 @@ from .base import AggregatedRecord, Aggregator, ImportOptions, RawOccurrence, Sc
 
 _REF_ANCHOR = re.compile(r"<a\s+href=['\"]([^'\"]+)['\"][^>]*>(.*?)</a>", re.IGNORECASE | re.DOTALL)
 
+# Burp's own confidence scale (an XML `<confidence>` element, distinct from
+# severity): Certain/Firm/Tentative, most to least confident. Surfaced as a
+# `confidence:<value>` tag (lowercased) rather than a new IR field — workspace
+# format v2 has no confidence field, and a tag is the least invasive carrier.
+_CONFIDENCE_RANK = {"tentative": 1, "firm": 2, "certain": 3}
+
 
 class BurpScanner(Scanner):
     name = "burp"
@@ -19,6 +25,10 @@ class BurpScanner(Scanner):
     def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         root = ET.fromstring(data)
         agg = Aggregator()
+        # Highest confidence seen per type_id — Aggregator itself only keeps the
+        # first occurrence's fields, so a later, more-confident occurrence of the
+        # same finding needs tracking separately (see module comment above).
+        best_confidence: dict[str, str] = {}
 
         for issue in root.findall(".//issue"):
             raw = {child.tag: (child.text or "").strip() for child in issue}
@@ -58,6 +68,12 @@ class BurpScanner(Scanner):
                 (text, href) for href, text in _REF_ANCHOR.findall(raw.get("references", ""))
             ]
 
+            conf_raw = raw.get("confidence", "").lower()
+            if conf_raw in _CONFIDENCE_RANK:
+                current = best_confidence.get(type_id)
+                if current is None or _CONFIDENCE_RANK[conf_raw] > _CONFIDENCE_RANK[current]:
+                    best_confidence[type_id] = conf_raw
+
             agg.add(
                 RawOccurrence(
                     key=type_id,
@@ -70,10 +86,11 @@ class BurpScanner(Scanner):
                 )
             )
 
-        findings = [self._to_finding(rec) for rec in agg.records()]
+        findings = [self._to_finding(rec, best_confidence.get(rec.key)) for rec in agg.records()]
         return self.sort_by_severity(findings)
 
-    def _to_finding(self, rec: AggregatedRecord) -> ScanFinding:
+    def _to_finding(self, rec: AggregatedRecord, confidence: str | None = None) -> ScanFinding:
+        tags = [f"confidence:{confidence}"] if confidence else []
         return ScanFinding(
             title=rec.title,
             plugin_id=rec.key,
@@ -82,4 +99,5 @@ class BurpScanner(Scanner):
             mitigation=rec.mitigation,
             references=refs_to_html(rec.references),
             affected_components=rec.affected_components,
+            tags=tags,
         )
