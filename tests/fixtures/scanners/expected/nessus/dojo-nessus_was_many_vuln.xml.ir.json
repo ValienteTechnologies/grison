@@ -1,0 +1,92 @@
+{
+  "detected": "nessus",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "http://google.com/:80/TCP (http)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Client-side scripts are used extensively by modern web applications. They perform from simple functions (such as the formatting of text) up to full manipulation of client-side data and Operating System interaction.\n\nCross Site Scripting (XSS) allows clients to inject scripts into a request and have the server return the script to the client in the response. This occurs because the application is taking untrusted data (in this example, from the client) and reusing it without performing any validation or sanitisation.\n\nIf the injected script is returned immediately this is known as reflected XSS. If the injected script is stored by the server and returned to any client visiting the affected page, then this is known as persistent XSS (also stored XSS).\n\nScanner has discovered that it is possible to insert script content directly into HTML element content.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "To remedy XSS vulnerabilities, it is important to never use untrusted or unfiltered data within the code of a HTML page.\nUntrusted data can originate not only form the client but potentially a third party or previously uploaded file etc.\nFiltering of untrusted data typically involves converting special characters to their HTML entity encoded counterparts (however, other methods do exist, see references). These special characters include:\n* `&` * `<` * `>` * `'` * `'` * `/`\nAn example of HTML entity encoding is converting `<` to `&lt;`.\nAlthough it is possible to filter untrusted input, there are five locations within an HTML page where untrusted input (even if it has been filtered) should never be placed:\n1. Directly in a script. 2. Inside an HTML comment. 3. In an attribute name. 4. In a tag name. 5. Directly in CSS.\nEach of these locations have their own form of escaping and filtering.\n_Because many browsers attempt to implement XSS protection, any manual verification of this finding should be conducted using multiple different browsers and browser versions._",
+      "plugin_id": "98104",
+      "references": "<ul><li><a href=\"http://projects.webappsec.org/w/page/13246920/Cross%20Site%20Scripting\">http://projects.webappsec.org/w/page/13246920/Cross%20Site%20Scripting</a></li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Cross-Site Scripting (XSS)"
+    },
+    {
+      "affected_components": [
+        "http://google.com/:80/TCP (http)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Clickjacking (User Interface redress attack, UI redress attack, UI redressing) is a malicious technique of tricking a Web user into clicking on something different from what the user perceives they are clicking on, thus potentially revealing confidential information or taking control of their computer while clicking on seemingly innocuous web pages.\n\nThe server didn't return an `X-Frame-Options` header which means that this website could be at risk of a clickjacking attack.\n\nThe `X-Frame-Options` HTTP response header can be used to indicate whether or not a browser should be allowed to render a page inside a frame or iframe. Sites can use this to avoid clickjacking attacks, by ensuring that their content is not embedded into other sites.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "Configure your web server to include an `X-Frame-Options` header.",
+      "plugin_id": "98060",
+      "references": "<ul><li><a href=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/X-Frame-Options\">https://developer.mozilla.org/en-US/docs/Web/HTTP/X-Frame-Options</a></li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Missing 'X-Frame-Options' Header"
+    },
+    {
+      "affected_components": [
+        "http://google.com/:80/TCP (http)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "SameSite is an attribute which can be set on a cookie to instruct the web browser if this cookie can be sent along with cross-site requests to help prevent Cross-Site Request Forgery (CSRF) attacks.\n\nThe attribute has three possible values :\n\n- Strict : the cookie will only be sent in a first-party context, thus preventing cross-site requests initiated from third-party websites to include it.\n\n- Lax : the cookie is allowed to be sent in GET cross-site requests initiated by the top-level navigation from third-party websites. For example, following an hypertext link from the external website will make the request include the cookie.\n\n- None : the cookie is explicitly set to be sent by the browser in any context.\n\nThe scanner identified the lack of SameSite attribute on cookies set by the application or a misconfiguration.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "Web browsers default behavior may differ when processing cookies in a cross-site context, making the final decision to send the cookie in this context unpredictable. The SameSite attribute should be set in every cookie to enforce the expected result by developers. When using the 'None' attribute value, ensure that the cookie is also set with the 'Secure' flag.",
+      "plugin_id": "115540",
+      "references": "<ul><li><a href=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite\">https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite</a></li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Cookie Without SameSite Flag Detected"
+    },
+    {
+      "affected_components": [
+        "http://google.com/:80/TCP (http)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Content Security Policy (CSP) is a web security standard that helps to mitigate attacks like cross-site scripting (XSS), clickjacking or mixed content issues. CSP provides mechanisms to websites to restrict content that browsers will be allowed to load.\n\nNo CSP header has been detected on this host. This URL is flagged as an specific example.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "Configure Content Security Policy on your website by adding 'Content-Security-Policy' HTTP header or meta tag http-equiv='Content-Security-Policy'.",
+      "plugin_id": "112551",
+      "references": "<ul><li><a href=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy\">https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy</a></li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Missing Content Security Policy"
+    },
+    {
+      "affected_components": [
+        "http://google.com/:80/TCP (http)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "This plugin displays information about the X.509 certificate extracted from the HTTPS connection.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "112491",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL/TLS Certificate Information"
+    }
+  ],
+  "outcome": "ok"
+}

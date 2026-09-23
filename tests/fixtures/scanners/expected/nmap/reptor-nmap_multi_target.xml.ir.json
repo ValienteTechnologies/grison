@@ -1,0 +1,43 @@
+{
+  "detected": "nmap",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "80/tcp (http)",
+        "443/tcp (https)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>Open ports discovered on <strong>www.google.com</strong> (142.250.180.228):</p><table><thead><tr><th>Port</th><th>Service</th><th>Product/Version</th></tr></thead><tbody><tr><td>80/tcp</td><td>http</td><td>gws</td></tr><tr><td>443/tcp</td><td>https</td><td>gws</td></tr></tbody></table>",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "nmap-142.250.180.228",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Open Ports \u2013 www.google.com"
+    },
+    {
+      "affected_components": [
+        "80/tcp (http)",
+        "443/tcp (https)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>Open ports discovered on <strong>www.syslifters.com</strong> (34.249.200.254):</p><table><thead><tr><th>Port</th><th>Service</th><th>Product/Version</th></tr></thead><tbody><tr><td>80/tcp</td><td>http</td><td></td></tr><tr><td>443/tcp</td><td>https</td><td></td></tr></tbody></table>",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "nmap-34.249.200.254",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Open Ports \u2013 www.syslifters.com"
+    }
+  ],
+  "outcome": "ok"
+}

@@ -1,0 +1,109 @@
+{
+  "detected": "nessus",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "preprod.boardvantage.net:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Information about the Nessus scan.\n\nThis script displays, for each tested host, information about the scan itself :\n\n - The version of the plugin set\n - The type of plugin feed (HomeFeed or ProfessionalFeed)\n - The version of the Nessus Engine\n - The port scanner(s) used\n - The port range scanned\n - Whether credentialed or third-party patch management    checks are possible\n - The date of the scan\n - The duration of the scan\n - The number of hosts scanned in parallel\n - The number of checks done in parallel",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "n/a",
+      "plugin_id": "19506",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Nessus Scan Information"
+    },
+    {
+      "affected_components": [
+        "preprod.boardvantage.net:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to guess the remote device type.\n\nBased on the remote operating system, it is possible to determine what the remote system type is (eg: a printer, router, general-purpose computer, etc).",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "n/a",
+      "plugin_id": "54615",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Device Type"
+    },
+    {
+      "affected_components": [
+        "preprod.boardvantage.net:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to enumerate CPE names that matched on the remote system.\n\nBy using information obtained from a Nessus scan, this plugin reports CPE (Common Platform Enumeration) matches for various hardware and software products found on a host. \n\nNote that if an official CPE is not available for the product, this plugin computes the best possible CPE based on the information available from the scan.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "n/a",
+      "plugin_id": "45590",
+      "references": "<ul><li><a href=\"http://cpe.mitre.org/\">http://cpe.mitre.org/</a></li></ul>",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Common Platform Enumeration (CPE)"
+    },
+    {
+      "affected_components": [
+        "preprod.boardvantage.net:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to guess the remote operating system.\n\nUsing a combination of remote probes (TCP/IP, SMB, HTTP, NTP, SNMP, etc...), it is possible to guess the name of the remote operating system in use. It is also sometimes possible to guess the version of the operating system.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "n/a",
+      "plugin_id": "11936",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "OS Identification"
+    },
+    {
+      "affected_components": [
+        "preprod.boardvantage.net:0/tcp (general)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It was possible to resolve the name of the remote host.\n\nNessus was able to resolve the FQDN of the remote host.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "n/a",
+      "plugin_id": "12053",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Host Fully Qualified Domain Name (FQDN) Resolution"
+    },
+    {
+      "affected_components": [
+        "preprod.boardvantage.net:443/tcp (https?)"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to determine which TCP ports are open.\n\nThis plugin is a SYN 'half-open' port scanner.\nIt shall be reasonably quick even against a firewalled target.\n\nNote that SYN scanners are less intrusive than TCP (full connect) scanners against broken services, but they might kill lame misconfigured firewalls. They might also leave unclosed connections on the remote target, if the network is loaded.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "Protect your target with an IP filter.",
+      "plugin_id": "11219",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Nessus SYN scanner"
+    }
+  ],
+  "outcome": "ok"
+}

@@ -1,0 +1,24 @@
+{
+  "detected": "qualys",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "192.0.2.30"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "An attacker may exploit known vulnerabilities in the outdated software.",
+      "finding_guidance": "",
+      "impact": "The remote host is running an outdated version of Apache HTTPD.",
+      "mitigation": "Upgrade Apache HTTPD to the latest stable release.",
+      "plugin_id": "86000",
+      "references": "<ul><li>CVE-2023-9999</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Outdated Apache Version"
+    }
+  ],
+  "outcome": "ok"
+}

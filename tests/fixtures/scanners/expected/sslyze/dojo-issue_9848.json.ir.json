@@ -1,0 +1,41 @@
+{
+  "detected": "sslyze",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "example.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>TLS 1.0 is enabled on the target. TLS 1.0 is vulnerable to BEAST (CVE-2011-3389) and POODLE-over-TLS. It has been deprecated by RFC 8996 and is prohibited by PCI DSS since June 2018.</p>",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "<p>Disable TLS 1.0 and TLS 1.1. Accept only TLS 1.2 and TLS 1.3.</p>",
+      "plugin_id": "sslyze:tls_1_0",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "TLS 1.0 Enabled"
+    },
+    {
+      "affected_components": [
+        "example.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>TLS 1.1 is enabled on the target. TLS 1.1 has been deprecated by RFC 8996. While fewer vulnerabilities exist than TLS 1.0, it is considered insecure by current standards.</p>",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "<p>Disable TLS 1.1. Accept only TLS 1.2 and TLS 1.3.</p>",
+      "plugin_id": "sslyze:tls_1_1",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "TLS 1.1 Enabled"
+    }
+  ],
+  "outcome": "ok"
+}

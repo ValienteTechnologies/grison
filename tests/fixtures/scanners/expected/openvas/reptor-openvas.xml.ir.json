@@ -1,0 +1,619 @@
+{
+  "detected": "openvas",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "10.20.0.125"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "The Operating System (OS) on the remote host has reached the End\n  of Life (EOL) and should not be used anymore.",
+      "finding_guidance": "Checks if an EOL version of an OS is present on the target\n  host.",
+      "impact": "An EOL version of an OS is not receiving any security updates\n  from the vendor. Unfixed security vulnerabilities might be leveraged by an attacker to compromise\n  the security of this host.",
+      "mitigation": "Upgrade the OS on the remote host to a version which is still\n  supported and receiving security updates by the vendor.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.103674",
+      "references": "",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Operating System (OS) End of Life (EOL) Detection"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow remote\n  attackers to bypass authentication and perform unauthorized actions, cause\n  a denial-of-service condition and gain access to potentially sensitive\n  information.",
+      "mitigation": "Update to Apache HTTP Server 2.2.33 or 2.4.26\n  or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.811214",
+      "references": "<ul><li>CVE-2017-7679</li><li>CVE-2017-3169</li><li>CVE-2017-3167</li><li>http://seclists.org/oss-sec/2017/q2/509</li><li>http://www.securityfocus.com/bid/99135</li><li>http://www.securityfocus.com/bid/99134</li><li>http://httpd.apache.org/security/vulnerabilities_24.html</li><li>http://httpd.apache.org/security/vulnerabilities_22.html</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server Multiple Vulnerabilities (Jun 2017) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.53 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.113837",
+      "references": "<ul><li>CVE-2022-22719</li><li>CVE-2022-22720</li><li>CVE-2022-22721</li><li>CVE-2022-23943</li><li>https://httpd.apache.org/security/vulnerabilities_24.html#2.4.53</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server <= 2.4.52 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a buffer overflow\n  vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.52 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.117856",
+      "references": "<ul><li>CVE-2021-44790</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server <= 2.4.51 Buffer Overflow Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow an attacker\n  to replay HTTP requests across servers without detection, influence the user\n  content, upload a malicious file, crash the Apache HTTP Server and perform\n  denial of service attack.",
+      "mitigation": "Update to version 2.4.30 or later. Please see the references for more information.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.812844",
+      "references": "<ul><li>CVE-2018-1312</li><li>CVE-2018-1283</li><li>CVE-2017-15715</li><li>CVE-2017-15710</li><li>CVE-2018-1301</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li><li>http://www.securityfocus.com/bid/103524</li><li>http://www.securityfocus.com/bid/103520</li><li>http://www.securityfocus.com/bid/103525</li><li>http://www.securityfocus.com/bid/103512</li><li>http://www.securityfocus.com/bid/103515</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server Multiple Vulnerabilities (Apr 2018) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "- CVE-2020-35452: A specially crafted Digest nonce can cause a\n  stack overflow in mod_auth_digest.\n\n  - CVE-2021-26690: A specially crafted Cookie header handled by mod_session can cause a NULL\n  pointer dereference and crash, leading to a possible Denial Of Service.\n\n  - CVE-2021-26691: A specially crafted SessionHeader sent by an origin server could cause a heap\n  overflow.",
+      "mitigation": "Update to version 2.4.48 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.112897",
+      "references": "<ul><li>CVE-2020-35452</li><li>CVE-2021-26690</li><li>CVE-2021-26691</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server 2.4.0 - 2.4.46 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a HTTP request smuggling\n  vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Request splitting/smuggling could result in bypass of access\n  controls in the proxy server, proxying unintended URLs to existing origin servers, and cache\n  poisoning.",
+      "mitigation": "Update to version 2.4.56 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.104597",
+      "references": "<ul><li>CVE-2023-25690</li><li>https://httpd.apache.org/security/vulnerabilities_24.html#2.4.56</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server 2.4.0 - 2.4.55 HTTP Request Smuggling Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.54 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.148252",
+      "references": "<ul><li>CVE-2022-26377</li><li>CVE-2022-28614</li><li>CVE-2022-28615</li><li>CVE-2022-29404</li><li>CVE-2022-30556</li><li>CVE-2022-31813</li><li>https://httpd.apache.org/security/vulnerabilities_24.html#2.4.54</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.54 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.49 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.146725",
+      "references": "<ul><li>CVE-2021-34798</li><li>CVE-2021-39275</li><li>CVE-2021-40438</li><li>https://www.cisa.gov/known-exploited-vulnerabilities-catalog</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.49 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow remote\n  attackers to cause the target service to crash. A remote user can obtain\n  potentially sensitive information as well on the target system.",
+      "mitigation": "Update to Apache HTTP Server 2.2.34 or 2.4.27\n  or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.811237",
+      "references": "<ul><li>CVE-2017-9788</li><li>http://www.securitytracker.com/id/1038906</li><li>http://www.securityfocus.com/bid/99569</li><li>http://httpd.apache.org/security/vulnerabilities_22.html</li><li>http://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server 'mod_auth_digest' Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.55 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.149152",
+      "references": "<ul><li>CVE-2006-20001</li><li>CVE-2022-36760</li><li>CVE-2022-37436</li><li>https://httpd.apache.org/security/vulnerabilities_24.html#2.4.55</li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.55 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.52 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.117854",
+      "references": "<ul><li>CVE-2021-44224</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server 2.4.7 - 2.4.51 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a man-in-the-middle attack vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow remote\n  attackers to redirect an application's outbound HTTP traffic to an arbitrary\n  proxy server via a crafted proxy header in an HTTP request.",
+      "mitigation": "Update to version 2.4.24, or 2.2.32, or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.808632",
+      "references": "<ul><li>CVE-2016-5387</li><li>https://www.apache.org/security/asf-httpoxy-response.txt</li><li>http://www.securityfocus.com/bid/91816</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server Man-in-the-Middle Attack Vulnerability (Jul 2016) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a vulnerability in mod_session_crypto.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.25 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.147045",
+      "references": "<ul><li>CVE-2016-0736</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server mod_session_crypto Vulnerability (Dec 2016) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "In Apache HTTP Server, a race condition in mod_auth_digest when running in a\n  threaded server could allow a user with valid credentials to authenticate using another username, bypassing\n  configured access control restrictions.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.39 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.142220",
+      "references": "<ul><li>CVE-2019-0217</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.39 mod_auth_digest Access Control Bypass Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a NULL pointer dereference\n  vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow an attacker to crash the server.",
+      "mitigation": "Update to version 2.4.48 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.112905",
+      "references": "<ul><li>CVE-2021-31618</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.48 NULL Pointer Dereference Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a denial of service (DoS) vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow remote\n  attackers to cause a denial-of-service condition.",
+      "mitigation": "Update to Apache HTTP Server 2.4.25 or\n  later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.812067",
+      "references": "<ul><li>CVE-2016-2161</li><li>https://httpd.apache.org/security/vulnerabilities_24.html#CVE-2016-2161</li><li>http://www.securityfocus.com/bid/95076</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server 'mod_auth_digest' DoS Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to an out-of-bounds read\n  vulnerability in mod_macro.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.58 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.100272",
+      "references": "<ul><li>CVE-2023-31122</li><li>https://httpd.apache.org/security/vulnerabilities_24.html#2.4.58</li><li>https://www.openwall.com/lists/oss-security/2023/10/19/4</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.58 'mod_macro' Out-of-bounds Read Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server allows remote attackers to read\n  secret data from process memory if the Limit directive can be set in a user's .htaccess\n  file, or if httpd.conf has certain misconfigurations, aka Optionsbleed.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "The successful exploitation allows the attacker to read\n  chunks of the host's memory.",
+      "mitigation": "Update to Apache HTTP Server 2.4.28. For Apache HTTP\n  Server running version 2.2.34 apply the patch linked in the references.\n\n  As a workaround the usage of .htaccess should be disabled completely via the\n  'AllowOverride None' directive within the webservers configuration. Furthermore all\n  <Limit> statements within the webserver configuration needs to be verified for\n  invalid HTTP methods.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.108252",
+      "references": "<ul><li>CVE-2017-9798</li><li>http://openwall.com/lists/oss-security/2017/09/18/2</li><li>https://blog.fuzzing-project.org/60-Optionsbleed-HTTP-OPTIONS-method-can-leak-Apaches-server-memory.html</li><li>http://www.securityfocus.com/bid/100872</li><li>https://archive.apache.org/dist/httpd/patches/apply_to_2.2.34/</li><li>https://www.apache.org/dist/httpd/CHANGES_2.4.28</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server OPTIONS Memory Leak Vulnerability (Optionsbleed) - Version Check"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a denial of service vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow an attacker\n  to crash the Apache HTTP Server resulting in denial of service condition.",
+      "mitigation": "Update to version 2.4.30 or later. Please see the references for more information.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.812849",
+      "references": "<ul><li>CVE-2018-1303</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li><li>http://www.securityfocus.com/bid/103522</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server Denial of Service Vulnerability-02 (Apr 2018) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow remote\n  attackers to conduct request smuggling, response splitting and cache pollution\n  attacks.",
+      "mitigation": "Update to Apache HTTP Server 2.2.32 or 2.4.25\n  or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.812033",
+      "references": "<ul><li>CVE-2016-8743</li><li>https://httpd.apache.org/security/vulnerabilities_22.html</li><li>http://www.securityfocus.com/bid/95077</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server 'Whitespace Defects' Multiple Vulnerabilities"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+      "cwe": "",
+      "description": "In Apache HTTP Server mod_session checks the session expiry time before\n  decoding the session. This causes session expiry time to be ignored for mod_session_cookie sessions since the\n  expiry time is loaded when the session is decoded.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.38 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.141964",
+      "references": "<ul><li>CVE-2018-17199</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.38 mod_session_cookie Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.2.29, 2.4.12 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.147048",
+      "references": "<ul><li>CVE-2013-5704</li><li>CVE-2014-0118</li><li>CVE-2014-0226</li><li>CVE-2014-0231</li><li>https://httpd.apache.org/security/vulnerabilities_22.html</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server Multiple Vulnerabilities (Sep 2014) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a CRLF injection vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.2.32, 2.4.25 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.147044",
+      "references": "<ul><li>CVE-2016-4975</li><li>https://httpd.apache.org/security/vulnerabilities_22.html</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server CRLF Injection Vulnerability (Dec 2016) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.42 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.143671",
+      "references": "<ul><li>CVE-2020-1927</li><li>CVE-2020-1934</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server 2.4.0 < 2.4.42 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to multiple vulnerabilities.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.41 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.114143",
+      "references": "<ul><li>CVE-2019-10092</li><li>CVE-2019-10098</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server 2.4.0 - 2.4.40 Multiple Vulnerabilities - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a tunneling misconfiguration\n  vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.48 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.112898",
+      "references": "<ul><li>CVE-2019-17567</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server 2.4.6 - 2.4.46 Tunneling Misconfiguration Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "cwe": "",
+      "description": "When the path component of a request URL contains multiple consecutive slashes\n  ('/'), directives such as LocationMatch and RewriteRule must account for duplicates in regular expressions while\n  other aspects of the servers processing will implicitly collapse them.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.39 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.142228",
+      "references": "<ul><li>CVE-2019-0220</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server < 2.4.39 URL Normalization Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to an IP address spoofing vulnerability when\n  proxying using mod_remoteip and mod_rewrite.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.24 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.144376",
+      "references": "<ul><li>CVE-2020-11985</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server 2.4.1 < 2.4.24 IP Spoofing Vulnerability - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "cwe": "",
+      "description": "The remote HTTP web server / application is missing to set the\n  'HttpOnly' cookie attribute for one or more sent HTTP cookie.",
+      "finding_guidance": "Checks all cookies sent by the remote HTTP web server /\n  application for a missing 'HttpOnly' cookie attribute.",
+      "impact": "",
+      "mitigation": "- Set the 'HttpOnly' cookie attribute for any session cookie\n\n  - Evaluate / do an own assessment of the security impact on the web server / application and create\n  an override for this result if there is none (this can't be checked automatically by this VT)",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.105925",
+      "references": "<ul><li>https://www.rfc-editor.org/rfc/rfc6265#section-5.2.6</li><li>https://owasp.org/www-community/HttpOnly</li><li>https://wiki.owasp.org/index.php/Testing_for_cookies_attributes_(OTG-SESS-002)</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Missing 'HttpOnly' Cookie Attribute (HTTP)"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a denial of service vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow a remote\n  attacker to cause a denial of service via some crafted dimension.",
+      "mitigation": "Update to version 2.4.13 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.805616",
+      "references": "<ul><li>CVE-2015-0228</li><li>https://bugs.mageia.org/show_bug.cgi?id=15428</li><li>http://www.securityfocus.com/bid/73041</li><li>http://svn.apache.org/repos/asf/httpd/httpd/branches/2.4.x/CHANGES</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server 'mod_lua' Denial of Service Vulnerability -01 (May 2015)"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a denial of service vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "Successful exploitation will allow a remote\n  attacker to cause a denial of service via specially crafted response.",
+      "mitigation": "Update to version 2.4.12 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.805636",
+      "references": "<ul><li>CVE-2014-3583</li><li>https://bugzilla.redhat.com/show_bug.cgi?id=1163555</li><li>http://www.securityfocus.com/bid/71657</li><li>http://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server 'mod_proxy_fcgi' Denial of Service Vulnerability (May 2015)"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+      "cwe": "",
+      "description": "Apache HTTP Server is prone to a denial of service (DoS)\n  vulnerability.",
+      "finding_guidance": "Checks if a vulnerable version is present on the target host.",
+      "impact": "",
+      "mitigation": "Update to version 2.4.12 or later.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.147046",
+      "references": "<ul><li>CVE-2014-3581</li><li>https://httpd.apache.org/security/vulnerabilities_24.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Apache HTTP Server DoS Vulnerability (Sep 2014) - Linux"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:8080/tcp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+      "cwe": "",
+      "description": "The host / application transmits sensitive information (username, passwords) in\n  cleartext via HTTP.",
+      "finding_guidance": "Evaluate previous collected information and check if the host / application is not\n  enforcing the transmission of sensitive data via an encrypted SSL/TLS connection.\n\n  The script is currently checking the following:\n\n  - HTTP Basic Authentication (Basic Auth)\n\n  - HTTP Forms (e.g. Login) with input field of type 'password'",
+      "impact": "An attacker could use this situation to compromise or eavesdrop on the\n  HTTP communication between the client and the server using a man-in-the-middle attack to get access to\n  sensitive data like usernames or passwords.",
+      "mitigation": "Enforce the transmission of sensitive data via an encrypted SSL/TLS connection.\n  Additionally make sure the host / application is redirecting all users to the secured SSL/TLS connection before\n  allowing to input sensitive data into the mentioned functions.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.108440",
+      "references": "<ul><li>https://www.owasp.org/index.php/Top_10_2013-A2-Broken_Authentication_and_Session_Management</li><li>https://www.owasp.org/index.php/Top_10_2013-A6-Sensitive_Data_Exposure</li><li>https://cwe.mitre.org/data/definitions/319.html</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Cleartext Transmission of Sensitive Information via HTTP"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "cwe": "",
+      "description": "The remote host implements TCP timestamps and therefore allows\n  to compute the uptime.",
+      "finding_guidance": "Special IP packets are forged and sent with a little delay in\n  between to the target IP. The responses are searched for a timestamps. If found, the timestamps\n  are reported.",
+      "impact": "A side effect of this feature is that the uptime of the remote\n  host can sometimes be computed.",
+      "mitigation": "To disable TCP timestamps on linux add the line\n  'net.ipv4.tcp_timestamps = 0' to /etc/sysctl.conf. Execute 'sysctl -p' to apply the settings at\n  runtime.\n\n  To disable TCP timestamps on Windows execute 'netsh int tcp set global timestamps=disabled'\n\n  Starting with Windows Server 2008 and Vista, the timestamp can not be completely disabled.\n\n  The default behavior of the TCP/IP stack on this Systems is to not use the Timestamp options when\n  initiating TCP connections, but use them if the TCP peer that is initiating communication includes\n  them in their synchronize (SYN) segment.\n\n  See the references for more information.",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.80091",
+      "references": "<ul><li>https://datatracker.ietf.org/doc/html/rfc1323</li><li>https://datatracker.ietf.org/doc/html/rfc7323</li><li>https://web.archive.org/web/20151213072445/http://www.microsoft.com/en-us/download/details.aspx?id=9152</li><li>https://www.fortiguard.com/psirt/FG-IR-16-090</li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "TCP Timestamps Information Disclosure"
+    },
+    {
+      "affected_components": [
+        "10.20.0.125:general/icmp"
+      ],
+      "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "cwe": "",
+      "description": "The remote host responded to an ICMP timestamp request.",
+      "finding_guidance": "Sends an ICMP Timestamp (Type 13) request and checks if a\n  Timestamp Reply (Type 14) is received.",
+      "impact": "This information could theoretically be used to exploit weak\n  time-based random number generators in other services.",
+      "mitigation": "Various mitigations are possible:\n\n  - Disable the support for ICMP timestamp on the remote host completely\n\n  - Protect the remote host by a firewall, and block ICMP packets passing through the firewall in\n  either direction (either completely or only for untrusted networks)",
+      "plugin_id": "1.3.6.1.4.1.25623.1.0.103190",
+      "references": "<ul><li>CVE-1999-0524</li><li>https://datatracker.ietf.org/doc/html/rfc792</li><li>https://datatracker.ietf.org/doc/html/rfc2780</li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "ICMP Timestamp Reply Information Disclosure"
+    }
+  ],
+  "outcome": "ok"
+}

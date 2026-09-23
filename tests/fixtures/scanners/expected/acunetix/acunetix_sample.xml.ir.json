@@ -1,0 +1,79 @@
+{
+  "detected": "acunetix",
+  "error": null,
+  "findings": [
+    {
+      "affected_components": [
+        "https://other.example.com/api/upload"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-502",
+      "description": "<p>Remote code execution via deserialization.</p>",
+      "finding_guidance": "",
+      "impact": "Full system compromise.",
+      "mitigation": "Update the affected library. Disable deserialization of untrusted data.",
+      "plugin_id": "rce-001",
+      "references": "",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Critical Remote Code Execution"
+    },
+    {
+      "affected_components": [
+        "https://example.com/login.php?id=1",
+        "https://other.example.com/admin/users.php?id=1"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-89",
+      "description": "<p>SQL injection vulnerability detected in login parameter.</p>",
+      "finding_guidance": "",
+      "impact": "Data exfiltration, authentication bypass, remote code execution.",
+      "mitigation": "Use parameterized queries or prepared statements.",
+      "plugin_id": "sqli-001",
+      "references": "<ul><li>CVE-2023-1234</li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [
+        "CVE-2023-1234",
+        "injection"
+      ],
+      "title": "SQL Injection"
+    },
+    {
+      "affected_components": [
+        "https://example.com/search?q=test"
+      ],
+      "cvss_vector": "",
+      "cwe": "CWE-79",
+      "description": "<p>Reflected XSS detected in search parameter.</p>",
+      "finding_guidance": "",
+      "impact": "Session hijacking, credential theft.",
+      "mitigation": "Encode all user-supplied output. Use a Content Security Policy.",
+      "plugin_id": "xss-001",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Cross-Site Scripting"
+    },
+    {
+      "affected_components": [
+        "https://example.com/"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<p>Server version disclosure.</p>",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "info-001",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Informational Finding"
+    }
+  ],
+  "outcome": "ok"
+}
