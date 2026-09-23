@@ -14,6 +14,25 @@ from grison.scanners.ir.severity import max_severity as _max_severity
 _WHITESPACE_RUN = re.compile(r"\s+")
 
 
+class RefusedInput(Exception):
+    """An input a parser recognises but will not turn into findings — a category
+    distinct from "unrecognized" (detect() returned None) and "parse error" (the
+    parser tried and blew up on malformed input). A parser raises this for input
+    it understood well enough to make a deliberate call about: Nmap for every
+    file (it's recon output, not findings), SSLyze for a pre-v5 JSON export (its
+    schema changed enough that the old fields silently mean nothing under this
+    parser).
+
+    :func:`grison.sinks.pipeline.run_parse` catches this separately from a bare
+    parse error, records it in both ``ParseSummary.refused_files`` and
+    ``file_errors`` (the exit code must still reflect it), and
+    :mod:`grison.cli.render` prints refused files under their own header instead
+    of folding them into "could not be parsed" — the file parsed as expected;
+    grison chose not to use it, which is a different fact than it failing to
+    parse.
+    """
+
+
 def collapse_whitespace(text: str) -> str:
     """Collapse any run of whitespace (including an embedded newline plus XML
     indentation, as OpenVAS NVT text carries) to a single space, and strip.
@@ -167,11 +186,15 @@ class Aggregator:
 
 @dataclass
 class ImportOptions:
-    severity_filter: set[Severity] | None = None  # None = all severities
-    include_plugins: list[str] = field(default_factory=list)
-    exclude_plugins: list[str] = field(default_factory=list)
+    # Every field below is read by at least one parser today (grep
+    # `grison/scanners/*.py` for `opts.`/`_plugin_allowed`/`_severity_allowed`
+    # before adding a field nothing reads — Nmap's `fmt` was one such dead
+    # field, removed when Nmap became a RefusedInput-only recon scanner and
+    # its grepable-format code path went with it).
+    severity_filter: set[Severity] | None = None  # None = all severities; every parser
+    include_plugins: list[str] = field(default_factory=list)  # every parser (base._plugin_allowed)
+    exclude_plugins: list[str] = field(default_factory=list)  # every parser (base._plugin_allowed)
     min_qod: int = 0  # OpenVAS: minimum quality-of-detection threshold
-    fmt: str = "xml"  # Nmap: "xml" | "grepable"
     no_snoozed: bool = False  # Nessus: skip snoozed findings
 
 

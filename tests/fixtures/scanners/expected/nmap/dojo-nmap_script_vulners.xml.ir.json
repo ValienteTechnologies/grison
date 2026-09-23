@@ -1,24 +1,6 @@
 {
   "detected": "nmap",
-  "error": null,
-  "findings": [
-    {
-      "affected_components": [
-        "5022/tcp (ssh)"
-      ],
-      "cvss_vector": "",
-      "cwe": "",
-      "description": "<p>Open ports discovered on <strong>192.168.0.1</strong>:</p><table><thead><tr><th>Port</th><th>Service</th><th>Product/Version</th></tr></thead><tbody><tr><td>5022/tcp</td><td>ssh</td><td>OpenSSH 7.4</td></tr></tbody></table>",
-      "finding_guidance": "",
-      "impact": "",
-      "mitigation": "",
-      "plugin_id": "nmap-192.168.0.1",
-      "references": "",
-      "replication_steps": "",
-      "severity": "informational",
-      "tags": [],
-      "title": "Open Ports \u2013 192.168.0.1"
-    }
-  ],
-  "outcome": "ok"
+  "error": "nmap is recon output, not findings; inventory support is pending",
+  "findings": [],
+  "outcome": "refused"
 }

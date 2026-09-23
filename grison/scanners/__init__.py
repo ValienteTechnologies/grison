@@ -8,7 +8,7 @@ sniffs a file to pick its parser so ``grison parse`` needs no ``--scanner`` arg.
 from __future__ import annotations
 
 from grison.scanners.acunetix import AcunetixScanner
-from grison.scanners.base import ImportOptions, Scanner
+from grison.scanners.base import ImportOptions, RefusedInput, Scanner
 from grison.scanners.burp import BurpScanner
 from grison.scanners.detect import detect, detect_bytes
 from grison.scanners.nessus import NessusScanner
@@ -48,6 +48,7 @@ __all__ = [
     "NmapScanner",
     "OpenVASScanner",
     "QualysScanner",
+    "RefusedInput",
     "Scanner",
     "SslyzeScanner",
     "ZapScanner",

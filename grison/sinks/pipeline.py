@@ -18,7 +18,7 @@ from grison.errors import GrisonError
 from grison.formats.finding import FindingDoc
 from grison.markdown import default_finding_type, ir_to_finding
 from grison.model import FindingType
-from grison.scanners import ImportOptions, scanner_for
+from grison.scanners import ImportOptions, RefusedInput, scanner_for
 from grison.scanners.detect import _HEAD_BYTES, InputEncodingError, detect_bytes, normalise_input
 from grison.scanners.ir import parse_severity_filter
 from grison.sinks.file_sink import FileSink, SinkResult
@@ -35,16 +35,26 @@ class ParsePathNotFound(GrisonError):
 class ParseSummary:
     files_parsed: dict[str, int] = field(default_factory=dict)  # scanner -> file count
     skipped_files: list[tuple[Path, str]] = field(default_factory=list)  # (path, reason)
+    # Inputs a parser recognised but deliberately declined (grison.scanners.base.
+    # RefusedInput) — e.g. an nmap export (recon, not findings) or pre-v5 sslyze
+    # JSON. Distinct from `skipped_files`: the file wasn't unrecognized and its
+    # parser didn't blow up, it was refused on purpose. Every entry here also has
+    # a matching `file_errors` entry (a refused file in a scan directory must be
+    # as loud as an unrecognized one — `grison parse` still exits 1) but
+    # `grison.cli.render` prints refused files under their own header instead of
+    # folding them into "could not be parsed".
+    refused_files: list[tuple[Path, str]] = field(default_factory=list)  # (path, message)
     findings: list[FindingDoc] = field(default_factory=list)
     keys: list[str] = field(default_factory=list)  # dedupe key per finding (parallel)
     warnings: list[str] = field(default_factory=list)
     # Two distinct failure kinds, kept apart so the CLI (grison.cli.render) can give
     # each its own header instead of string-matching one combined list. A file-level
     # failure means the *input file itself* never yielded anything to validate (it
-    # couldn't be read, wasn't recognized, had bad encoding, or its parser raised) —
-    # every entry here has a matching `skipped_files` reason. A finding-level failure
-    # means the file DID parse but one of its findings failed IR-to-markdown
-    # validation, or failed to write to the sink.
+    # couldn't be read, wasn't recognized, had bad encoding, was refused, or its
+    # parser raised) — every entry here has a matching `skipped_files` or
+    # `refused_files` reason. A finding-level failure means the file DID parse but
+    # one of its findings failed IR-to-markdown validation, or failed to write to
+    # the sink.
     file_errors: list[str] = field(default_factory=list)
     finding_errors: list[str] = field(default_factory=list)
     sink: SinkResult | None = None
@@ -128,6 +138,14 @@ def run_parse(
             continue
         try:
             ir_list = cls().parse(data, ImportOptions(severity_filter=sev_filter))
+        except RefusedInput as e:
+            reason = str(e)
+            # Not a `skipped_files` entry: the file was recognized and its parser
+            # made a deliberate call, not silently discarded — see RefusedInput's
+            # docstring and `refused_files`'s own docstring above.
+            summary.refused_files.append((f, reason))
+            summary.file_errors.append(f"{f.name}: {reason}")
+            continue
         except Exception as e:  # noqa: BLE001 — one bad file must not kill the batch
             first_line = (str(e).splitlines() or [""])[0]
             reason = f"parse error: {type(e).__name__}: {first_line}"

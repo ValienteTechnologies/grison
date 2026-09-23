@@ -1,6 +1,6 @@
 {
   "detected": "nmap",
-  "error": null,
+  "error": "nmap is recon output, not findings; inventory support is pending",
   "findings": [],
-  "outcome": "ok"
+  "outcome": "refused"
 }

@@ -50,7 +50,12 @@ def test_parse_dir_autodetects_all_and_skips_unknown(tmp_path: Path) -> None:
     out = _out_dir(tmp_path)
     summary = run_parse([inp], out)
 
-    assert set(summary.files_parsed) == _ALL_SCANNERS  # every fixture auto-detected
+    # nmap is recon output and is refused (RefusedInput), not parsed — every
+    # other scanner still auto-detects and parses.
+    assert set(summary.files_parsed) == _ALL_SCANNERS - {"nmap"}
+    assert any(
+        p.name == "nmap_sample.xml" and "recon output" in msg for p, msg in summary.refused_files
+    )
     assert any(
         p.name == "notes.txt" and "unrecognized" in reason for p, reason in summary.skipped_files
     )
@@ -112,6 +117,28 @@ def test_detected_file_whose_parser_raises_is_recorded_as_an_error(tmp_path: Pat
     )
     assert any("broken.xml" in e and "parse error" in e for e in summary.errors)
     assert "ParseError" in "".join(summary.errors)  # exception type recorded, not swallowed
+
+
+def test_refused_file_is_recorded_separately_from_a_parse_error(tmp_path: Path) -> None:
+    # A RefusedInput (grison.scanners.base.RefusedInput) is a third file-level
+    # outcome, distinct from both "unrecognized" and "parser raised": the file
+    # WAS recognized and its parser made a deliberate call not to process it
+    # (nmap is recon output, not findings). It must still fail the batch (an
+    # entry in `errors`, same as any other file-level failure) but land in its
+    # own `refused_files` list, not `skipped_files`/treated as a parse error.
+    out = _out_dir(tmp_path)
+    nmap_file = tmp_path / "nmap_sample.xml"
+    shutil.copy(_FIX / "nmap/nmap_sample.xml", nmap_file)
+
+    summary = run_parse([nmap_file], out)
+
+    assert summary.refused_files == [
+        (nmap_file, "nmap is recon output, not findings; inventory support is pending")
+    ]
+    assert summary.skipped_files == []  # refused, not skipped
+    assert "nmap" not in summary.files_parsed  # never counted as successfully parsed
+    assert any("nmap_sample.xml" in e and "recon output" in e for e in summary.file_errors)
+    assert summary.errors  # still fails the batch, exit code must reflect it
 
 
 def test_other_files_in_the_same_run_still_get_processed(tmp_path: Path) -> None:

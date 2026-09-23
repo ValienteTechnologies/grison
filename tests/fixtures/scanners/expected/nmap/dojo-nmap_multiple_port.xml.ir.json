@@ -1,36 +1,6 @@
 {
   "detected": "nmap",
-  "error": null,
-  "findings": [
-    {
-      "affected_components": [
-        "21/tcp (ftp)",
-        "25/tcp (smtp)",
-        "53/tcp (domain)",
-        "80/tcp (http)",
-        "110/tcp (pop3)",
-        "143/tcp (imap)",
-        "443/tcp (https)",
-        "465/tcp (smtps)",
-        "587/tcp (submission)",
-        "993/tcp (imaps)",
-        "995/tcp (pop3s)",
-        "2525/tcp (ms-v-worlds)",
-        "3306/tcp (mysql)"
-      ],
-      "cvss_vector": "",
-      "cwe": "",
-      "description": "<p>Open ports discovered on <strong>joaquinlp.me</strong> (198.38.82.159):</p><table><thead><tr><th>Port</th><th>Service</th><th>Product/Version</th></tr></thead><tbody><tr><td>21/tcp</td><td>ftp</td><td></td></tr><tr><td>25/tcp</td><td>smtp</td><td></td></tr><tr><td>53/tcp</td><td>domain</td><td></td></tr><tr><td>80/tcp</td><td>http</td><td></td></tr><tr><td>110/tcp</td><td>pop3</td><td></td></tr><tr><td>143/tcp</td><td>imap</td><td></td></tr><tr><td>443/tcp</td><td>https</td><td></td></tr><tr><td>465/tcp</td><td>smtps</td><td></td></tr><tr><td>587/tcp</td><td>submission</td><td></td></tr><tr><td>993/tcp</td><td>imaps</td><td></td></tr><tr><td>995/tcp</td><td>pop3s</td><td></td></tr><tr><td>2525/tcp</td><td>ms-v-worlds</td><td></td></tr><tr><td>3306/tcp</td><td>mysql</td><td></td></tr></tbody></table>",
-      "finding_guidance": "",
-      "impact": "",
-      "mitigation": "",
-      "plugin_id": "nmap-198.38.82.159",
-      "references": "",
-      "replication_steps": "",
-      "severity": "informational",
-      "tags": [],
-      "title": "Open Ports \u2013 joaquinlp.me"
-    }
-  ],
-  "outcome": "ok"
+  "error": "nmap is recon output, not findings; inventory support is pending",
+  "findings": [],
+  "outcome": "refused"
 }

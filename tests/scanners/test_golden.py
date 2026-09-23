@@ -31,7 +31,7 @@ from typing import Any
 
 import pytest
 
-from grison.scanners import ImportOptions, detect_bytes, scanner_for
+from grison.scanners import ImportOptions, RefusedInput, detect_bytes, scanner_for
 from grison.scanners.detect import normalise_input
 from grison.scanners.ir import ScanFinding
 
@@ -71,6 +71,14 @@ def _run(path: Path) -> dict[str, Any]:
     assert cls is not None, f"{name!r} came from detect_bytes but has no registered parser"
     try:
         findings = cls().parse(data, ImportOptions())
+    except RefusedInput as e:
+        # A distinct outcome from "error": the parser recognised this input and
+        # made a deliberate call not to process it (see RefusedInput's docstring
+        # in grison/scanners/base.py) — recorded with the plain message, not the
+        # exception-type-plus-first-line shape a genuine parse error gets below.
+        doc["outcome"] = "refused"
+        doc["error"] = str(e)
+        return doc
     except Exception as e:  # noqa: BLE001 — recording current behaviour, not filtering it
         first_line = (str(e).splitlines() or [""])[0]
         doc["outcome"] = "error"
