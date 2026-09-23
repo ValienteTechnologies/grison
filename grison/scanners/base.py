@@ -106,6 +106,11 @@ class RawOccurrence:
     references: FindingReferences = field(default_factory=list)
     replication_steps: str = ""
     tags: list[str] = field(default_factory=list)
+    # Free-text remarks about this occurrence's own extraction (e.g. "CVSS v2
+    # vector ... could not be converted, dropped") — carried through to
+    # :class:`~grison.scanners.ir.ScanFinding`.notes the same first-occurrence-
+    # wins way as the other prose fields above.
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -130,6 +135,7 @@ class AggregatedRecord:
     references: FindingReferences = field(default_factory=list)
     replication_steps: str = ""
     tags: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 class Aggregator:
@@ -166,6 +172,7 @@ class Aggregator:
                 references=occurrence.references,
                 replication_steps=occurrence.replication_steps,
                 tags=occurrence.tags,
+                notes=occurrence.notes,
             )
             return
 

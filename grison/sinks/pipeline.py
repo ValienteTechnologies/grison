@@ -148,7 +148,7 @@ def run_parse(
             continue
         except Exception as e:  # noqa: BLE001 — one bad file must not kill the batch
             first_line = (str(e).splitlines() or [""])[0]
-            reason = f"parse error: {type(e).__name__}: {first_line}"
+            reason = f"parse error: {first_line}"
             # A detected file whose parser blows up is still a *failure*, not a
             # skip — it must reach `errors` so the CLI's exit code reflects it,
             # exactly like an unrecognized file above. Other files in the same

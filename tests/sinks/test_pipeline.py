@@ -116,7 +116,11 @@ def test_detected_file_whose_parser_raises_is_recorded_as_an_error(tmp_path: Pat
         p.name == "broken.xml" and "parse error" in reason for p, reason in summary.skipped_files
     )
     assert any("broken.xml" in e and "parse error" in e for e in summary.errors)
-    assert "ParseError" in "".join(summary.errors)  # exception type recorded, not swallowed
+    # The exception's own message is recorded, not swallowed — but bare, without
+    # its class name prefixed (e.g. "parse error: unclosed token: line 1,
+    # column 17", never "parse error: ParseError: ...").
+    assert "unclosed token" in "".join(summary.errors)
+    assert "ParseError" not in "".join(summary.errors)
 
 
 def test_refused_file_is_recorded_separately_from_a_parse_error(tmp_path: Path) -> None:

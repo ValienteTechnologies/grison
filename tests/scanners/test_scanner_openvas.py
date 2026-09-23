@@ -57,6 +57,16 @@ def test_bare_v2_cvss_base_vector_gets_converted() -> None:
     assert parse_cvss(findings[0].cvss_vector).base_score > 0
 
 
+def test_malformed_cvss_base_vector_drops_and_warns_instead_of_defaulting() -> None:
+    # Not a real CVSS2 vector (no "KEY:VALUE" pairs) and not "CVSS:"-prefixed
+    # either, so it's routed into the v2 converter, which must refuse it rather
+    # than silently emit an all-defaults CVSS3 vector.
+    xml = _result("summary=Test|cvss_base_vector=garbage")
+    findings = OpenVASScanner().parse(xml, ImportOptions())
+    assert findings[0].cvss_vector == ""
+    assert findings[0].notes == ["CVSS v2 vector garbage could not be converted, dropped"]
+
+
 def test_empty_summary_falls_back_to_description() -> None:
     xml = _result(
         "summary=|solution=Fix it",

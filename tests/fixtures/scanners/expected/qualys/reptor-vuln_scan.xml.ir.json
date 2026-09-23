@@ -13,7 +13,7 @@
       "mitigation": "There are no patches available at this time. Please contact your vendor for updates.\n<P>\n\n\n\n\n\n\n\n\n\n\n\n\n\nWorkaround:<BR><P>\nFor IIS Web Server 6.x  and prior:<BR>\nCheck the Microsoft article on <A HREF=\"https://support.microsoft.com/en-us/kb/218180\" TARGET=\"_blank\">how to set the Hostname instead of internal IP address for IIS</A>.\n<P>\nFor IIS 7.0 or newer<BR>\nThe release version of IIS7 by default includes the functionality of masking the IP address. Refer to <A HREF=\"https://techcommunity.microsoft.com/t5/iis-support-blog/removing-an-iis-server-s-ip-address-from-http-responses/ba-p/347669\" TARGET=\"_blank\">Removing an IIS server's IP address from HTTP responses</A> and <A HREF=\"https://support.microsoft.com/en-us/help/218180/internet-information-server-returns-ip-address-in-http-header-content\" TARGET=\"_blank\">Internet Information Server returns IP address in HTTP header (Content-Location)</A> for more information.\n<P>\nFor Apache Web Server:<BR>\nModify the Apache configuration file as follows:<BR>\n- Set &quot;ServerName&quot; to a proper FQDN.\n<BR>\n or\n<BR>\n- Use module mod_rewrite to modify the 3xx error message returned by the server.\n<P>\nNo workaround information is available for other Web servers at this time. Refer to your vendor for an appropriate workaround.",
       "notes": [],
       "plugin_id": "86247",
-      "references": "<ul><li>\n            </li></ul>",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2000-0649\">CVE-2000-0649</a></li></ul>",
       "replication_steps": "",
       "severity": "low",
       "tags": [],

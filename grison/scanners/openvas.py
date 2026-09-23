@@ -3,7 +3,7 @@ from __future__ import annotations
 import defusedxml.ElementTree as ET
 
 from grison.scanners.ir import ScanFinding, cvss_to_severity
-from grison.scanners.ir.cvss2 import cvss2_to_cvss3
+from grison.scanners.ir.cvss2 import CvssConversionError, cvss2_to_cvss3
 
 from .base import AggregatedRecord, Aggregator, ImportOptions, RawOccurrence, Scanner, refs_to_html
 
@@ -89,8 +89,13 @@ class OpenVASScanner(Scanner):
             # prefix in its own spec) but a properly prefixed v3 vector on newer
             # ones — convert only the former, leave the latter untouched.
             cvss_raw = tags.get("cvss_base_vector", "").strip()
+            notes: list[str] = []
             if cvss_raw and not cvss_raw.startswith("CVSS:"):
-                cvss_raw = cvss2_to_cvss3(cvss_raw)
+                try:
+                    cvss_raw = cvss2_to_cvss3(cvss_raw)
+                except CvssConversionError:
+                    notes.append(f"CVSS v2 vector {cvss_raw} could not be converted, dropped")
+                    cvss_raw = ""
 
             agg.add(
                 RawOccurrence(
@@ -103,6 +108,7 @@ class OpenVASScanner(Scanner):
                     impact=tags.get("impact", ""),
                     mitigation=tags.get("solution", ""),
                     references=refs,
+                    notes=notes,
                 )
             )
 
@@ -120,4 +126,5 @@ class OpenVASScanner(Scanner):
             mitigation=rec.mitigation,
             references=refs_to_html(rec.references),
             affected_components=rec.affected_components,
+            notes=rec.notes,
         )

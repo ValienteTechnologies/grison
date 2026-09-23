@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from grison.markdown.mapping import ir_to_finding
 from grison.model import FindingType
 from grison.model.cvss import parse_cvss
 from grison.scanners import ImportOptions, NessusScanner
 from grison.scanners.ir import Severity
+from grison.scanners.ir.cvss2 import CvssConversionError
 from grison.scanners.nessus import _cvss2_to_cvss3
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "scanners"
@@ -108,3 +111,21 @@ def test_cvss2_to_cvss3_preserves_av_parenthesized() -> None:
 def test_cvss2_to_cvss3_full_conversion() -> None:
     v3 = _cvss2_to_cvss3("CVSS2#AV:N/AC:L/Au:N/C:P/I:P/A:P")
     assert v3 == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"
+
+
+def test_cvss2_to_cvss3_raises_on_garbage_vector() -> None:
+    # No recognizable "KEY:VALUE" pair anywhere — not a CVSS2 vector at all.
+    # Silently returning an all-defaults vector would be worse than dropping it.
+    with pytest.raises(CvssConversionError):
+        _cvss2_to_cvss3("not a vector at all")
+
+
+def test_malformed_cvss2_vector_drops_and_warns_instead_of_defaulting() -> None:
+    xml = _report_item("<cvss_vector>garbage</cvss_vector>")
+    findings = NessusScanner().parse(xml, ImportOptions())
+    assert findings[0].cvss_vector == ""
+    assert findings[0].notes == ["CVSS v2 vector garbage could not be converted, dropped"]
+
+    result = ir_to_finding(findings[0], finding_type=FindingType.NETWORK)
+    assert result.finding.cvss is None
+    assert any("could not be converted, dropped" in w for w in result.warnings)

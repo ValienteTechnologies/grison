@@ -48,6 +48,24 @@ def _ref_entry(ref_id: str, url: str) -> str | tuple[str, str]:
     return (ref_id, url) if url else ref_id
 
 
+def _id_url_refs(container: Element, xpath: str) -> FindingReferences:
+    """Extract each reference matched by ``xpath`` — a wrapper element (Qualys's
+    ``CVE_ID``/``CVE``/``VENDOR_REFERENCE``) whose id lives in a nested ``<ID>``
+    child, never the wrapper's own text (which is just the whitespace between its
+    children). Shared by every Qualys reference list across all three XML
+    dialects: SCAN's ``.//CVE_ID_LIST/CVE_ID``, the VM glossary's
+    ``CVE_ID_LIST/CVE_ID`` and ``VENDOR_REFERENCE_LIST/VENDOR_REFERENCE`` (same
+    shape), and WAS's ``CVE_LIST/CVE`` (whose entries carry no ``<URL>``
+    sibling — plain ids only). A ``<URL>`` sibling, when present, makes the
+    reference a link instead of a bare id (see ``_ref_entry``)."""
+    refs: FindingReferences = []
+    for item in container.findall(xpath):
+        ref_id = item.findtext("ID") or ""
+        if ref_id:
+            refs.append(_ref_entry(ref_id, item.findtext("URL") or ""))
+    return refs
+
+
 class QualysScanner(Scanner):
     name = "qualys"
     label = "Qualys"
@@ -88,7 +106,7 @@ class QualysScanner(Scanner):
                     "impact": qid_el.findtext("IMPACT") or "",
                     "solution": qid_el.findtext("SOLUTION") or "",
                     "cvss_vector": cvss_vector,
-                    "cve_list": [c.text or "" for c in qid_el.findall(".//CVE_LIST/CVE/ID")],
+                    "cve_list": _id_url_refs(qid_el, ".//CVE_LIST/CVE"),
                 }
 
         agg = Aggregator()
@@ -172,7 +190,7 @@ class QualysScanner(Scanner):
                         continue
 
                     title = vuln.findtext("TITLE") or f"QID {qid}"
-                    cve_list = [c.text or "" for c in vuln.findall(".//CVE_ID_LIST/CVE_ID")]
+                    cve_list = _id_url_refs(vuln, ".//CVE_ID_LIST/CVE_ID")
 
                     agg.add(
                         RawOccurrence(
@@ -246,15 +264,10 @@ class QualysScanner(Scanner):
             if m:
                 cvss_vector = ensure_cvss3_prefix(m.group(1))
 
-            references: FindingReferences = []
-            for cve in vd.findall("CVE_ID_LIST/CVE_ID"):
-                cve_id = cve.findtext("ID") or ""
-                if cve_id:
-                    references.append(_ref_entry(cve_id, cve.findtext("URL") or ""))
-            for vendor_ref in vd.findall("VENDOR_REFERENCE_LIST/VENDOR_REFERENCE"):
-                vendor_id = vendor_ref.findtext("ID") or ""
-                if vendor_id:
-                    references.append(_ref_entry(vendor_id, vendor_ref.findtext("URL") or ""))
+            references: FindingReferences = [
+                *_id_url_refs(vd, "CVE_ID_LIST/CVE_ID"),
+                *_id_url_refs(vd, "VENDOR_REFERENCE_LIST/VENDOR_REFERENCE"),
+            ]
 
             glossary[qid] = {
                 "title": vd.findtext("TITLE") or f"QID {qid}",

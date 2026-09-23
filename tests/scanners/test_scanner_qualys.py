@@ -31,6 +31,60 @@ def test_parses_findings() -> None:
     # no numeric score) — _parse_vuln is intentionally left unchanged, so this
     # stays empty. See report for the open question on real VM XML shape.
     assert findings[0].cvss_vector == ""
+    # CVE_ID_LIST/CVE_ID/ID (real Qualys SCAN nesting) — see
+    # test_scan_cve_id_reads_nested_id_not_wrapper_whitespace below for the
+    # regression this fixture shape now exercises.
+    assert findings[0].references == "<ul><li>CVE-2023-9999</li></ul>"
+
+
+def _scan_vuln(inner: str) -> bytes:
+    """Wrap a single SCAN-root VULN body in the minimal Qualys vuln-scan envelope."""
+    return f"""<?xml version="1.0" ?>
+<SCAN>
+  <IP value="192.0.2.99">
+    <VULNS>
+      <CAT value="Vulnerabilities">
+        <VULN number="86247">
+          <TITLE>Test Finding</TITLE>
+          {inner}
+        </VULN>
+      </CAT>
+    </VULNS>
+  </IP>
+</SCAN>
+""".encode()
+
+
+def test_scan_cve_id_reads_nested_id_not_wrapper_whitespace() -> None:
+    # Bug fix: the wrapper <CVE_ID> element's own .text is whitespace (the
+    # newline/indentation before its <ID> child) — the id itself only lives in
+    # that nested <ID>. Real Qualys SCAN exports (e.g. the vendored
+    # reptor-vuln_scan.xml fixture, QID 86247) always nest it this way.
+    xml = _scan_vuln("<CVE_ID_LIST><CVE_ID>\n  <ID>CVE-2000-0649</ID>\n</CVE_ID></CVE_ID_LIST>")
+    findings = QualysScanner().parse(xml, ImportOptions())
+    assert findings[0].references == "<ul><li>CVE-2000-0649</li></ul>"
+
+
+def test_scan_cve_id_with_url_renders_as_a_link() -> None:
+    xml = _scan_vuln(
+        "<CVE_ID_LIST><CVE_ID>"
+        "<ID>CVE-2000-0649</ID>"
+        "<URL>http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2000-0649</URL>"
+        "</CVE_ID></CVE_ID_LIST>"
+    )
+    findings = QualysScanner().parse(xml, ImportOptions())
+    assert findings[0].references == (
+        '<ul><li><a href="http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2000-0649">'
+        "CVE-2000-0649</a></li></ul>"
+    )
+
+
+def test_scan_cve_id_missing_nested_id_is_dropped_not_whitespace() -> None:
+    # A malformed/unexpected <CVE_ID> with no <ID> child at all contributes
+    # nothing — never the wrapper's own (empty/whitespace) text.
+    xml = _scan_vuln("<CVE_ID_LIST><CVE_ID>   </CVE_ID></CVE_ID_LIST>")
+    findings = QualysScanner().parse(xml, ImportOptions())
+    assert findings[0].references == ""
 
 
 def test_was_cvss_v3_vector_string_bare_gets_prefixed() -> None:

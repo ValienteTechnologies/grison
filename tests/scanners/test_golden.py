@@ -7,10 +7,8 @@ see ``tests/fixtures/scanners/ATTRIBUTION.md``). For each file this records what
 the same ``normalise_input`` step (see ``grison.scanners.detect``) the real
 pipeline (``grison/sinks/pipeline.py``) applies before both detection and
 parsing — so this module records the production contract, not a raw-bytes
-approximation of it. This still includes current bugs (e.g. Acunetix's empty
-``cwe``, Qualys WAS missing ``INFORMATION_GATHERED`` items, SSLyze's pre-v5
-JSON schema yielding zero findings) — this module is a behaviour recorder, not
-a correctness check.
+approximation of it. This records current behaviour, bugs included — this
+module is a behaviour recorder, not a correctness check.
 
 Regenerate every expected file after an intentional parser change with::
 

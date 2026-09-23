@@ -3,7 +3,8 @@
 This is the parsers' **output type** — a plain dataclass ``ScanFinding`` whose prose
 fields are Ghostwriter HTML strings — kept minimally-diverged from the salvage
 source. It is distinct from :mod:`grison.model` (the pydantic house schema);
-``grison.markdown`` (Phase 4) converts this IR into a :class:`grison.model.Finding`.
+``grison.markdown`` (Phase 4) converts this IR into a
+:class:`grison.formats.finding.FindingDoc`.
 """
 
 from __future__ import annotations

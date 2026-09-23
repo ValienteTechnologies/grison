@@ -3,8 +3,8 @@ from __future__ import annotations
 import defusedxml.ElementTree as ET
 
 from grison.scanners.ir import ScanFinding
+from grison.scanners.ir.cvss2 import CvssConversionError, ensure_cvss3_prefix
 from grison.scanners.ir.cvss2 import cvss2_to_cvss3 as _cvss2_to_cvss3
-from grison.scanners.ir.cvss2 import ensure_cvss3_prefix
 from grison.scanners.ir.cwe import normalize_cwe
 from grison.scanners.ir.severity import severity_or_info
 
@@ -50,11 +50,21 @@ class NessusScanner(Scanner):
                 # prefix — either way it's already v3 and must never be routed
                 # through the v2 converter, which would silently zero its impact.
                 cvss3_raw = (item.findtext("cvss3_vector") or "").strip()
+                notes: list[str] = []
                 if cvss3_raw:
                     cvss_raw = ensure_cvss3_prefix(cvss3_raw)
                 else:
                     cvss2_raw = (item.findtext("cvss_vector") or "").strip()
-                    cvss_raw = _cvss2_to_cvss3(cvss2_raw) if cvss2_raw else ""
+                    if cvss2_raw:
+                        try:
+                            cvss_raw = _cvss2_to_cvss3(cvss2_raw)
+                        except CvssConversionError:
+                            cvss_raw = ""
+                            notes.append(
+                                f"CVSS v2 vector {cvss2_raw} could not be converted, dropped"
+                            )
+                    else:
+                        cvss_raw = ""
 
                 cwe = normalize_cwe((item.findtext("cwe") or "").strip())
 
@@ -78,6 +88,7 @@ class NessusScanner(Scanner):
                         description=description.strip(),
                         mitigation=(item.findtext("solution") or "").strip(),
                         references=refs,
+                        notes=notes,
                     )
                 )
 
@@ -95,4 +106,5 @@ class NessusScanner(Scanner):
             mitigation=rec.mitigation,
             references=refs_to_html(rec.references),
             affected_components=rec.affected_components,
+            notes=rec.notes,
         )
