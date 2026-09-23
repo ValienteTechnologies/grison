@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from grison.scanners import ImportOptions, SslyzeScanner
+from grison.scanners import ImportOptions, RefusedInput, SslyzeScanner
 from grison.scanners.ir import Severity
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "scanners"
@@ -263,6 +263,66 @@ def test_robot_attack_enum_null_survives_parse(scanner: SslyzeScanner) -> None:
     }
     findings = scanner.parse(json.dumps(doc).encode(), ImportOptions())
     assert not any(f.plugin_id == "sslyze:robot" for f in findings)
+
+
+# --- pre-v5 schema refusal ----------------------------------------------------
+
+
+def test_pre_v5_schema_is_refused(scanner: SslyzeScanner) -> None:
+    # sslyze pre-v5 keys its per-server results under "scan_commands_results"
+    # and "server_info" instead of v5's "scan_result"/"server_location" — this
+    # parser's field lookups are v5-shaped, so silently returning 0 findings on
+    # an old export would be indistinguishable from a genuinely clean scan.
+    findings_path = FIXTURES / "sslyze" / "dojo-one_target_many_vuln_old.json"
+    with pytest.raises(RefusedInput, match="sslyze JSON predates v5"):
+        scanner.parse(findings_path.read_bytes(), ImportOptions())
+
+
+def test_v5_schema_still_parses(scanner: SslyzeScanner) -> None:
+    # The new-shape corpus fixture must not be affected by the old-shape check.
+    findings_path = FIXTURES / "sslyze" / "dojo-one_target_many_vuln_new.json"
+    findings = scanner.parse(findings_path.read_bytes(), ImportOptions())
+    assert findings  # sanity: this fixture is known to yield findings
+
+
+def test_all_old_shape_servers_refused_with_count(scanner: SslyzeScanner) -> None:
+    doc = {
+        "server_scan_results": [
+            {"scan_commands_results": {}, "server_info": {}},
+            {"scan_commands_results": {}, "server_info": {}},
+        ]
+    }
+    with pytest.raises(RefusedInput, match=r"\(2 of 2 server entries\)"):
+        scanner.parse(json.dumps(doc).encode(), ImportOptions())
+
+
+def test_v5_empty_server_scan_results_parses_without_refusal(scanner: SslyzeScanner) -> None:
+    # A v5 document with no server entries at all (server_scan_results: [])
+    # must parse to zero findings — _is_old_shape never gets a server dict to
+    # inspect, so there is nothing old-shaped to refuse. This must not raise
+    # RefusedInput.
+    doc = {"server_scan_results": []}
+    findings = scanner.parse(json.dumps(doc).encode(), ImportOptions())
+    assert findings == []
+
+
+def test_mixed_old_and_new_shape_servers_refused_naming_the_count(
+    scanner: SslyzeScanner,
+) -> None:
+    # A file with both an old-shape and a new-shape server entry: refuse the
+    # whole file rather than silently drop the old-shape server's findings —
+    # the refusal message names how many of the total were old-shape.
+    doc = {
+        "server_scan_results": [
+            {"scan_commands_results": {}, "server_info": {}},
+            {
+                "server_location": {"hostname": "ok.example.com", "port": 443},
+                "scan_result": {},
+            },
+        ]
+    }
+    with pytest.raises(RefusedInput, match=r"\(1 of 2 server entries\)"):
+        scanner.parse(json.dumps(doc).encode(), ImportOptions())
 
 
 def test_robot_not_triggered_when_not_vulnerable(scanner: SslyzeScanner) -> None:

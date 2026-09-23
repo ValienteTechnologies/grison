@@ -1,6 +1,1780 @@
 {
-  "detected": null,
+  "detected": "qualys",
   "error": null,
-  "findings": [],
+  "findings": [
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Remote Desktop feature in Windows enables access to all of the programs, resources and accessories on a user's computer from a second Windows-based computer.\n<P>\nA remote code execution vulnerability exists in the way the Remote Desktop Protocol accesses an object in memory that has been improperly initialized or has been deleted (CVE-2012-0002).\n<P>\nA denial of service vulnerability exists in the way the Remote Desktop Protocol service processes packets. An attacker who successfully exploited this vulnerability could cause the target service to stop responding (CVE-2012-0152).\n<P>\nThis security update is rated Critical for all supported releases of Microsoft Windows.<P>\nNote:<BR>\nNLA or network layer authentication is a  layer of security on top of RDP. If NLA is enabled then the vulnerability can be exploited remotely but will need credentials.<BR>\n1. The authenticated check will determine presence of this vulnerability irrespective of the NLA setting.<BR>\n2. The remote check can determine presence of this vulnerability only if NLA is disabled.<BR>\nWe encourage customers to patch irrespective of the NLA status.\n<P><B>Windows Embedded Systems:-</B> For additional information regarding security updates for embedded systems, refer to the following MSDN blog(s):<P><A HREF=\"http://blogs.msdn.com/b/embedded/archive/2012/03/26/march-2012-security-updates-for-xpe-sp3-and-standard-2009-are-now-on-ece.aspx\" TARGET=\"_blank\">March 2012 Security Updates for XPe SP3 and Standard 2009 Are Now on ECE</A> (KB2621440)<BR>\n<A HREF=\"http://blogs.msdn.com/b/embedded/archive/2012/04/24/april-2012-security-updates-are-live-on-ece-for-xpe-and-standard-2009.aspx\" TARGET=\"_blank\">April 2012 Security Updates are Live on ECE for XPe and Standard 2009</A> (KB2621440)<BR>\n<BR>\nNote: This vulnerability is applicable to versions of the software that are not listed in the official advisory.",
+      "finding_guidance": "",
+      "impact": "Successfully exploiting these vulnerabilities might allow a remote attacker to execute arbitrary code or cause a denial of service.",
+      "mitigation": "<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=18a1fe48-1318-4b93-afad-206950bb1ae5\" TARGET=\"_blank\">MS12-020: Windows XP Service Pack 3</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=eccf865d-399a-4862-b26f-f35580419875\" TARGET=\"_blank\">MS12-020: Windows XP Professional x64 Edition Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=b69b4b9b-c0a1-4c1e-b081-8529eaf1536a\" TARGET=\"_blank\">MS12-020: Windows Server 2003 Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=8081e67f-288c-4714-bff8-e0ff9777692f\" TARGET=\"_blank\">MS12-020: Windows Server 2003 x64 Edition Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=521baa02-5d7a-4cba-8a1a-2af1b6e4cbe4\" TARGET=\"_blank\">MS12-020: Windows Server 2003 with SP2 for Itanium-based Systems</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=39abdf7b-ea9d-4b95-a28d-4140374d531d\" TARGET=\"_blank\">MS12-020: Windows Vista Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=e5970daf-4440-42fa-8efc-e6190c6a22aa\" TARGET=\"_blank\">MS12-020: Windows Vista x64 Edition Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=fef2c1d7-2004-43d7-aa49-673c6f374670\" TARGET=\"_blank\">MS12-020: Windows Server 2008 for 32-bit Systems Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=4ffae13f-3432-4849-a2da-a76f96d7ceb3\" TARGET=\"_blank\">MS12-020: Windows Server 2008 for x64-based Systems Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=67581250-50fd-4f4c-a3cc-45ce2662b0c3\" TARGET=\"_blank\">MS12-020: Windows Server 2008 for Itanium-based Systems Service Pack 2</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=16b0195c-84d3-4c08-8b98-ff2c80d144e1\" TARGET=\"_blank\">MS12-020: Windows 7 for 32-bit Systems and Windows 7 for 32-bit Systems Service Pack 1</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=3a6c7fdf-105a-4886-ad52-c892f37e32d1\" TARGET=\"_blank\">MS12-020: Windows 7 for 32-bit Systems and Windows 7 for 32-bit Systems Service Pack 1</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=40b62d08-d2a2-4900-b01c-46fc761973d0\" TARGET=\"_blank\">MS12-020: Windows 7 for x64-based Systems and Windows 7 for x64-based Systems Service Pack 1</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=1bbe7cda-4bee-4d65-8127-3c13624a1168\" TARGET=\"_blank\">MS12-020: Windows 7 for x64-based Systems and Windows 7 for x64-based Systems Service Pack 1</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=7c1774cc-e00c-47f3-97a2-bc90de857793\" TARGET=\"_blank\">MS12-020: Windows Server 2008 R2 for x64-based Systems and Windows Server 2008 R2 for x64-based Systems Service Pack 1*</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=7ec21f41-1673-4592-b45c-6438ad57e08c\" TARGET=\"_blank\">MS12-020: Windows Server 2008 R2 for x64-based Systems and Windows Server 2008 R2 for x64-based Systems Service Pack 1*</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=6a07f99c-8ab4-4e44-8d48-6ac787dd2b51\" TARGET=\"_blank\">MS12-020: Windows Server 2008 R2 for Itanium-based Systems and Windows Server 2008 R2 for Itanium-based Systems Service Pack 1</A><P> <A HREF=\"http://www.microsoft.com/downloads/details.aspx?familyid=469aa1f6-ed89-4649-8736-eaa5e2ad44ee\" TARGET=\"_blank\">MS12-020: Windows Server 2008 R2 for Itanium-based Systems and Windows Server 2008 R2 for Itanium-based Systems Service Pack 1</A>\n\n<P>Virtual Patches:<BR><A HREF=\"http://www.trendmicro.com/vulnerabilitycontrols\"TARGET=\"_blank\">Trend Micro Virtual Patching</A><BR>\nVirtual Patch #1004949: 1004949 - Remote Desktop Protocol Vulnerability (CVE-2012-0002)<BR>",
+      "plugin_id": "90783",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2012-0002\">CVE-2012-0002</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2012-0152\">CVE-2012-0152</a></li><li><a href=\"http://technet.microsoft.com/en-us/security/bulletin/ms12-020\">MS12-020</a></li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Microsoft Windows Remote Desktop Protocol Remote Code Execution Vulnerability (MS12-020)"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "A remote code execution vulnerability exists in remote desktop services -- formerly known as terminal Services - when an unauthenticated attacker connects to the target system using RDP and sends specially crafted requests. This vulnerability is pre-authentication and requires no user interaction.\n<P>Affected Products: <BR>\nWindows 7 Service Pack 1, Windows Server 2008 R2 Service Pack 1, Windows Server 2008 Service Pack 2, Microsoft Windows XP Service Pack 3, Microsoft Windows Server 2003 Service Pack 2, Microsoft Windows XP Professional x64 Edition Service Pack 2, Windows Embedded POSReady 2009, Windows Embedded Standard 2009\n<P>QID Detection Logic:<BR>\n<P>This QID sends a safe RDP MS_T120 channel binding probe, post the vulnerability if response packet generated by unpatched functions detected.\nNote: Qualys scanner version 11.2.35 or later is required to use this QID.",
+      "finding_guidance": "",
+      "impact": "An attacker who successfully exploited this vulnerability could execute arbitrary code on the target system.",
+      "mitigation": "Please refer to the <A HREF=\"https://blogs.technet.microsoft.com/msrc/2019/05/14/prevent-a-worm-by-updating-remote-desktop-services-cve-2019-0708/\" TARGET=\"_blank\">Prevent a worm by updating Remote Desktop Services (CVE-2019-0708)</A> for more information pertaining to these vulnerabilities.<P>\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2019-0708\" TARGET=\"_blank\">CVE-2019-0708: Windows 7 Service Pack 1</A><P> <A HREF=\"https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2019-0708\" TARGET=\"_blank\">CVE-2019-0708: Windows Server 2008 R2 Service Pack 1</A><P> <A HREF=\"https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2019-0708\" TARGET=\"_blank\">CVE-2019-0708: Windows Server 2008 Service Pack 2</A><P> <A HREF=\"https://support.microsoft.com/en-us/help/4500331/windows-update-kb4500331\" TARGET=\"_blank\">customer-guidance-for-cve-2019-0708: Windows Server 2003 SP2</A><P> <A HREF=\"https://support.microsoft.com/en-us/help/4500331/windows-update-kb4500331\" TARGET=\"_blank\">customer-guidance-for-cve-2019-0708: Windows XP Embedded SP3</A><P> <A HREF=\"https://support.microsoft.com/en-us/help/4500331/windows-update-kb4500331\" TARGET=\"_blank\">customer-guidance-for-cve-2019-0708: Windows XP Professional x64 Edition SP2</A><P> <A HREF=\"https://support.microsoft.com/en-us/help/4500331/windows-update-kb4500331\" TARGET=\"_blank\">customer-guidance-for-cve-2019-0708: Windows XP SP3</A>",
+      "plugin_id": "91541",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-0708\">CVE-2019-0708</a></li><li><a href=\"https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2019-0708\">CVE-2019-0708</a></li><li><a href=\"https://support.microsoft.com/en-us/help/4500705/customer-guidance-for-cve-2019-0708\">Customer guidance for CVE-2019-0708</a></li><li><a href=\"https://support.microsoft.com/en-us/help/4500331/windows-update-kb4500331\">KB4500331</a></li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Microsoft Windows Remote Desktop Services Remote Code Execution Vulnerability (BlueKeep) (unauthenticated check)"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Microsoft Server Message Block (SMB) Protocol is a Microsoft network file sharing protocol used in Microsoft Windows. \n<P>\nThe Microsoft SMB Server is vulnerable to multiple remote code execution vulnerabilities due to the way that the Microsoft Server Message Block 1.0 (SMBv1) server handles certain requests. \n<P>\nThis security update is rated Critical for all supported editions of Windows XP, Windows 2003, Windows 8, Windows Vista, Windows Server 2008, Windows 7, Windows Server 2008 R2, Windows Server 2012 and 2012 R2, Windows 8.1 and RT 8.1, Windows 10 and Windows Server 2016.\n<P>\n<P>UPDATE: 14 May 2017. Signature for this QID has been updated to detect the patch released by Microsoft for end-of-life operating systems Windows XP, Windows 2003 and Windows 8.\n<P>\nQID Detection Logic (Unauthenticated):<BR>\nThis QID connects the remote server's &quot;IPC$&quot; then sends a &quot;PeekNamedPipe&quot; SMB request with &quot;FID = 0&quot; to the remote target. Vulnerable system should return &quot;STATUS_INSUFF_SERVER_RESOURCES&quot; in the SMB status code. <P>\n\nQID Detection Logic (Authenticated):<BR>\nOperating Systems: Windows XP, Windows Server 2003 Windows Server 2008, Windows Server 2008 R2, Windows Vista, Windows 7, Windows 8, Windows 8.1, Windows RT 8.1, Windows 10, Windows Server 2012, Windows Server 2012 R2, Windows Server 2016 <BR>\nThis QID checks for the file version of %windir%\\System32\\drivers\\srv.sys (On Windows XP, Windows Server 2003 Windows Server 2008, Windows Server 2008 R2, Windows Vista, Windows 7, Windows 8,  Windows 8.1, Windows RT 8.1, Windows 10, Windows Server 2012, Windows Server 2012 R2 and Windows Server 2016)<BR>\nThe following KBs are checked for srv.sys:<BR>\nThe patch version is 5.1.2600.7208 (KB4012598) <BR>\nThe patch version is 5.2.3790.6021 (KB4012598) <BR>\nThe patch version is 6.0.6002.19743 (KB4012598) <BR>\nThe patch version is 6.0.6002.24067 (KB4012598) <BR>\nThe patch version is 6.1.7601.23689 (KB4012212 and KB4012215) <BR>\nThe patch version is 6.2.9200.22099 (KB4012598, KB4012214 and KB4012217) <BR>\nThe patch version is 6.3.9600.18604 (KB4012213 and KB4012216) <BR>\nThe patch version is 10.0.10240.17319 (KB4012606)<BR>\nThe patch version is 10.0.10586.839 (KB4013198)<BR>\nThe patch version is 10.0.14393.953 (KB4013429)<P>",
+      "finding_guidance": "",
+      "impact": "A remote attacker could gain the ability to execute code by sending crafted messages to a Microsoft Server Message Block 1.0 (SMBv1) server. <P>\n<B>The latest version of the Petya ransomware is spreading over Windows SMB and is reportedly using the ETERNALBLUE exploit.</B><P>",
+      "mitigation": "Customers are advised to refer to Microsoft Advisory <A HREF=\"https://technet.microsoft.com/en-us/security/bulletin/MS17-010\" TARGET=\"_blank\">MS17-010</A> or <A HREF=\"https://support.microsoft.com/eu-es/help/4023262/how-to-verify-that-ms17-010-is-installed\" TARGET=\"_blank\">How to verify that MS17-010 is installed</A> for more details.\n<P>\n\n\n\n\n\n\nWorkaround:<BR>Disable SMBv1<BR>\nRefer to <A HREF=\"https://support.microsoft.com/en-us/help/2696547/how-to-enable-and-disable-smbv1,-smbv2,-and-smbv3-in-windows-vista,-windows-server-2008,-windows-7,-windows-server-2008-r2,-windows-8,-and-windows-server-2012\" TARGET=\"_blank\">KB2696547</A> for more information.<P>\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012598\" TARGET=\"_blank\">MS17-010: Windows Vista Service Pack 2</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012598\" TARGET=\"_blank\">MS17-010: Windows Vista x64 Edition Service Pack 2</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012598\" TARGET=\"_blank\">MS17-010: Windows Server 2008 for 32-bit Systems Service Pack 2</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012598\" TARGET=\"_blank\">MS17-010: Windows Server 2008 for x64-based Systems Service Pack 2</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012212\" TARGET=\"_blank\">MS17-010: Windows 7 for 32-bit Systems Service Pack 1</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012212\" TARGET=\"_blank\">MS17-010: Windows 7 for x64-based Systems Service Pack 1</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012212\" TARGET=\"_blank\">MS17-010: Windows Server 2008 R2 for x64-based Systems Service Pack 1</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012215\" TARGET=\"_blank\">MS17-010: Windows 7 for 32-bit Systems Service Pack 1</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012215\" TARGET=\"_blank\">MS17-010: Windows 7 for x64-based Systems Service Pack 1</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012215\" TARGET=\"_blank\">MS17-010: Windows Server 2008 R2 for x64-based Systems Service Pack 1</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012213\" TARGET=\"_blank\">MS17-010: Windows 8.1 for 32-bit Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012213\" TARGET=\"_blank\">MS17-010: Windows 8.1 for x64-based Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012213\" TARGET=\"_blank\">MS17-010: Windows Server 2012 R2</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012216\" TARGET=\"_blank\">MS17-010: Windows 8.1 for 32-bit Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012216\" TARGET=\"_blank\">MS17-010: Windows 8.1 for x64-based Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012216\" TARGET=\"_blank\">MS17-010: Windows Server 2012 R2</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012216\" TARGET=\"_blank\">MS17-010: Windows RT 8.1</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012214\" TARGET=\"_blank\">MS17-010: Windows Server 2012</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012217\" TARGET=\"_blank\">MS17-010: Windows Server 2012</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012606\" TARGET=\"_blank\">MS17-010: Windows 10 for 32-bit Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012606\" TARGET=\"_blank\">MS17-010: Windows 10 for x64-based Systems </A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4013198\" TARGET=\"_blank\">MS17-010: Windows 10 Version 1511 for 32-bit Systems </A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4013198\" TARGET=\"_blank\">MS17-010: Windows 10 Version 1511 for x64-based Systems </A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4013429\" TARGET=\"_blank\">MS17-010: Windows 10 Version 1607 for 32-bit Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4013429\" TARGET=\"_blank\">MS17-010: Windows 10 Version 1607 for x64-based Systems </A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4013429\" TARGET=\"_blank\">MS17-010: Windows Server 2016 for x64-based Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012598\" TARGET=\"_blank\">MS17-010: Windows Server 2003 Systems</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012598\" TARGET=\"_blank\">MS17-010: Windows XP Service Pack 3</A><P> <A HREF=\"http://www.catalog.update.microsoft.com/Search.aspx?q=KB4012598\" TARGET=\"_blank\">MS17-010: Windows 8</A>",
+      "plugin_id": "91345",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-0143\">CVE-2017-0143</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-0144\">CVE-2017-0144</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-0145\">CVE-2017-0145</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-0146\">CVE-2017-0146</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-0148\">CVE-2017-0148</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-0147\">CVE-2017-0147</a></li><li>MS17-010</li><li><a href=\"https://blogs.technet.microsoft.com/msrc/2017/04/14/protecting-customers-and-evaluating-risk/\">MS Shadow Brokers</a></li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Microsoft SMB Server Remote Code Execution Vulnerability (MS17-010) and Shadow Brokers"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The GNU Bourne Again shell (Bash) is a shell and command language\ninterpreter compatible with the Bourne shell (sh).\n<P>\nA flaw was found in the way Bash evaluated certain specially crafted\nenvironment variables. An attacker could use this flaw to override or\nbypass environment restrictions to execute shell commands. Certain\nservices and applications allow remote unauthenticated attackers to\nprovide environment variables, allowing them to exploit this issue.\n(CVE-2014-6271)\n<P>\nAffected Platforms:<BR>\nNovel/SuSE, Debian, Ubuntu, Redhat, Fedora, CentOS and more are affected.\n<P>QID detection logic:(UnAuthenticated Telnet)<BR>\n<P>It sends &quot;() { :;}; /usr/bin/id&quot; in the telnet payload.<BR>",
+      "finding_guidance": "",
+      "impact": "Exploitation allows remote code execution.",
+      "mitigation": "GNU bash has patches available at <A HREF=\"http://ftp.gnu.org/gnu/bash/?C=M;O=A\" TARGET=\"_blank\">GNU BASH patches</A>.\n<P>\nSeveral vendors have also released patches for this vulnerability. Refer to <A HREF=\"https://rhn.redhat.com/errata/RHSA-2014-1293.html\" TARGET=\"_blank\">RHSA-2014-1293</A>, <A HREF=\"https://lists.debian.org/debian-security-announce/2014/msg00220.html\" TARGET=\"_blank\">DSA 3032</A>, <A HREF=\"https://linux.oracle.com/errata/ELSA-2014-1293.html\" TARGET=\"_blank\">ELSA-2014-1293</A>, <A HREF=\"http://people.canonical.com/~ubuntu-security/cve/2014/CVE-2014-6271.html\" TARGET=\"_blank\">Ubuntu CVE-2014-6271</A> for more information.\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"http://ftp.gnu.org/gnu/bash/?C=M;O=A\" TARGET=\"_blank\">Bash Remote Code Execution CVE-2014-6271: Linux (Bash)</A>\n\n<P>Virtual Patches:<BR><A HREF=\"http://www.trendmicro.com/vulnerabilitycontrols\"TARGET=\"_blank\">Trend Micro Virtual Patching</A><BR>\nVirtual Patch #1006256: 1006256 - GNU Bash Remote Code Execution Vulnerability<BR>",
+      "plugin_id": "13038",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-6271\">CVE-2014-6271</a></li><li><a href=\"https://securityblog.redhat.com/2014/09/24/bash-specially-crafted-environment-variables-code-injection-attack/\">Bash Remote Code Execution CVE-2014-6271</a></li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Bash Command Injection/Remote Code Execution Vulnerability (Remote Detection) (ShellShock)"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "OpenSSL is an open source implementation of the SSL protocol which is used by a number of other projects, including but not restricted to Apache, Sendmail and Bind. It is commonly found on Linux and Unix systems.\n<P>\nThe Debian OpenSSL package is prone to a random number generator weakness which causes the keys generated by this package to be predictable.",
+      "finding_guidance": "",
+      "impact": "Attackers can exploit this issue to predict random data used to generate encryption keys by certain applications. An attacker can record encrypted sessions (SSL,SSH, VPN) then in an off-line mode use a library of weak keys to find out the private key values used by the communication parties and decrypt the encrypted traffic. Specifically affected keys include RSA, SSH, OpenVPN and DNSSEC keys as well as X.509 certificates and session keys used in the SSL/TLS sessions.\n<P>\nAttackers may exploit this issue to potentially compromise encryption keys and gain access to sensitive data. This may aid in further attacks. In the case of SSH attackers can gain full access to the target system.\n<P>\nThis issue affects only a modified OpenSSL package for Debian prior to Version 0.9.8c-4etch3.\n<P>\nPlease note that the keys that were generated on a vulnerable system and then moved to a different non-Debian system are still vulnerable and can cause a compromise of that non-Debian system.",
+      "mitigation": "The vendor has released updates to address this issue. See the references for more information.\n<P>\nThe Results section contains identifications for the weak keys detected on the target system. The keys are identified by calculating a hash over the public key. The hash function as well as the information the hash function is calculated upon is different for SSH and SSL keys. \n<P>\nFor SSL the following command can be used to calculate the hash of a key in a X.509 certificate:\n<BR>\nopenssl x509 -in [cert name.pem]  -modulus -noout|openssl sha1\n<P>\nFor an SSH key the following command can be used to obtain the hash of the public key:\n<BR>\nssh-keygen -f [SSH public key file name.pub] -l\n<P>\nAll the keys listed in the Results section are weak and need to be regenerated on a non-vulnerable  or patched system. In the case of certificates, they need to be regenerated and signed again.\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"http://www.debian.org/security/2008/dsa-1571\" TARGET=\"_blank\">DSA-1571: Debian</A><P> <A HREF=\"http://www.debian.org/security/2008/dsa-1576\" TARGET=\"_blank\">DSA-1576: Debian</A>",
+      "plugin_id": "42007",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2008-0166\">CVE-2008-0166</a></li><li><a href=\"http://www.debian.org/security/2008/dsa-1571\">OpenSSH Debian Patch</a></li><li><a href=\"http://www.debian.org/security/2008/dsa-1576\">OpenSSL Debian Patch</a></li></ul>",
+      "replication_steps": "",
+      "severity": "critical",
+      "tags": [],
+      "title": "Debian OpenSSL Package Random Number Generator Weakness"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+      "cwe": "",
+      "description": "AMD processors contain the following vulnerabilities:<BR>\nCVE-2018-8936: The AMD EPYC Server, Ryzen, Ryzen Pro, and Ryzen Mobile processor chips allow Platform Security Processor (PSP) privilege escalation.<BR>\nCVE-2018-8935: The Promontory chipset, as used in AMD Ryzen and Ryzen Pro platforms, has a backdoor in the ASIC, aka CHIMERA-HW.<BR>\nCVE-2018-8934: The Promontory chipset, as used in AMD Ryzen and Ryzen Pro platforms, has a backdoor in firmware, aka CHIMERA-FW.<BR>\nCVE-2018-8933: The AMD EPYC Server processor chips have insufficient access control for protected memory regions, aka FALLOUT-1, FALLOUT-2, and FALLOUT-3.<BR>\nCVE-2018-8932:\t The AMD Ryzen and Ryzen Pro processor chips have insufficient access control for the Secure Processor, aka RYZENFALL-2, RYZENFALL-3, and RYZENFALL-4.<BR>\nCVE-2018-8931:\t The AMD Ryzen, Ryzen Pro, and Ryzen Mobile processor chips have insufficient access control for the Secure Processor, aka RYZENFALL-1.<BR>\nCVE-2018-8930: The AMD EPYC Server, Ryzen, Ryzen Pro, and Ryzen Mobile processor chips have insufficient enforcement of Hardware Validated Boot, aka MASTERKEY-1, MASTERKEY-2, and MASTERKEY-3.<P>\nAffected Versions:<BR>\nAMD EPYC Server, Ryzen, Ryzen Pro, and Ryzen Mobile<P>\nQID Detection Logic:<BR>\nThis potential detection detects processor models based on the HKLM\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\\ProcessorNameString key.",
+      "finding_guidance": "",
+      "impact": "Depending on the vulnerability being exploited, an attacker could bypass security restrictions or execute arbitrary code on a targeted system.<P>",
+      "mitigation": "AMD has confirmed the vulnerability. However, updates are awaited.<P>\n\n\n\n\nWorkaround:<BR>\nCustomers are advised to maintain physical security for affected devices as most of these vulnerabilities need physical access.",
+      "plugin_id": "370876",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-8930\">CVE-2018-8930</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-8931\">CVE-2018-8931</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-8932\">CVE-2018-8932</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-8933\">CVE-2018-8933</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-8934\">CVE-2018-8934</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-8935\">CVE-2018-8935</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-8936\">CVE-2018-8936</a></li><li><a href=\"https://community.amd.com/community/amd-corporate/blog/2018/03/21/initial-amd-technical-assessment-of-cts-labs-research\">AMD</a></li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "AMD Processors Multiple Security Vulnerabilities (RYZENFALL/MASTERKEY/CHIMERA-FW/FALLOUT)"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "OpenSSL is a toolkit that implements the Secure Sockets Layer (SSL v2/v3) and Transport Layer Security (TLS v1) protocols as well as a full-strength general purpose cryptography library. For more details about the detection please refer to the Qualys community article <A HREF=\"https://community.qualys.com/blogs/qualys-tech/2014/04/09/heartbleed-detection-update\" TARGET=\"_blank\">heartbleed-detection-update</A>.\n<P>\nOpenSSL is exposed to a security vulnerability due to a missing bounds check in the handling of the TLS heartbeat extension.\n<P>\nAffected Versions:<BR>\nOpenSSL 1.0.1f, 1.0.1e, 1.0.1d, 1.0.1c, 1.0.1b, 1.0.1a, 1.0.1\n<P>PLEASE NOTE:\n<BR>This QID will be reported as possible vulnerability (YELLOW) if it was triggered because the target host has a vulnerable OpenSSL banner.\n<BR>This QID will be reports as confirmed vulnerability (RED) if the target responds to the SSL heartbeat request in a vulnerable fashion (irrespective of the OpenSSL banner).",
+      "finding_guidance": "",
+      "impact": "The vulnerabilities can be exploited by malicious users to reveal up to 64kB of memory to a connected client or server that may aid in launching further attacks.",
+      "mitigation": "Update to Version 1.0.1g or latest fixed to resolve this issue. The latest version is available for download from<A HREF=\"http://www.openssl.org/source/\" TARGET=\"_blank\">OpenSSL Web site</A>.\n<P>\n\n\n\n\n\n\n\n\n\n\n\nWorkaround:<BR>- Recompile OpenSSL with the handshake removed from the code by compile time option -DOPENSSL_NO_HEARTBEATS.<BR>\n<P>\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"http://www.openssl.org/source/openssl-1.0.1g.tar.gz\" TARGET=\"_blank\">OpenSSL 1.0.1g</A>\n\n<P>Virtual Patches:<BR><A HREF=\"http://www.trendmicro.com/vulnerabilitycontrols\"TARGET=\"_blank\">Trend Micro Virtual Patching</A><BR>\nVirtual Patch #1006012: 1006012 - Identified Suspicious OpenSSL TLS/DTLS Heartbeat Request<BR>",
+      "plugin_id": "42430",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-0160\">CVE-2014-0160</a></li><li><a href=\"http://www.openssl.org/news/vulnerabilities.html#2014-0160\">OpenSSL vulnerabilities</a></li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "OpenSSL Memory Leak Vulnerability (Heartbleed Bug)"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The OpenSSL Project is an Open Source toolkit implementing the Secure Sockets Layer (SSL v2/v3) and Transport Layer Security (TLS) protocols as well as a general purpose cryptography library.<P>\nOpenSSL contains the following vulnerability:\n<P>A MITM attacker can use a padding oracle attack to decrypt traffic when the connection uses an AES CBC cipher and the server support AES-NI.\nAffected Versions:<BR>\nOpenSSL 1.0.2 prior to OpenSSL 1.0.2h\nOpenSSL 1.0.1 prior to OpenSSL 1.0.1t",
+      "finding_guidance": "",
+      "impact": "A MITM attacker can use a padding oracle attack to decrypt traffic.",
+      "mitigation": "OpenSSL version 1.0.2h and 1.0.1t have been released to address these issues. Refer to <A HREF=\"https://www.openssl.org/news/secadv/20160503.txt\" TARGET=\"_blank\">OpenSSL Advisory</A> to obtain more information.<P>\nFor applications that bundle OpenSSL, please contact the vendor for updates.\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"https://www.openssl.org/news/secadv/20160503.txt\" TARGET=\"_blank\">OpenSSL Security Advisory 3rd May 2016</A>",
+      "plugin_id": "38626",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-2107\">CVE-2016-2107</a></li><li><a href=\"https://www.openssl.org/news/secadv/20160503.txt\">OpenSSL Security Advisory 20160503</a></li></ul>",
+      "replication_steps": "",
+      "severity": "high",
+      "tags": [],
+      "title": "OpenSSL oracle padding vulnerability (CVE-2016-2107)"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "A remote access or remote management service was detected. If such a service is accessible to malicious users it can be used to carry different type of attacks. Malicious users could try to brute force credentials or collect additional information on the service which could enable them in crafting further attacks. \n<P>\nThe Results section includes information on the remote access service that was found on the target.\n<P>\nServices like Telnet, Rlogin, SSH, windows remote desktop, pcAnywhere, Citrix Management Console, Remote Admin (RAdmin), VNC, OPENVPN and ISAKMP are checked.",
+      "finding_guidance": "",
+      "impact": "Consequences vary by the type of attack.",
+      "mitigation": "Expose the remote access or remote management services only to the system administrators or intended users of the system.",
+      "plugin_id": "42017",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Remote Access or Management Service Detected"
+    },
+    {
+      "affected_components": [
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<P>The Network Time Protocol (NTP) is used to synchronize the time of a computer client or server to another server or reference time source.\n<P>The monlist feature in ntp_request.c in ntpd in NTP allows remote attackers to cause a denial of service (traffic amplification) via forged  REQ_MON_GETLIST or  REQ_MON_GETLIST_1 requests.\n\n<P>Affected Software:<BR>\nNTP prior to Version 4.2.7p26",
+      "finding_guidance": "",
+      "impact": "<P>This issue allows an attacker to perform reflection distributed denial of service attacks.",
+      "mitigation": "Upgrade to NTP Version 4.2.7p26 or latest version to fix this issue.\n<P>\nWorkaround:<BR>\nDisable &quot;monlist&quot; functionality by adding the following lines in ntp.conf file:- <BR>\nrestrict default kod nomodify notrap nopeer noquery <BR>\nrestrict -6 default kod nomodify notrap nopeer noquery <BR>\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"http://www.eecis.udel.edu/~ntp/ntp_spool/ntp4/ntp-dev/ntp-dev-4.2.7p26.tar.gz\" TARGET=\"_blank\">NTP 4.2.7p26</A>\n\n<P>Virtual Patches:<BR><A HREF=\"http://www.trendmicro.com/vulnerabilitycontrols\"TARGET=\"_blank\">Trend Micro Virtual Patching</A><BR>\nVirtual Patch #1005910: 1005910 - Identified ntpd 'monlist' Query Reflected Denial Of Service Attack<BR>",
+      "plugin_id": "121695",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2013-5211\">CVE-2013-5211</a></li><li>NTP 4.2.7p26</li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "NTP \"monlist\" Feature Denial of Service Vulnerability"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The following bindings were detected on this computer. Bindings have many purposes. They reflect such things as users logged-in, registration of a user name, registration of a service in a domain, and registering of a NetBIOS name.",
+      "finding_guidance": "",
+      "impact": "Unauthorized users can use this information in further attacks against the host. A list of logged-in users on the target host/network can potentially be used to launch social engineering attacks.",
+      "mitigation": "This service uses the UDP and TCP port 137. Typically, this port should not be\naccessible to external networks, and should be firewalled.",
+      "plugin_id": "70004",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "NetBIOS Bindings Information"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Remote Desktop Protocol is a protocol by which Terminal Service provides desktop level access to a remote user.  It can be used to remotely log in and interact with a Windows machine.<P>\nSince RDP transfers sensitive information about the user and the system, it can be configured to use encryption to provide privacy and integrity for its sessions. It is possible to configure RDP to use encryption algorithms that are considered insecure, such as RC4 40bit and RC4 56 bit.",
+      "finding_guidance": "",
+      "impact": "If an attacker has access to the network traffic with RDP sessions using weak encryption methods it's possible to bruteforce the encryption parameters and compromise privacy of the RDP session.",
+      "mitigation": "RDP needs to be configured to use strong encryption methods or use SSL as the privacy and integrity provider.<P>\nTo configure RDP encryption methods 'Terminal Services Configuration' or 'Remote Desktop Session Host Configuration' snap-in can be launched in mmc.exe.<BR>\nIn 'Terminal Services Configuration' or 'Remote Desktop Session Host Configuration' properties dialog box General tab for the Encryption Level 'High' should be selected.\n<P>\nOn Windows XP the RDP configuration can be found under  Computer Configuration\\Administrative Templates\\Windows Components\\Terminal Services and User Configuration\\Administrative Templates\\Windows Components\\Terminal Services.  Under Encryption and Security item, double click on 'Set client connection encryption level' and enable the policy and select high for the 'Encryption level'.<P>\nFor more details on configuration on 2008 R2 systems see <A HREF=\"http://technet.microsoft.com/en-us/library/cc770833.aspx\" TARGET=\"_blank\">Configure Server Authentication and Encryption Levels</A>.<BR>\nFor more detail on disabling RC4 see <A HREF=\"https://technet.microsoft.com/library/security/2868725\" TARGET=\"_blank\">Microsoft Update for Disabling RC4</A>.<BR>\nFor details on supporting TLS 1.1 and TLS1.2 for Remote Desktop Services see <A HREF=\"https://support.microsoft.com/en-us/kb/3080079\" TARGET=\"_blank\">Update to add RDS support for TLS 1.1 and TLS 1.2 in Windows 7 or Windows Server 2008 R2</A>.<BR>\nFor more details on configuration on windows server 2012 and 2012 R2 systems see  <A HREF=\"https://social.technet.microsoft.com/wiki/contents/articles/20684.management-how-to-changes-for-rds-in-windows-server-2012-and-2012r2.aspx\" TARGET=\"_blank\">Management (how to) changes for RDS in Windows Server 2012 and 2012R2</A>.<BR>",
+      "plugin_id": "90882",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Windows Remote Desktop Protocol Weak Encryption Method Allowed"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "TLS is capable of using a multitude of ciphers (algorithms) to create the public and private key pairs.<BR>\nFor example if TLSv1.0 uses either the RC4 stream cipher, or a block cipher in CBC mode.<BR>\nRC4 is known to have biases and the block cipher in CBC mode is vulnerable to the POODLE attack.<P>\n\nTLSv1.0, if configured to use the same cipher suites as SSLv3, includes a means by which a TLS implementation can downgrade the connection to SSL v3.0, thus weakening security.<P>\n\n<A HREF=\"https://blog.qualys.com/ssllabs/2014/12/08/poodle-bites-tls\" TARGET=\"_blank\">A POODLE-type</A> attack could also be launched directly at TLS without negotiating a downgrade.<P>\n\n<B> This QID is an automatic PCI FAIL in accordance with the PCI standards. <P>\n\nFurther details can be found under: <BR>\n<A HREF=\"https://www.pcisecuritystandards.org/documents/ASV_Program_Guide_v3.1.pdf\" TARGET=\"_blank\">PCI: ASV Program Guide v3.1 (page 27)</A><BR>\n<A HREF=\"https://www.pcisecuritystandards.org/documents/Use-of-SSL-Early-TLS-and-ASV-Scans.pdf\" TARGET=\"_blank\">PCI: Use of SSL Early TLS and ASV Scans</A>\n</B>\n<P>",
+      "finding_guidance": "",
+      "impact": "An attacker can exploit cryptographic flaws to conduct man-in-the-middle type attacks or to decryption communications.<P>\nFor example: An attacker could force a downgrade from the TLS protocol to the older SSLv3.0 protocol and exploit the POODLE vulnerability, read secure communications or maliciously modify messages.<P>\n<A HREF=\"https://blog.qualys.com/ssllabs/2014/12/08/poodle-bites-tls\" TARGET=\"_blank\">A POODLE-type</A> attack could also be launched directly at TLS without negotiating a downgrade.<P>",
+      "mitigation": "Disable the use of TLSv1.0 protocol in favor of a cryptographically stronger protocol such as TLSv1.2.\nThe following openssl commands can be used to do a manual test:\nopenssl s_client -connect ip:port -tls1\n\nIf the test is successful, then the target support TLSv1",
+      "plugin_id": "38628",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "SSL/TLS Server supports TLSv1.0"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Secure Sockets Layer (SSL v2/v3) and Transport Layer Security (TLS ) protocols provide integrity, confidentiality and authenticity services to other protocols that lack these features.\n<P>\nSSL/TLS protocols use ciphers such as AES,DES, 3DES and RC4(Arcfour) to encrypt the content of the higher layer protocols and thus provide the confidentiality service. Normally the output of an encryption process is a sequence of random looking bytes. It was known that RC4 output has some bias in the output. Recently a group of researchers has discovered that the there is a stronger bias in RC4(Arcfour) , which make statistical analysis of ciphertext more practical.\n<P>\nThe described attack is to inject a malicious javascript into the victim's browser that would ensure that there are multiple connections being established with a target website and the same HTTP cookie is sent multiple times to the website in encrypted form. This provides the attacker a large set of ciphertext samples, that can be used for statistical analysis.\n\n<P>NOTE: On 3/12/15 NVD changed the CVSS v2 access complicity from high to medium. As a result Qualys revised the CVSS score to 4.3 immediately. On 5/4/15 Qualys is also revising the severity to level 3.",
+      "finding_guidance": "",
+      "impact": "If this attack is carried out and an HTTP cookie is recovered, then the attacker can use the cookie to impersonate the user whose cookie was recovered.\n<P>\nThis attack is not very practical as it requires the attacker to have access to millions of samples of ciphertext, but there are certain assumptions that an attacker can make to improve the chances of recovering the cleartext from cihpertext. For examples HTTP cookies are either base64 encoded or hex digits. This information can help the attacker in their efforts to recover the cookie.",
+      "mitigation": "RC4 should not be used where possible. One reason that RC4(Arcfour) was still being used was BEAST and Lucky13 attacks against CBC mode ciphers in SSL and TLS. However, TLSv 1.2 or later address these issues.",
+      "plugin_id": "38601",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2013-2566\">CVE-2013-2566</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-2808\">CVE-2015-2808</a></li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "SSL/TLS use of weak RC4(Arcfour) cipher"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Legacy block ciphers having block size of 64 bits are vulnerable to a practical collision attack when used in CBC mode. \nAll versions of SSL/TLS protocol support cipher suites which use DES, 3DES, IDEA or RC2 as the symmetric encryption cipher are affected.",
+      "finding_guidance": "",
+      "impact": "Remote attackers can obtain cleartext data via a birthday attack against a long-duration encrypted session.",
+      "mitigation": "Disable and stop using DES, 3DES, IDEA or RC2 ciphers.<BR>\nMore information can be found at <A HREF=\"https://docs.microsoft.com/en-us/windows-server/security/tls/tls-schannel-ssp-changes-in-windows-10-and-windows-server\" TARGET=\"_blank\">Microsoft Windows TLS changes docs</A> and <A HREF=\"https://docs.microsoft.com/en-us/windows-server/security/tls/tls-registry-settings\" TARGET=\"_blank\">Microsoft Transport Layer Security (TLS) registry settings</A>",
+      "plugin_id": "38657",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-2183\">CVE-2016-2183</a></li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Birthday attacks against TLS ciphers with 64bit block size vulnerability (Sweet32)"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "libxml2 is prone to multiple vulnerabilities:- <BR>\n\n1. The xmlNextChar function in libxml2 before 2.9.4 allows remote attackers to cause a denial of service (heap-based buffer over-read) via a crafted XML document. (CVE-2016-1762)<BR>\n2. The xmlPArserPrintFileContextInternal function in libxml2 allows remote attackers to cause a denial of service (heap-based buffer over-read) via a crafted XML document. (CVE-2016-1838) <BR>\n3. Multiple use-after-free vulnerabilities in the (1) htmlPArsePubidLiteral and (2) htmlParseSystemiteral functions in libxml2 allow remote attackers to cause a denial of service via a crafted XML document. (CVE-2016-1837) <BR>\n4. Use-after-free vulnerability in the xmlDictComputeFastKey function in libxml2 allows remote attackers to cause a denial of service via a crafted XML document. (CVE-2016-1836) <BR>\n5. Use-after-free vulnerability in the xmlSAX2AttributeNs function in libxml2 allows remote attackers to cause a denial of service via a crafted XML document. (CVE-2016-1835) <BR>\n6. Heap-based buffer overflow in the xmlStrncat function in libxml2 allows remote attackers to execute arbitrary code or cause a denial of service (memory corruption) via a crafted XML document. (CVE-2016-1834) <BR>\n7. The htmlCurrentChar function in libxml2 allows remote attackers to cause a denial of service (heap-based buffer over-read) via a crafted XML document. (CVE-2016-1833) <BR>\n8. The xmlNextChar function in libxml2 allows remote attackers to cause a denial of service (heap-based buffer over-read) via a crafted XML document.(CVE-2016-1762) <BR>\n9. dict.c in libxml2 allows remote attackers to cause a denial of service (heap-based buffer over-read and application crash) via an unexpected character in a crafted HTML document. (CVE-2015-8806) <BR>\n10. The xmlDictAddString function in libxml2 allows remote attackers to cause a denial of service (heap-based buffer over-read) via a crafted XML document.(CVE-2016-1839) <BR>\n11. Heap-based buffer overflow in the xmlFAParsePosCharGroup function in libxml2 allows remote attackers to execute arbitrary code or cause a denial of service (memory corruption) via a crafted XML document. (CVE-2016-1840) <BR>\n12. The htmlParseNameComplex function in HTMLparser.c in libxml2 allows attackers to cause a denial of service (out-of-bounds read) via a crafted XML document. (CVE-2016-2073) <BR>\n13. The (1) xmlParserEntityCheck and (2) xmlParseAttValueComplex functions in parser.c in libxml2 do not properly keep track of the recursion depth, which allows context-dependent attackers to cause a denial of service (stack consumption and application crash) via a crafted XML document containing a large number of nested entity references. (CVE-2016-3705) <BR>\n14. The xmlParseElementDecl function in parser.c in libxml2 allows context-dependent attackers to cause a denial of service (heap-based buffer underread and application crash) via a crafted file, involving xmlParseName. (CVE-2016-4447) <BR>\n15. Format string vulnerability in libxml2 allows attackers to have unspecified impact via format string specifiers in unknown vectors. (CVE-2016-4448) <BR>\n16. XML external entity (XXE) vulnerability in the xmlStringLenDecodeEntities function in parser.c in libxml2 , when not in validating mode, allows context-dependent attackers to read arbitrary files or cause a denial of service (resource consumption) via unspecified vectors. (CVE-2016-4449) <BR>\n17. The xmlBufAttrSerializeTxtContent function in xmlsave.c in libxml2 allows context-dependent attackers to cause a denial of service (out-of-bounds read and application crash) via a non-UTF-8 attribute value, related to serialization. (CVE-2016-4483) <BR> <P>\nVersions Affected:- <BR>\nlibxml2 versions prior to 2.9.4 <P>\n\nQID Detection Logic:<BR>\nThis QID queries for phpinfo and then looks for vulnerable libxml2 versions.<P>",
+      "finding_guidance": "",
+      "impact": "Successful exploitation allows remote attackers to cause a denial of service via an unexpected character in a crafted HTML document.",
+      "mitigation": "Refer to libxml2 repository <A HREF=\"http://xmlsoft.org/downloads.html\" TARGET=\"_blank\">libxml2</A> to obtain further details.\n<P>Patch:<BR>\nFollowing are links for downloading patches to fix the vulnerabilities:\n<P> <A HREF=\"http://xmlsoft.org/downloads.html\" TARGET=\"_blank\">libxml2</A>",
+      "plugin_id": "11803",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-8806\">CVE-2015-8806</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1762\">CVE-2016-1762</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1833\">CVE-2016-1833</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1834\">CVE-2016-1834</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1835\">CVE-2016-1835</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1836\">CVE-2016-1836</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1837\">CVE-2016-1837</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1838\">CVE-2016-1838</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1839\">CVE-2016-1839</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1840\">CVE-2016-1840</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-2073\">CVE-2016-2073</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-3705\">CVE-2016-3705</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4447\">CVE-2016-4447</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4448\">CVE-2016-4448</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4449\">CVE-2016-4449</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4483\">CVE-2016-4483</a></li><li><a href=\"http://xmlsoft.org/news.html\">libxml2</a></li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "libxml2 Multiple Vulnerabilities"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The HTTP Content-Security-Policy response header allows web site administrators to control resources the user agent is allowed to load for a given page. This helps guard against cross-site scripting attacks (XSS).<P>\nQID Detection Logic:<BR>\nThis QID detects the absence of the Content-Security-Policy HTTP header by transmitting a GET request.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "48001",
+      "references": "<ul><li><a href=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy\">Content-Security-Policy</a></li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "Content-Security-Policy HTTP Security Header Not Detected"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The remote Web server supports the TRACE and/or TRACK HTTP methods, which makes it easier for remote attackers to steal cookies and authentication credentials or bypass the HttpOnly protection mechanism.\n<P>\nTrack / Trace are required to be disabled to be PCI compliance.",
+      "finding_guidance": "",
+      "impact": "If this vulnerability is successfully exploited, attackers can potentially steal cookies and authentication credentials, or bypass the HttpOnly protection mechanism.",
+      "mitigation": "Disable these methods in your web server's configuration file.",
+      "plugin_id": "12680",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2004-2320\">CVE-2004-2320</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2010-0386\">CVE-2010-0386</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2003-1567\">CVE-2003-1567</a></li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "HTTP TRACE / TRACK Methods Enabled"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "HTTP Public Key Pinning (HPKP) is a security feature that tells a web client to associate a specific cryptographic public key with a certain web server to decrease the risk of MITM attacks with forged certificates.<P>\nQID Detection Logic:<BR>\nThis QID detects the absence of the Public-Key-Pins HTTP header by transmitting a GET request.",
+      "finding_guidance": "",
+      "impact": "N/A<P>",
+      "mitigation": "N/A",
+      "plugin_id": "48002",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "HTTP Public-Key-Pins Security Header Not Detected"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "This host has a publicly-accessible PHP file that calls the phpinfo() function (or some other function similar to it). \n<P>\nIf a user requests this file (such as via an Internet browser), the user may obtain a page containing sensitive information about the Web server host. The information displayed to the user could include the exact version numbers of various software products (Operating Systems, Web Servers, PHP, XML, MySQL), the values of some environment variables ($PATH, $SYSTEM_ROOT), paths to various programs (cmd.exe), and much more.\n<P>\nTo get specific information about the type of data your host displayed, please refer to the &quot;Result&quot; field below.",
+      "finding_guidance": "",
+      "impact": "By exploiting this vulnerability, any user could obtain very sensitive information about the Web server host. This information may aid in attacks against the host.",
+      "mitigation": "You should immediately remove all such files from the public domain on your Web server.",
+      "plugin_id": "10464",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "phpinfo Information Disclosure Vulnerability"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "SSL 3.0 is an obsolete and insecure protocol.<BR>\nEncryption in SSL 3.0 uses either the RC4 stream cipher, or a block cipher in CBC mode.<BR>\nRC4 is known to have biases, and the block cipher in CBC mode is vulnerable to the POODLE attack.<P>\n\nThe SSLv3 protocol is insecure due to the POODLE attack and the weakness of RC4 cipher.<P>\nNote: In April 2016, PCI released <A HREF=\"https://www.pcisecuritystandards.org/documents/PCI_DSS_v3-2.pdf\" TARGET=\"_blank\">PCI DSS v3.2</A> announcing that NIST no longer considers Secure Socket Layers (SSL) v3.0 protocol as acceptable for protecting data and that all versions of SSL versions do not meet the PCI definition of &quot;strong cryptography.&quot;<P>\n<B> This QID is an automatic PCI FAIL in accordance with the PCI standards. <P>\n\nFurther details can be found under: <BR>\n<A HREF=\"https://www.pcisecuritystandards.org/documents/ASV_Program_Guide_v3.1.pdf\" TARGET=\"_blank\">PCI: ASV Program Guide v3.1 (page 27)</A><BR>\n<A HREF=\"https://www.pcisecuritystandards.org/documents/Use-of-SSL-Early-TLS-and-ASV-Scans.pdf\" TARGET=\"_blank\">PCI: Use of SSL Early TLS and ASV Scans</A>\n</B>\n<P>",
+      "finding_guidance": "",
+      "impact": "An attacker can exploit this vulnerability to read secure communications or maliciously modify messages.",
+      "mitigation": "Disable the SSL 3.0 protocol in the client and in the server, refer to \nHow to disable SSLv3 : <A HREF=\"http://disablessl3.com/\" TARGET=\"_blank\">Disable SSLv3</A>",
+      "plugin_id": "38606",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "SSL Server Has SSLv3 Enabled Vulnerability"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Secure Socket Layer (SSL) protocol allows for secure communication between a client and a server.\n<P>\nSSL encryption ciphers are classified based on encryption key length as follows:<BR>\n<UL>\n<LI>HIGH - key length larger than 128 bits\n<LI>MEDIUM - key length equal to 128 bits\n<LI>LOW - key length smaller than 128 bits\n</UL>\n<P>\nMessages encrypted with LOW encryption ciphers are easy to decrypt. Commercial SSL servers should only support MEDIUM or HIGH strength ciphers to guarantee transaction security.\n<P>\nThe following link provides more information about this vulnerability:\n<UL>\n<LI><A HREF=\"http://www.schneier.com/paper-ssl-revised.pdf\" TARGET=\"_blank\">Analysis of the SSL 3.0 protocol</A>\n</UL>\n<P>\nPlease note that this detection only checks for weak cipher support at the SSL layer. Some servers may implement additional protection at the data layer. For example, some SSL servers and SSL proxies (such as SSL accelerators) allow cipher negotiation to complete but send back an error message and abort further communication on the secure channel. This vulnerability may not be exploitable for such configurations.",
+      "finding_guidance": "",
+      "impact": "An attacker can exploit this vulnerability to decrypt secure communications without authorization.",
+      "mitigation": "Disable support for LOW encryption ciphers.<P>\n<B>Apache</B>\n<BR> If TLSv1.1 or TLSv1.2 are available, then those protocols should be used.\n<BR>SSLProtocol TLSv1.1 TLSv1.2<BR>\nIf TLSv1.1 and TLSv1.2 are not available then only TLS1.0 should be used:\n<BR>SSLProtocol TLSv1\n<BR>Typically, for Apache/mod_ssl, httpd.conf or ssl.conf should have the following lines:<BR>\nSSLCipherSuite ALL:!aNULL:!ADH:!eNULL:!LOW:!EXP:RC4+RSA:+HIGH:+MEDIUM<BR><BR>\nFor Apache/apache_ssl include the following line in the configuration file (httpsd.conf):<BR>\nSSLRequireCipher ALL:!aNULL:!ADH:!eNULL:!LOW:!EXP:RC4+RSA:+HIGH:+MEDIUM<BR><P>\n\n<B>Tomcat</B>\n<BR>\nsslProtocol=&quot;SSLv3&quot;                \n<BR>ciphers=&quot;SSL_RSA_WITH_RC4_128_MD5,SSL_RSA_WITH_RC4_128_SHA,SSL_DHE_RSA_W\n<BR>ITH_3DES_EDE_CBC_SHA&quot;\n<BR><P>\n<B>IIS</B>\n<BR>\n<A HREF=\"http://support.microsoft.com/default.aspx?scid=kb;EN-US;245030\" TARGET=\"_blank\">How to Restrict the Use of Certain Cryptographic Algorithms and Protocols in Schannel.dll</A> (Windows restart required)\n<BR><A HREF=\"http://support.microsoft.com/default.aspx?scid=kb;en-us;187498\" TARGET=\"_blank\">How to disable PCT 1.0, SSL 2.0, SSL 3.0, or TLS 1.0 in Internet Information Services</A> (Windows restart required)\n<BR><A HREF=\"http://www.microsoft.com/technet/security/prodtech/IIS.mspx\" TARGET=\"_blank\">Security Guidance for IIS</A>\n<P>For Novell Netware 6.5 please refer to the following document \n<A HREF=\"http://support.novell.com/cgi-bin/search/searchtid.cgi?10100633.htm\" TARGET=\"_blank\">SSL Allows the use of Weak Ciphers. -TID10100633 </A>",
+      "plugin_id": "38140",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "SSL Server Supports Weak Encryption Vulnerability"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Secure Socket Layer (SSL) protocol allows for secure communication between a client and a server.\n<P>\nSSL encryption ciphers are classified based on the encryption key length as follows:<BR>\n<UL>\n<LI>HIGH - key length larger than 128 bits\n<LI>MEDIUM - key length equal to 128 bits\n<LI>LOW - key length smaller than 128 bits\n</UL>\nDuring the SSL handshake, the SSL client and the SSL server negotiate which cipher to use for the session. The SSL server chooses a cipher from a list proposed by the SSL client. The list is sorted by preference with the first cipher in the list being the most preferred.\n\n<P> This vulnerability is reported when the list of ciphers submitted by the client has a mixture of LOW, MEDIUM and HIGH ciphers with a LOW grade cipher listed first, and the SSL server chooses to use the LOW grade cipher\neven though it supports at least one MEDIUM or HIGH grade cipher in the list.\n<P>\nMessages encrypted with LOW encryption ciphers are easy to decrypt. Commercial SSL servers should only support MEDIUM or HIGH strength ciphers to guarantee transaction security. SSL servers support a LOW grade cipher even though the client supports stronger ciphers.",
+      "finding_guidance": "",
+      "impact": "An attacker can exploit this vulnerability to decrypt secure communications without authorization.",
+      "mitigation": "Disable support for LOW encryption ciphers.\n<P>Typically, for Apache/mod_ssl, httpd.conf or ssl.conf should have the following lines:<BR>\nSSLProtocol -ALL +SSLv3 +TLSv1<BR>\nSSLCipherSuite ALL:!aNULL:!ADH:!eNULL:!LOW:!EXP:RC4+RSA:+HIGH:+MEDIUM<P>\n<P> If for some reason LOW grade cipher are needed, then using the SSLHonorCipherOrder directive will enforce the server's preference on cipher selection and will guarantee that weak ciphers will be used only if nothing else is available.<BR>\n<A HREF=\"http://httpd.apache.org/docs/2.1/mod/mod_ssl.html#SSLHonorCipherOrder\" TARGET=\"_blank\">SSLHonorCipherOrder Directive</A>\n<P>\n<A HREF=\"http://support.microsoft.com/kb/245030\" TARGET=\"_blank\">How to Control the Ciphers for SSL and TLS on IIS</A>\n<P>For Novell Netware 6.5 please refer to the following document \n<A HREF=\"http://support.novell.com/cgi-bin/search/searchtid.cgi?10100633.htm\" TARGET=\"_blank\">SSL Allows the use of Weak Ciphers. -TID10100633 </A>",
+      "plugin_id": "38141",
+      "references": "",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "SSL Server May Be Forced to Use Weak Encryption Vulnerability"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The SSL protocol 3.0 design error, uses nondeterministic CBC padding, which makes it easier for man-in-the-middle attacks. \n<P>\nThe target supports SSLv3, which makes it vulnerable to POODLE (Padding Oracle On Downgraded Legacy Encryption), even if it also supports more recent versions of TLS. It's subject to a downgrade attack, in which the attacker tricks the browser into connecting with SSLv3.<P>\n<B> This QID is an automatic PCI FAIL in accordance with the PCI standards. <P>\n\nFurther details can be found under: <BR>\n<A HREF=\"https://www.pcisecuritystandards.org/documents/ASV_Program_Guide_v3.1.pdf\" TARGET=\"_blank\">PCI: ASV Program Guide v3.1 (page 27)</A><BR>\n<A HREF=\"https://www.pcisecuritystandards.org/documents/Use-of-SSL-Early-TLS-and-ASV-Scans.pdf\" TARGET=\"_blank\">PCI: Use of SSL Early TLS and ASV Scans</A>\n</B>\n<P>",
+      "finding_guidance": "",
+      "impact": "An attacker who can take a man-in-the-middle (MitM) position can exploit this vulnerability and gain access to encrypted communication between a client and server.",
+      "mitigation": "Disable SSLv3 support to avoid this vulnerability.<P>\nExamples to disable SSLv3.<BR>\nnginx: list specific allowed protocols in the &quot;ssl_protocols&quot; line. Make sure SSLv2 and SSLv3 is not listed. For example: ssl_protocols TLSv2 TLSv1.1 TLSv1.2;<BR>\nApache: Add -SSLv3 to the &quot;SSLProtocol&quot; line. <BR>\n<A HREF=\"https://support.microsoft.com/kb/187498/en-us\" TARGET=\"_blank\">How to disable SSL 3.0 on Microsoft IIS</A>.\n<P>For PCI, please refer to the Qualys <A HREF=\"https://community.qualys.com/thread/15280\" TARGET=\"_blank\">community article</A>.",
+      "plugin_id": "38603",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-3566\">CVE-2014-3566</a></li><li><a href=\"https://www.openssl.org/~bodo/ssl-poodle.pdf\">POODLE</a></li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "SSLv3 Padding Oracle Attack Information Disclosure Vulnerability (POODLE)"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "SSLv 3.0 and TLS v1.0 protocols are used to provide integrity, authenticity and privacy to other protocols such as HTTP and LDAP. They provide these services by using encryption for privacy, x509 certificates for authenticity and one-way hash functions for integrity. To encrypt data SSL and TLS can use block ciphers, which are encryption algorithms that can encrypt only a fixed block of original data to an encrypted block of the same size. Note that these ciphers will always obtain the same resulting block for the same original block of data. To achieve difference in the output the output of encryption is XORed with yet another block of the same size referred to as initialization vectors (IV). A special mode of operation for block ciphers known as CBC (cipher block chaining) uses one IV for the initial block and the result of the previous block for each subsequent block to obtain difference in the output of block cipher encryption.\n<P>\nIn SSLv3.0 and TLSv1.0 implementation the choice CBC mode usage was poor because the entire traffic shares one CBC session with single set of initial IVs. The rest of the IV are as mentioned above results of the encryption of the previous blocks. The subsequent IV are available to the eavesdroppers. This allows an attacker with the capability to inject arbitrary traffic into the plain-text stream (to be encrypted by the client) to verify their guess of the plain-text preceding the injected block. If the attackers guess is correct then the output of the encryption will be the same for two blocks.\n<P>For low entropy data it is possible to guess the plain-text block with relatively few number of attempts. For example for data that has 1000 possibilities the number of attempts can be 500.\n<P>For more information please see <A HREF=\"http://eprint.iacr.org/2006/136.pdf\" TARGET=\"_blank\">a paper by Gregory V. Bard.</A>\n<P>NOTE:<BR>\nThe CVSS access complexity assigned by NIST to CVE-2011-3389 is 'Medium' which makes the base score 4.3. But Qualys has assigned access complexity to 'High' for server side, because Javascipt injection and MiTM capabilities and a vulnerable client are required to exploit this vulnerability. Therefore the Qualys CVSS score is 2.6.",
+      "finding_guidance": "",
+      "impact": "Recently attacks against the web authentication cookies have been described which used this vulnerability. If the authentication cookie is guessed by the attacker then the attacker can impersonate the legitimate user on the Web site which accepts the authentication cookie.",
+      "mitigation": "This attack was identified in 2004 and later revisions of TLS protocol which contain a fix for this. If possible, upgrade to TLSv1.1 or TLSv1.2. If upgrading to TLSv1.1 or TLSv1.2 is not possible, then disabling CBC mode ciphers will remove the vulnerability.\n<P>\nSetting your SSL server to prioritize RC4 ciphers mitigates this vulnerability. Microsoft has posted information including workarounds for IIS at <A HREF=\"http://technet.microsoft.com/en-us/security/advisory/2588513\" TARGET=\"_blank\">KB2588513</A>.\n<P>\nUsing the following SSL configuration in Apache mitigates this vulnerability:<P>\nSSLHonorCipherOrder On<BR>\nSSLCipherSuite RC4-SHA:HIGH:!ADH<BR>\n<P>\nQualys SSL/TLS Deployment Best Practices can be found <A HREF=\"https://www.ssllabs.com/projects/best-practices/\" TARGET=\"_blank\">here</A>.\n\n<P>\nNote: RC4 recommendation is only in situations where upgrade to TLSv1.2 is not possible. RC4 in TLS v1.0 has output bias problem as described in QID 38601. Therefore it is recommended to upgrade to TLS v1.2 or later.",
+      "plugin_id": "42366",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2011-3389\">CVE-2011-3389</a></li></ul>",
+      "replication_steps": "",
+      "severity": "medium",
+      "tags": [],
+      "title": "SSLv3.0/TLSv1.0 Protocol Weak CBC Mode Server Side Vulnerability (BEAST)"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The TCP/IP stack on the host supports the TCP TimeStamp (kind 8) option. Typically the timestamp used is the host's uptime (since last reboot) in various units (e.g., one hundredth of second, one tenth of a second, etc.). Based on this, we can obtain the host's uptime. The result is given in the Result section below.\n<P>\nSome operating systems (e.g., MacOS, OpenBSD) use a non-zero, probably random, initial value for the timestamp. For these operating systems, the uptime obtained does not reflect the actual uptime of the host; the former is always larger than the latter.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "82063",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Host Uptime Based on TCP TimeStamp Option"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Several different techniques can be used to identify the operating system (OS) running on a host. A short description of these techniques is provided below. The specific technique used to identify the OS on this host is included in the RESULTS section of your report.\n<P>\n1) <B>TCP/IP Fingerprint</B>: The operating system of a host can be identified from a remote system using TCP/IP fingerprinting. All underlying operating system TCP/IP stacks have subtle differences that can be seen in their responses to specially-crafted TCP packets. According to the results of this &quot;fingerprinting&quot; technique, the OS version is among those listed below. \n<P>\nNote that if one or more of these subtle differences are modified by a firewall or a packet filtering device between the scanner and the host, the fingerprinting technique may fail. Consequently, the version of the OS may not be detected correctly. If the host is behind a proxy-type firewall, the version of the operating system detected may be that of the firewall instead of the host being scanned.\n<P>\n2) <B>NetBIOS</B>: Short for Network Basic Input Output System, an application programming interface (API) that augments the DOS BIOS by adding special functions for local-area networks (LANs). Almost all LANs for PCs are based on the NetBIOS. Some LAN manufacturers have even extended it, adding additional network capabilities. NetBIOS relies on a message format called Server Message Block (SMB). \n<P>\n3) <B>PHP Info</B>: PHP is a hypertext pre-processor, an open-source, server-side, HTML-embedded scripting language used to create dynamic Web pages. Under some configurations it is possible to call PHP functions like phpinfo() and obtain operating system information.\n<P>\n4) <B>SNMP</B>: The Simple Network Monitoring Protocol is used to monitor hosts, routers, and the networks to which they attach. The SNMP service maintains Management Information Base (MIB), a set of variables (database) that can be fetched by Managers. These include &quot;MIB_II.system.sysDescr&quot; for the operating system.",
+      "finding_guidance": "",
+      "impact": "Not  applicable.",
+      "mitigation": "Not  applicable.",
+      "plugin_id": "45017",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Operating System Detected"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "TCP provides stateful communications between hosts on a network. TCP sessions are established by a three-way handshake and use random 32-bit sequence and acknowledgement numbers to ensure the validity of traffic. A vulnerability was reported that may permit TCP sequence numbers to be more easily approximated by remote attackers. This issue affects products released by multiple vendors.  \n<P>\nThe cause of the vulnerability is that affected implementations will accept TCP sequence numbers within a certain range, known as the acknowledgement range, of the expected sequence number for a packet in the session. This is determined by the TCP window size, which is negotiated during the three-way handshake for the session. Larger TCP window sizes may be set to allow for more throughput, but the larger the TCP window size, the more probable it is to guess a TCP sequence number that falls within an acceptable range. It was initially thought that guessing an acceptable sequence number was relatively difficult for most implementations given random distribution, making this type of attack impractical. However, some implementations may make it easier to successfully approximate an acceptable TCP sequence number, making these attacks possible with a number of protocols and implementations.\n<P>\nThis is further compounded by the fact that some implementations may support the use of the TCP Window Scale Option, as described in RFC 1323, to extend the TCP window size to a maximum value of 1 billion.\n<P>\nThis vulnerability will permit a remote attacker to inject a SYN or RST packet into the session, causing it to be reset and effectively allowing for denial of service attacks. An attacker would exploit this issue by sending a packet to a receiving implementation with an approximated sequence number and a forged source IP address and TCP port.\n<P>\nThere are a few factors that may present viable target implementations, such as those which depend on long-lived TCP connections, those that have known or easily guessed IP address endpoints and those implementations with easily guessed TCP source ports. It has been noted that Border Gateway Protocol (BGP) is reported to be particularly vulnerable to this type of attack, due to the use of long-lived TCP sessions and the possibility that some implementations may use the TCP Window Scale Option. As a result, this issue is likely to affect a number of routing platforms.\n<P>\nAnother factor to consider is the relative difficulty of injecting packets into TCP sessions, as a number of receiving implementations will reassemble packets in order, dropping any duplicates. This may make some implementations more resistant to attacks than others.\n<P>\nIt should be noted that while a number of vendors have confirmed this issue in various products, investigations are ongoing and it is likely that many other vendors and products will turn out to be vulnerable as the issue is investigated further.",
+      "finding_guidance": "",
+      "impact": "Successful exploitation of this issue could lead to denial of service attacks on the TCP based services of target hosts.",
+      "mitigation": "Please first check the results section below for the port number on which this vulnerability was detected. If that port number is known to be used for port-forwarding, then it is the backend host that is really vulnerable.\n<P>\nVarious implementations and products including Check Point, Cisco, Cray Inc, Hitachi, Internet Initiative Japan, Inc (IIJ), Juniper Networks, NEC, Polycom, and Yamaha are currently undergoing review. Contact the vendors to obtain more information about affected products and fixes. <A HREF=\"http://packetstormsecurity.org/0404-advisories/246929.html\" TARGET=\"_blank\">NISCC Advisory 236929 - Vulnerability Issues in TCP</A> details the vendor patch status as of the time of the advisory, and identifies resolutions and workarounds.\n<P>\nRefer to <A HREF=\"http://www.kb.cert.org/vuls/id/415294\" TARGET=\"_blank\">US-CERT Vulnerability Note VU#415294</A> and <A HREF=\"http://osvdb.org/4030\" TARGET=\"_blank\">OSVDB Article 4030</A> to obtain a list of vendors affected by this issue and a note on resolutions (if any) provided by the vendor.\n<P>\nFor Microsoft: Refer to <A HREF=\"https://docs.microsoft.com/en-us/security-updates/securitybulletins/2005/ms05-019\" TARGET=\"_blank\">MS05-019</A> and <A HREF=\"https://docs.microsoft.com/en-us/security-updates/securitybulletins/2006/ms06-064\" TARGET=\"_blank\">MS06-064</A> for further details.\n<P>\nFor SGI IRIX: Refer to <A HREF=\"ftp://patches.sgi.com/support/free/security/advisories/20040905-01-P.asc\" TARGET=\"_blank\">SGI Security Advisory 20040905-01-P</A>\n<P>\nFor SCO UnixWare 7.1.3 and 7.1.1: Refer to <A HREF=\"ftp://ftp.sco.com/pub/updates/UnixWare/SCOSA-2005.14/SCOSA-2005.14.txt\" TARGET=\"_blank\">SCO Security Advisory SCOSA-2005.14</A>\n<P>\nFor Solaris (Sun Microsystems): The vendor has acknowledged the vulnerability; however a patch is not available. Refer to <A HREF=\"http://www.kb.cert.org/vuls/id/JARL-5YGQAJ\" TARGET=\"_blank\">Sun Microsystems, Inc. Information for VU#415294</A> to obtain additional details. Also, refer to <A HREF=\"http://www.us-cert.gov/cas/techalerts/TA04-111A.html\" TARGET=\"_blank\">TA04-111A</A> for detailed mitigating strategies against these attacks.\n<P>\nFor NetBSD: Refer to <A HREF=\"ftp://ftp.netbsd.org/pub/NetBSD/security/advisories/NetBSD-SA2004-006.txt.asc\" TARGET=\"_blank\">NetBSD-SA2004-006</A>\n<P>\nFor Cisco: Refer to <A HREF=\"http://www.cisco.com/warp/public/707/cisco-sa-20040420-tcp-ios.shtml\" TARGET=\"_blank\">cisco-sa-20040420-tcp-ios.shtml</A>.\n<P>\nFor Red Hat Linux: There is no fix available.\n<P>\n\n\n\n\n\n\nWorkaround:<BR>\nThe following BGP-specific workaround information has been provided.\n<P>\nFor BGP implementations that support it, the TCP MD5 Signature Option should be enabled. Passwords that the MD5 checksum is applied to should be set to strong values and changed on a regular basis.\n<P>\nSecure BGP configuration instructions have been provided for Cisco and Juniper at these locations:\n<BR>\n<A HREF=\"http://www.cymru.com/Documents/secure-bgp-template.html\" TARGET=\"_blank\">Secure Cisco IOS BGP Template</A>\n<BR>\n<A HREF=\"http://www.cymru.com/gillsr/documents/junos-bgp-template.pdf\" TARGET=\"_blank\">JUNOS Secure BGP Template</A>",
+      "plugin_id": "82054",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2004-0230\">CVE-2004-0230</a></li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "TCP Sequence Number Approximation Based Denial of Service"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com:22",
+        "demo14.s02.sjc01.qualys.com:22",
+        "demo20.s02.sjc01.qualys.com:22"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The SSH protocol (Secure Shell) is a method for secure remote login from one computer to another.<P>\nThe SSH Server is using a small Public Key.<P>\nBest practices require that RSA digital signatures be 2048 or more bits long to provide adequate security. Key lengths of 1024 are acceptable through 2013, but since 2011 they are considered deprecated. \n<P>For more information, please refer to NIST Special Publication 800-131A (<A HREF=\"http://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-131Ar1.pdf\" TARGET=\"_blank\">http://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-131Ar1.pdf</A>).<P>\nOnly server keys that are not part of a certificate are reported in this QID. OpenSSH certificates using short keys are reported in QID 38733. X.509 certificates using short keys are reported in QID 38171.",
+      "finding_guidance": "",
+      "impact": "A man-in-the-middle attacker can exploit this vulnerability to record the communication to decrypt the session key and even the messages.<P>",
+      "mitigation": "DSA keys and RSA keys shorter than 2048 bits are considered vulnerable. It is recommended to install a RSA public key length of at least 2048 bits or greater, or to switch to ECDSA or EdDSA.<P>",
+      "plugin_id": "38738",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "SSH Server Public Key Too Small"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com:22",
+        "demo14.s02.sjc01.qualys.com:22",
+        "demo15.s02.sjc01.qualys.com:22",
+        "demo20.s02.sjc01.qualys.com:22"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The SSH protocol (Secure Shell) is a method for secure remote login from one computer to another. <P>\nThe target is using deprecated SSH cryptographic settings to communicate.",
+      "finding_guidance": "",
+      "impact": "A man-in-the-middle attacker may be able to exploit this vulnerability to record the communication to decrypt the session key and even the messages.<P>",
+      "mitigation": "Avoid using deprecated cryptographic settings. <P>\nUse best practices when configuring SSH.<P>\nRefer to <A HREF=\"https://csrc.nist.gov/publications/detail/nistir/7966/final\" TARGET=\"_blank\">Security of Interactive and Automated Access Management Using Secure Shell (SSH)</A> .<P>\nSettings currently considered deprecated:\n<DL>\n <DT>Ciphers using CFB of OFB</DT>\n <DD>Very uncommon, and deprecated because of weaknesses compared to newer cipher chaining modes such as CTR or GCM</DD>\n <DT>RC4 cipher (arcfour, arcfour128, arcfour256)</DT>\n <DD>The RC4 cipher has a cryptographic bias and is no longer considered secure</DD>\n <DT>Ciphers with a 64-bit block size (DES, 3DES, Blowfish, IDEA, CAST)</DT>\n <DD>Ciphers with a 64-bit block size may be vulnerable to birthday attacks (Sweet32)</DD>\n <DT>Key exchange algorithms using DH group 1 (diffie-hellman-group1-sha1, gss-group1-sha1-*)</DT>\n <DD>DH group 1 uses a 1024-bit key which is considered too short and vulnerable to Logjam-style attacks</DD>\n <DT>Key exchange algorithm &quot;rsa1024sha1&quot;</DT>\n <DD>Very uncommon, and deprecated because of the short RSA key size</DD>\n <DT>MAC algorithm &quot;umac-32&quot;</DT>\n <DD>Very uncommon, and deprecated because of the very short MAC length</DD>\n <DT>Cipher &quot;none&quot;</DT>\n <DD>This is available only in SSHv1</DD>\n</DL>",
+      "plugin_id": "38739",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Deprecated SSH Cryptographic Settings"
+    },
+    {
+      "affected_components": [
+        "demo14.s02.sjc01.qualys.com:123",
+        "demo15.s02.sjc01.qualys.com:123",
+        "demo20.s02.sjc01.qualys.com:123"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The NTP service running on the host allows queries of NTP variables.",
+      "finding_guidance": "",
+      "impact": "A remote user can obtain sensitive information about the host by querying various variables. The information obtained can aid in further attacks against the system.",
+      "mitigation": "Please reconfigure NTP to restrict remote access.\n<P>\nIf you require assistance in configuring NTP, please refer to your vendor. For an overview of NTP service access restrictions, please see this <A HREF=\"http://support.ntp.org/bin/view/Support/AccessRestrictions\" TARGET=\"_blank\">NTP access restrictions</A>.",
+      "plugin_id": "38293",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "NTP Information Disclosure Vulnerability"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Return code from remote access to the Windows registry pipe is displayed. The CIFS service accesses the Windows registry through a named pipe. Authentication to CIFS was successful, but it could not access the Registry named pipe if the error code is not 0.",
+      "finding_guidance": "",
+      "impact": "Vulnerabilities that require Windows registry access may not have been detected during the scan if the error code is not 0.",
+      "mitigation": "Error code 0x00 means the pipe access was successful. Other error codes (for eg: 0x0) denote unsuccessful access.",
+      "plugin_id": "90194",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Windows Registry Pipe Access Level"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The following DCE-RPC / MS-RPC services are active on the remote host.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "Shut down any unknown or unused service on the list. In Windows, this is done in the &quot;Services&quot; Control Panel. In other environments, this usually requires editing a configuration file or start-up script.\n\nIf you have provided Windows Authentication credentials, the Microsoft Registry service supporting the named pipe &quot;\\PIPE\\winreg&quot; must be present to allow CIFS to access the Registry.",
+      "plugin_id": "70022",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Open DCE-RPC / MS-RPC Services List"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Unauthorized users can obtain this host's NetBIOS server name from a remote system.",
+      "finding_guidance": "",
+      "impact": "Unauthorized users can obtain the list of NetBIOS servers on your network.  This list outlines trust relationships between server and client computers.  Unauthorized users can therefore use a vulnerable host to penetrate secure servers.",
+      "mitigation": "If the NetBIOS service is not required on this host, disable it. Otherwise, block any NetBIOS traffic at your network boundaries.",
+      "plugin_id": "70000",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "NetBIOS Name Accessible"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "An SSL Certificate associates an entity (person, organization, host, etc.) with a Public Key. In an SSL connection, the client authenticates the remote server using the server's Certificate and extracts the Public Key in the Certificate to establish the secure connection.\n<P>\nA certificate whose Subject commonName or subjectAltName does not match the server FQDN offers only encryption without authentication.\n<P>\nPlease note that a false positive reporting of this vulnerability is possible in the following case:\n<UL>If the common name of the certificate uses a wildcard such as *.somedomainname.com and the reverse DNS resolution of the target IP is not configured. In this case there is no way for Qualys to associate the wildcard common name to the IP. Adding a reverse DNS lookup entry to the target IP will solve this problem.\n</UL>",
+      "finding_guidance": "",
+      "impact": "A man-in-the-middle attacker can exploit this vulnerability in tandem with a DNS cache poisoning attack to lure the client to another server, and then steal all the encryption communication.",
+      "mitigation": "Please install a server certificate whose Subject commonName or subjectAltName matches the server FQDN.",
+      "plugin_id": "38170",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "SSL Certificate - Subject Common Name Does Not Match Server FQDN"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:8443",
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "An SSL Certificate associates an entity (person, organization, host, etc.) with a Public Key. In an SSL connection, the client authenticates the remote server using the server's Certificate and extracts the Public Key in the Certificate to establish the secure connection. The authentication is done by verifying that the public key in the certificate is signed by a trusted third-party Certificate Authority.\n<P>\nIf a client is unable to verify the certificate, it can abort communication or prompt the user to continue the communication without authentication.",
+      "finding_guidance": "",
+      "impact": "By exploiting this vulnerability, man-in-the-middle attacks in tandem with DNS cache poisoning can occur.\n<P>\nException:<BR>\nIf the server communicates only with a restricted set of clients who have the server certificate or the trusted CA certificate, then the server or CA certificate may not be available publicly, and the scan will be unable to verify the signature.",
+      "mitigation": "Please install a server certificate signed by a trusted third-party Certificate Authority.",
+      "plugin_id": "38173",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "SSL Certificate - Signature Verification Failed Vulnerability"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:8080",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "This QID lists supported HTTP protocol (HTTP 1.x or HTTP 2) from remote web server.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "45266",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Web Server HTTP Protocol Versions"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Portmapper/Rpcbind listens on port 111 and stores an updated list of registered RPC services running on the server (RPC name, version and port number). It acts as a \"gateway\" for clients wanting to connect to any RPC daemon. \n<P>\nWhen the portmapper/rpcbind is removed or firewalled, standard RPC client programs fail to obtain the portmapper list.  However, by sending carefully crafted packets, it's possible to determine which RPC programs are listening on which port. This technique is known as direct RPC scanning. It's used to bypass portmapper/rpcbind in order to find RPC programs running on a port (TCP or UDP ports). On Linux servers, RPC services are typically listening on privileged ports (below 1024), whereas on Solaris, RPC services are on temporary ports (starting with port 32700).",
+      "finding_guidance": "",
+      "impact": "Unauthorized users can build a list of RPC services running on the host. If they discover vulnerable RPC services on the host, they then can exploit them.",
+      "mitigation": "Firewalling the portmapper port or removing the portmapper service is not sufficient to prevent unauthorized users from accessing the RPC daemons. You should remove all RPC services that are not strictly required on this host.",
+      "plugin_id": "11",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Hidden RPC Services"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The host transmits UDP packets with a constant IP Identification field. This behavior may be exploited to discover the operating system and approximate kernel version of the vulnerable system.\n<P>\nNormally, the IP Identification field is intended to be a reasonably unique value, and is used to reconstruct fragmented packets. It has been reported that in some versions of the Linux kernel IP stack implementation as well as other operating systems, UDP packets are transmitted with a constant IP Identification field of 0.",
+      "finding_guidance": "",
+      "impact": "By exploiting this vulnerability, a malicious user can discover the operating system and approximate kernel version of the host. This information can then be used in further attacks against the host.",
+      "mitigation": "We are not currently aware of any fixes for this issue.",
+      "plugin_id": "82024",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2002-0510\">CVE-2002-0510</a></li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "UDP Constant IP Identification Field Fingerprinting Vulnerability"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:111"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "A port scanner was used to draw a map of all the RPC services that are accessible.<P>",
+      "finding_guidance": "",
+      "impact": "Unauthorized users can subsequently test vulnerabilities related to each of the services open.<P>",
+      "mitigation": "Shut down any unknown or unused service on the list. To remove all RPC services, you cannot simply filter port 111 at the firewall because port 111 (the &quot;portmap&quot; service) only shows which ports the RPC services are listening on. Therefore, it cannot block access to these services. Disable the RPC services at the server level because each listens on an ephemeral UDP or TCP port.<P>",
+      "plugin_id": "9",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Open RPC Services List"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "A Web server was detected that supports the HTTP TRACE method. This method allows debugging and connection trace analysis for connections from the client to the Web server. Per the HTTP specification, when this method is used, the Web server echoes back the information sent to it by the client unmodified and unfiltered. Microsoft IIS web server uses an alias TRACK for this method, and is functionally the same.\n<P>\nA vulnerability related to this method was discovered. A malicious, active component in a Web page can send Trace requests to a Web server that supports this Trace method. Usually, browser security disallows access to Web sites outside of the present site's domain. Although unlikely and difficult to achieve, it's possible, in the presence of other browser vulnerabilities, for the active HTML content to make external requests to arbitrary Web servers beyond the hosting Web server. Since the chosen Web server then echoes back the client request unfiltered, the response also includes cookie-based or Web-based (if logged on) authentication credentials that the browser automatically sent to the specified Web application on the specified Web server. \n<P>\nThe significance of the Trace capability in this vulnerability is that the active component in the page visited by the victim user has no direct access to this authentication information, but gets it after the target Web server echoes it back as its Trace response. \n<P>\nSince this vulnerability exists as a support for a method required by the HTTP protocol specification, most common Web servers are vulnerable.\n<P>\nThe exact method(s) supported, Trace and/or Track, and their responses are in the Results section below.\n<P>\nTrack / Trace are required to be disabled to be PCI compliance.",
+      "finding_guidance": "",
+      "impact": "If this vulnerability is successfully exploited, users of the Web server may lose their authentication credentials for the server and/or for the Web applications hosted by the server to an attacker. This may be the case even if the Web applications are not vulnerable to cross site scripting attacks due to input validation errors.",
+      "mitigation": "Solutions for some of the common Web servers are supplied below. For other Web servers, please check your vendor's documentation.\n<P>\n<B>Apache</B>: Recent Apache versions have a Rewrite module that allows HTTP requests to be rewritten or handled in a specific way. Compile the Apache server with the mod_rewrite module. You might need to uncomment the 'AddModule' and 'LoadModule' directives in the httpd.conf configuration file. Add the following lines for each virtualhost in your configuration file (Please note that, by default, Rewrite configurations are not inherited. This means that you need to have Rewrite directives for each virtual host in which you wish to use it):\n<PRE>\n&lt;IfModule mod_rewrite.c&gt;\nRewriteEngine on\nRewriteCond %{REQUEST_METHOD} ^TRACE\nRewriteRule .* - [F]\n&lt;/IfModule&gt;\n</PRE>\nWith this configuration, Apache catches all TRACE requests, and replies with a page reporting the request as forbidden. None of the original request's contents are echoed back.\n<P>\nA slightly tighter fix is to use:\n<PRE>\n&lt;IfModule mod_rewrite.c&gt;\nRewriteEngine on\nRewriteCond %{REQUEST_METHOD} !^(GET|POST|HEAD)$\nRewriteRule .* - [F]\n&lt;/IfModule&gt;\n</PRE>\n\n<P>Please note that RewriteEngine can be processor intensive and may impact the web server performance. The trace method can also be controlled by use of the TraceEnable directive.\n<BR>In the httpd.conf add or modify:\n<P>\nTraceEnable Off\n<P>\n\n<P>\n<B>Microsoft IIS</B>: Microsoft released <A HREF=\"http://support.microsoft.com/kb/307608\" TARGET=\"_blank\">URLScan</A>, which can be used to screen all incoming requests based on customized rulesets. URLScan can be used to sanitize or disable the TRACE requests from the clients. Note that IIS aliases 'TRACK' to 'TRACE'. Therefore, if URLScan is used to specfically block the TRACE method, the TRACK method should also be added to the filter.\n<P>\nURLScan uses the 'urlscan.ini' configuration file, usually in \\System32\\InetSrv\\URLScan directory. In that, we have two sections - AllowVerbs and DenyVerbs. The former is used if the UseAllowVerbs variable is set to 1, else (if its set to 0), the DenyVerbs are used. Clearly, either can be used, depending on whether we want a Default-Deny-Explicit-Allow or a Default-Allow-Explicit-Deny policy. To disallow TRACE and TRACK methods through URLScan, first remove 'TRACK', 'TRACE' methods from the 'AllowVerbs' section and add them to the 'DenyVerbs' section. With this, URLScan will disallow all 'TRACE' and 'TRACK' methods, and generate an error page for all requests using that method. To enable the changes, restart the 'World Wide Web Publishing Service' from the 'Services' Control Panel item.<P>\nFor more details about other web servers :<A HREF=\"http://www.kb.cert.org/vuls/id/867593\" TARGET=\"_blank\"> Cert Advisory</A>.",
+      "plugin_id": "86473",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2004-2320\">CVE-2004-2320</a></li><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2007-3008\">CVE-2007-3008</a></li></ul>",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Web Server HTTP Trace/Track Method Support Cross-Site Tracing Vulnerability"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "This QID reports the absence of the following <A HREF=\"https://www.owasp.org/index.php/OWASP_Secure_Headers_Project#tab=Headers\" TARGET=\"_blank\">HTTP headers</A> according to <A HREF=\"https://cwe.mitre.org/data/definitions/693.html\" TARGET=\"_blank\">CWE-693: Protection Mechanism Failure</A>:<BR>\nX-Frame-Options: This HTTP response header improves the protection of web applications against clickjacking attacks. Clickjacking, also known as a &quot;UI redress attack&quot;, allows an attacker to use multiple transparent or opaque layers to trick a targeted user into clicking on a button or link on another page when they were intending to click on the the top level page. <BR>\nX-XSS-Protection: This HTTP header enables the browser built-in Cross-Site Scripting (XSS) filter to prevent cross-site scripting attacks. X-XSS-Protection: 0; disables this functionality.<BR>\nX-Content-Type-Options: This HTTP header prevents attacks based on MIME-type mismatch. The only possible value is nosniff. If your server returns X-Content-Type-Options: nosniff in the response, the browser will refuse to load the styles and scripts in case they have an incorrect MIME-type. <BR>\nStrict-Transport-Security: The HTTP Strict-Transport-Security response header (HSTS) is a security feature that lets a web site tell browsers that it should only be communicated with using HTTPS, instead of using HTTP.<P>\nQID Detection Logic:<BR>\nThis unauthenticated QID looks for the presence of the following HTTP responses:<BR>\nValid directives for X-Frame-Options are:<BR>\nX-Frame-Options: DENY - The page cannot be displayed in a frame, regardless of the site attempting to do so.<BR>\nX-Frame-Options: SAMEORIGIN - The page can only be displayed in a frame on the same origin as the page itself.<BR>\nX-Frame-Options: ALLOW-FROM RESOURCE-URL - The page can only be displayed in a frame on the specified origin.<P>\nValid directives for X-XSS-Protections are:<BR>\nX-XSS-Protection: 1 - Enables XSS filtering (usually default in browsers). If a cross-site scripting attack is detected, the browser will sanitize the page (remove the unsafe parts).<BR>\nX-XSS-Protection: 1; mode=block - Enables XSS filtering. Rather than sanitizing the page, the browser will prevent rendering of the page if an attack is detected.<BR>\nX-XSS-Protection: 1; report=URI  - Enables XSS filtering. If a cross-site scripting attack is detected, the browser will sanitize the page and report the violation. This uses the functionality of the CSP report-uri directive to send a report.<BR>\nX-XSS-Protection: 0 disables this directive and hence is also treated as not detected.<P>\nA valid directive for X-Content-Type-Options: nosniff<P>\nA valid HSTS directive Strict-Transport-Security: max-age=&lt;expire-time&gt;; [; includeSubDomains][; preload]<P>\n<B>NOTE:</B> All report-only directives (where applicable) are considered invalid.",
+      "finding_guidance": "",
+      "impact": "Depending on the vulnerability being exploited, an unauthenticated remote attacker could conduct cross-site scripting, clickjacking or MIME-type sniffing attacks.",
+      "mitigation": "<B>Note:</B> To better debug the results of this QID, it is requested that customers execute commands to simulate the following functionality: curl -lkL --verbose.<P>\nCWE-693: Protection Mechanism Failure mentions the following - The product does not use or incorrectly uses a protection mechanism that provides sufficient defense against directed attacks against the product. A &quot;missing&quot; protection mechanism occurs when the application does not define any mechanism against a certain class of attack. An &quot;insufficient&quot; protection mechanism might provide some defenses - for example, against the most common attacks - but it does not protect against everything that is intended. Finally, an &quot;ignored&quot; mechanism occurs when a mechanism is available and in active use within the product, but the developer has not applied it in some code path.<P>\nCustomers are advised to set proper <A HREF=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options\" TARGET=\"_blank\">X-Frame-Options</A>, <A HREF=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-XSS-Protection\" TARGET=\"_blank\">X-XSS-Protection</A>, <A HREF=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options\" TARGET=\"_blank\">X-Content-Type-Options</A> and <A HREF=\"https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security\" TARGET=\"_blank\">Strict-Transport-Security</A> HTTP response headers.<P>\nDepending on their server software, customers can set directives in their site configuration or Web.config files. Few examples are:<P>\nX-Frame-Options:<BR>\nApache: Header always append X-Frame-Options SAMEORIGIN<BR>\nnginx: add_header X-Frame-Options SAMEORIGIN;<BR>\nHAProxy: rspadd X-Frame-Options:\\ SAMEORIGIN<BR>\nIIS: &lt;HTTPPROTOCOL&gt;&lt;CUSTOMHEADERS&gt;&lt;ADD NAME=&quot;X-Frame-Options&quot; VALUE=&quot;SAMEORIGIN&quot;&gt;&lt;/ADD&gt;&lt;/CUSTOMHEADERS&gt;&lt;/HTTPPROTOCOL&gt;<P>\nX-XSS-Protection:<BR>\nApache: Header always set X-XSS-Protection &quot;1; mode=block&quot; <BR>\nPHP: header(&quot;X-XSS-Protection: 1; mode=block&quot;);<P>\nX-Content-Type-Options:<BR>\nApache: Header always set X-Content-Type-Options: nosniff<P>\nHTTP Strict-Transport-Security:<BR>\nApache: Header always set Strict-Transport-Security &quot;max-age=31536000; includeSubDomains&quot;<BR>\nNginx: add_header Strict-Transport-Security max-age=31536000;<P>\n<B>Note: Network devices that include a HTTP/HTTPS console for administrative/management purposes often do not include all/some of the security headers. This is a known issue and it is recommend to contact the vendor for a solution. </B><P>",
+      "plugin_id": "11827",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "HTTP Security Header Not Detected"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Web server has some listable directories. Very sensitive information can be obtained from directory listings.",
+      "finding_guidance": "",
+      "impact": "A remote user may exploit this vulnerability to obtain very sensitive information on the host. The information obtained may assist in further attacks against the host.",
+      "mitigation": "Disable directory browsing or listing for all directories.",
+      "plugin_id": "86445",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "Web Directories Listable Vulnerability"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Web server allows form based authentication without disabling the AutoComplete feature for the password field.<P>\nAutocomplete should be turned off for any input that takes sensitive information such as credit card number, CVV2/CVC code, U.S. social security number, etc.",
+      "finding_guidance": "",
+      "impact": "If the browser is used in a shared computing environment where more than one person may use the browser, then &quot;autocomplete&quot; values may be retrieved or submitted by an unauthorized user. <P>",
+      "mitigation": "Contact the vendor to have the AutoComplete attribute disabled for the password field in all forms. The AutoComplete attribute should also be disabled for the user ID field. <P>\nDevelopers can add the following attribute to the form or input element: autocomplete=&quot;off&quot; <BR>\nThis attribute prevents the browser from prompting the user to save the populated form values for later reuse. <BR> \nMost browsers no longer honor autocomplete=&quot;off&quot; for password input fields. These browsers include  Chrome, Firefox, Microsoft Edge, IE, Opera<BR>\nHowever, there is still an ability to turn off autocomplete through the browser and that is recommended for a shared computing environment.<BR>\nSince the ability to turn autocomplete off for password inputs fields is controlled by the user it is highly recommended for application to enforce strong password rules.<P>",
+      "plugin_id": "86729",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "AutoComplete Attribute Not Disabled for Password in Form Based Authentication"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "An SSL Certificate associates an entity (person, organization, host, etc.) with a Public Key. In an SSL connection, the client authenticates the remote server using the server's Certificate and extracts the Public Key in the Certificate to establish the secure connection.\n<P>\nThe client can trust that the Server Certificate belongs the server only if it is signed by a mutually trusted third-party Certificate Authority (CA). Self-signed certificates are created generally for testing purposes or to avoid paying third-party CAs. These should not be used on any production or critical servers.\n<P>\nBy exploiting this vulnerability, an attacker can impersonate the server by presenting a fake self-signed certificate. If the client knows that the server does not have a trusted certificate, it will accept this spoofed certificate and communicate with the remote server.",
+      "finding_guidance": "",
+      "impact": "By exploiting this vulnerability, an attacker can launch a man-in-the-middle attack.",
+      "mitigation": "Please install a server certificate signed by a trusted third-party Certificate Authority.",
+      "plugin_id": "38169",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "SSL Certificate - Self-Signed Certificate"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "An SSL Certificate associates an entity (person, organization, host, etc.) with a Public Key. In an SSL connection, client authenticates the remote server using the server's Certificate and extracts the Public Key in the Certificate to establish the secure connection.\n<P>\nA certificate with a past end date cannot be trusted.",
+      "finding_guidance": "",
+      "impact": "By exploiting this vulnerability, an attacker can launch a man-in-the-middle attack.",
+      "mitigation": "Please install a server certificate with valid start and end dates.",
+      "plugin_id": "38167",
+      "references": "",
+      "replication_steps": "",
+      "severity": "low",
+      "tags": [],
+      "title": "SSL Certificate - Expired"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The fully qualified domain name of this host, if it was obtained from a DNS server, is displayed in the RESULT section.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "6",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "DNS Host Name"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "ICMP (Internet Control and Error Message Protocol) is a protocol encapsulated in IP packets. ICMP's principal purpose is to provide a protocol layer that informs gateways of the inter-connectivity and accessibility of other gateways or hosts. \n<P>\nWe have sent the following types of packets to trigger the host to send us ICMP replies: \n<P>\nEcho Request (to trigger Echo Reply)<br>\nTimestamp Request (to trigger Timestamp Reply)<br>\nAddress Mask Request (to trigger Address Mask Reply)<br>\nUDP Packet (to trigger Port Unreachable Reply)<br>\nIP Packet with Protocol >= 250 (to trigger Protocol Unreachable Reply)\n<P>\nListed in the \"Result\" section are the ICMP replies that we have received.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "82040",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "ICMP Replies Received"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Traceroute describes the path in realtime from the scanner to the remote host being contacted. It reports the IP addresses of all the routers in between.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "45006",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Traceroute"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The information shown in the Result section was returned by the network infrastructure responsible for routing traffic from our cloud platform to the target network (where the scanner appliance is located).<P>\nThis information was returned from: 1) the WHOIS service, or 2) the infrastructure provided by the closest gateway server to our cloud platform. If your ISP is routing traffic, your ISP's gateway server returned this information.",
+      "finding_guidance": "",
+      "impact": "This information can be used by malicious users to gather more information about the network infrastructure that may help in launching attacks against it.",
+      "mitigation": "N/A",
+      "plugin_id": "45004",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Target Network Information"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The information shown in the Result section was returned by the network infrastructure responsible for routing traffic from our cloud platform to the target network (where the scanner appliance is located). \n\n<P>This information was returned from: 1) the WHOIS service, or 2) the infrastructure provided by the closest gateway server to our cloud platform. If your ISP is routing traffic, your ISP's gateway server returned this information.",
+      "finding_guidance": "",
+      "impact": "This information can be used by malicious users to gather more information about the network infrastructure that may aid in launching further attacks against it.",
+      "mitigation": "N/A",
+      "plugin_id": "45005",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Internet Service Provider"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The values for the identification (ID) field in IP headers in IP packets from the host are analyzed to determine how random they are. The changes between subsequent ID values for either the network byte ordering or the host byte ordering, whichever is smaller, are displayed in the RESULT section along with the duration taken to send the probes. When incremental values are used, as is the case for TCP/IP implementation in many operating systems, these changes reflect the network load of the host at the time this test was conducted.\n<P>\nPlease note that for reliability reasons only the network traffic from open TCP ports is analyzed.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "82046",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "IP ID Values Randomness"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "TCP Initial Sequence Numbers (ISNs) obtained in the SYNACK replies from the host are analyzed to determine how random they are. The average change between subsequent ISNs and the standard deviation from the average are displayed in the RESULT section. Also included is the degree of difficulty for exploitation of the TCP ISN generation scheme used by the host.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "82045",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Degree of Randomness of TCP Initial Sequence Numbers"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The following host names were discovered for this computer using various methods such as DNS look up, NetBIOS query, and SQL server name query.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "45039",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Host Names Found"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The port scanner enables unauthorized users with the appropriate tools to draw a map of all services on this host that can be accessed from the Internet.  The test was carried out with a &quot;stealth&quot; port scanner so that the server does not log real connections.\n<P>\nThe Results section displays the port number (Port), the default service listening on the port (IANA Assigned Ports/Services), the description of the service (Description) and the service that the scanner detected using service discovery (Service Detected).",
+      "finding_guidance": "",
+      "impact": "Unauthorized users can exploit this information to test vulnerabilities in each of the open services.",
+      "mitigation": "Shut down any unknown or unused service on the list.  If you have difficulty figuring out which service is provided by which process or program, contact your provider's support team.  For more information about commercial and open-source Intrusion Detection Systems available for detecting port scanners of this kind, visit the <A HREF=\"http://www.cert.org\" TARGET=\"_blank\">CERT Web site</A>.",
+      "plugin_id": "82023",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Open TCP Services List"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "A port scanner was used to draw a map of all the UDP services on this host that can be accessed from the Internet.\n<P>\nNote that if the host is behind a firewall, there is a small chance that the list includes a few ports that are filtered or blocked by the firewall but are not actually open on the target host. This (false positive on UDP open ports) may happen when the firewall is configured to reject UDP packets for most (but not all) ports with an ICMP Port Unreachable packet. This may also happen when the firewall is configured to allow UDP packets for most (but not all) ports through and filter/block/drop UDP packets for only a few ports. Both cases are uncommon.",
+      "finding_guidance": "",
+      "impact": "Unauthorized users can exploit this information to test vulnerabilities in each of the open services.",
+      "mitigation": "Shut down any unknown or unused service on the list.  If you have difficulty working out which service is provided by which process or program, contact your provider's support team.  For more information about commercial and open-source Intrusion Detection Systems available for detecting port scanners of this kind, visit the <A HREF=\"http://www.cert.org\" TARGET=\"_blank\">CERT Web site</A>.",
+      "plugin_id": "82004",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Open UDP Services List"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Host Scan Time is the period of time it takes the scanning engine to perform the vulnerability assessment of a single target host. The Host Scan Time for this host is reported in the Result section below. \n<P>\nThe Host Scan Time does not have a direct correlation to the Duration time as displayed in the Report Summary section of a scan results report. The Duration is the period of time it takes the service to perform a scan task. The Duration includes the time it takes the service to scan all hosts, which may involve parallel scanning. It also includes the time it takes for a scanner appliance to pick up the scan task and transfer the results back to the service's Secure Operating Center. Further, when a scan task is distributed across multiple scanners, the Duration includes the time it takes to perform parallel host scanning on all scanners.\n<P>\nFor host running the Qualys Windows agent this QID reports the time taken by the agent to collect the host metadata used for the most recent assessment scan.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "45038",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Host Scan Time"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com",
+        "demo14.s02.sjc01.qualys.com",
+        "demo15.s02.sjc01.qualys.com",
+        "trn-win7.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com",
+        "demo20.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "ICMP (Internet Control and Error Message Protocol) is a protocol encapsulated in IP packets. It's principal purpose is to provide a protocol layer able to inform gateways of the inter-connectivity and accessibility of other gateways or hosts. &quot;ping&quot; is a well-known program for determining if a host is up or down. It uses ICMP echo packets. ICMP timestamp packets are used to synchronize clocks between hosts.",
+      "finding_guidance": "",
+      "impact": "Unauthorized users can obtain information about your network by sending ICMP timestamp packets. For example, the internal systems clock should not be disclosed since some internal daemons use this value to calculate ID or sequence numbers (i.e., on SunOS servers).",
+      "mitigation": "You can filter ICMP messages of type &quot;Timestamp&quot; and &quot;Timestamp Reply&quot; at the firewall level. Some system administrators choose to filter most types of ICMP messages for various reasons. For example, they may want to protect their internal hosts from ICMP-based Denial Of Service attacks, such as the <I>Ping of Death</I> or <I>Smurf</I> attacks. \n<P>\nHowever, you should never filter <B>ALL</B> ICMP messages, as some of them (&quot;Don't Fragment&quot;, &quot;Destination Unreachable&quot;, &quot;Source Quench&quot;, etc) are necessary for proper behavior of Operating System TCP/IP stacks.\n<P>\nIt may be wiser to contact your network consultants for advice, since this issue impacts your overall network reliability and security.",
+      "plugin_id": "82003",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-1999-0524\">CVE-1999-0524</a></li></ul>",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "ICMP Timestamp Request"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com:22",
+        "demo14.s02.sjc01.qualys.com:22",
+        "demo15.s02.sjc01.qualys.com:22",
+        "demo20.s02.sjc01.qualys.com:22"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "SSH is a secure protocol, provided it is fully patched, properly configured, and uses FIPS approved algorithms. \n<P>\n<PRE>\nFor Red Hat ES 4:-\nSSH1 supported\t\t\t\t\tyes\nSupported authentification methods for SSH1\tRSA,password\nSupported ciphers for SSH1\t\t\t3des,blowfish\nSSH2 supported\t\t\t\t\tyes\nSupported keys exchange algorithm for SSH2\tdiffie-hellman-group-exchange-sha1,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1\nSupported decryption ciphers for SSH2\t\taes128-cbc,3des-cbc,blowfish-cbc,cast128-cbc,arcfour,aes192-cbc,aes256-cbc,rijndael-cbc@lysator.liu.se,aes128-ctr,aes192-ctr,aes256-ctr\nSupported encryption ciphers for SSH2\t\taes128-cbc,3des-cbc,blowfish-cbc,cast128-cbc,arcfour,aes192-cbc,aes256-cbc,rijndael-cbc@lysator.liu.se,aes128-ctr,aes192-ctr,aes256-ctr\nSupported decryption mac for SSH2\t\thmac-md5,hmac-sha1,hmac-ripemd160,hmac-ripemd160@openssh.com,hmac-sha1-96,hmac-md5-96\nSupported encryption mac for SSH2\t\thmac-md5,hmac-sha1,hmac-ripemd160,hmac-ripemd160@openssh.com,hmac-sha1-96,hmac-md5-96\nSupported authentification methods for SSH2\tpublickey,gssapi-with-mic,password\n</PRE>",
+      "finding_guidance": "",
+      "impact": "Successful exploitation allows an attacker to execute arbitrary commands on the SSH server or otherwise subvert an encrypted SSH channel with arbitrary data.",
+      "mitigation": "SSH version 2 is preferred over SSH version 1.",
+      "plugin_id": "38047",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSH daemon information retrieving"
+    },
+    {
+      "affected_components": [
+        "demo13.s02.sjc01.qualys.com:22",
+        "demo14.s02.sjc01.qualys.com:22",
+        "demo15.s02.sjc01.qualys.com:22",
+        "demo20.s02.sjc01.qualys.com:22"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "38050",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSH Banner"
+    },
+    {
+      "affected_components": [
+        "demo14.s02.sjc01.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The host responds to a TCP SYN packet with at least one of the following flags set with a SYN ACK packet: RST, FIN, ACK, FIN|PSH.",
+      "finding_guidance": "",
+      "impact": "This behavior in the TCP/IP implementation may allow a remote user to potentially bypass a firewall protecting the host, as some (especially stateless) firewalls may be configured to allow all TCP packets with one of these flags set (RST, FIN, ACK, FIN|PSH) to go through without examining the packets' SYN flag.",
+      "mitigation": "Many operating systems are known to have this behavior.",
+      "plugin_id": "82053",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Host Responds to TCP SYN Packet with Other Flags On with SYN ACK"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The NetBIOS workgroup or domain name for this system has been detected.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "82062",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "NetBIOS Workgroup Name Detected"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The NetBIOS host name of this computer has been detected.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "82044",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "NetBIOS Host Name"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "It is possible to obtain the MAC address information of the network adapters on the target system. Various sources such as SNMP and NetBIOS provide such information. This vulnerability test attempts to gather and report on this information in a table format.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "43007",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Network Adapter MAC Address"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Windows authentication was performed. The Results section in your detailed results includes a list of authentication credentials used.\n<P>\nThe service also attempts to authenticate using common credentials. You should verify that the credentials used for successful authentication were those that were provided in the Windows authentication record. User-provided credentials failed if the discovery method shows &quot;Unable to log in using credentials provided by user, fallback to NULL session&quot;. If this is the case, verify that the credentials specified in the Windows authentication record are valid for this host.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "70028",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Windows Authentication Method"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Server Message Block (SMB) Protocol is a network file sharing protocol, and as implemented in Microsoft Windows is known as Microsoft SMB Protocol. \n<P>\nThe Windows host has SMBv1 protocol enabled for either : <BR>\nClient or <BR>\nServer \n<P>",
+      "finding_guidance": "",
+      "impact": "SMB protocols could allow a remote attacker to obtain sensitive information from affected systems.",
+      "mitigation": "Microsoft recommends users to update to latest SMB versions and stop using SMBv1.\nRefer to Microsoft KB article <A HREF=\"https://support.microsoft.com/en-us/help/2696547/how-to-enable-and-disable-smbv1,-smbv2,-and-smbv3-in-windows-vista,-windows-server-2008,-windows-7,-windows-server-2008-r2,-windows-8,-and-windows-server-2012\" TARGET=\"_blank\">KB2696547</A> for more details.\n\n\n\n\n\n\n\n\n\nWorkaround:<BR>\nCustomer may consider blocking all versions of SMB at the network boundary by blocking TCP port 445 with related protocols on UDP ports 137-138 and TCP port 139, for all boundary devices.",
+      "plugin_id": "45261",
+      "references": "<ul><li><a href=\"https://blogs.technet.microsoft.com/filecab/2016/09/16/stop-using-smb1/\">SMB v1</a></li></ul>",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SMB Version 1 Enabled"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com",
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Windows host has SMBv2 or SMBv3 protocol enabled.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "For more information on how to enable/disable SMB, refer to Microsoft KB article <A HREF=\"https://support.microsoft.com/en-us/help/2696547/how-to-enable-and-disable-smbv1-smbv2-and-smbv3-in-windows-and-windows\" TARGET=\"_blank\">KB2696547</A>.",
+      "plugin_id": "45262",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SMB Version 2 or 3 Enabled"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com",
+        "win2008r2.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Microsoft Windows Network Level Authentication (NLA) is an authentication method that enhances the security of a Remote Desktop Session Host server by requiring the user to be authenticated before a session is created.\n<P>\nThe registry key for the Network Level Authentication (NLA) is disabled.<P>\n\nNetwork Level Authentication is supported on Windows Vista, Windows 7, Windows Server 2008, and Windows Server 2008 R2",
+      "finding_guidance": "",
+      "impact": "Enabling NLA can help protect the remote computer from malicious users and malicious software attacks.",
+      "mitigation": "See Microsoft Knowledge Base Article <A HREF=\"http://support.microsoft.com/kb/2671387\" TARGET=\"_blank\">2671387</A> to use the automated Microsoft Fix it solution to enable this feature.\n<P>\nAs a precaution, always test in a QA or rehearsal environment before rolling out to production.<P>\n<B>Note: Client computers that do not support Credential Security Support Provider (CredSSP) protocol will not be able to access servers protected with Network Level Authentication. Windows XP does not support the CredSSP protocol by default.</B>",
+      "plugin_id": "90788",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Microsoft Windows Network Level Authentication Disabled"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "86002",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL Certificate - Information"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Certificates are used for authentication purposes in different protocols such as SSL/TLS. Each certificate has a validity period outside of which it is supposed to be considered invalid. This QID is reported to inform that a certificate will expire within next six months. The advance notice can be helpful since obtaining a certificate can take some time.",
+      "finding_guidance": "",
+      "impact": "Expired certificates can cause connection disruptions or compromise the integrity and privacy of the connections being protected by the certificates.",
+      "mitigation": "Contact the certificate authority that signed your certificate to arrange for a renewal.",
+      "plugin_id": "38600",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL Certificate will expire within next six months"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "SSL session is a collection of security parameters that are negotiated by the SSL client and server for each SSL connection. SSL session caching is targeted to reduce the overhead of negotiations in recurring SSL connections. SSL sessions can be reused to resume an earlier connection or to establish multiple simultaneous connections. The client suggests an SSL session to be reused by identifying the session with a Session-ID during SSL handshake. If the server finds it appropriate to reuse the session,  then they both proceed to secure communication with already known security parameters.\n<P>\nThis test determines if SSL session caching is enabled on the host.",
+      "finding_guidance": "",
+      "impact": "SSL session caching is part of the SSL and TLS protocols and is not a security threat. The result of this test is for informational purposes only.",
+      "mitigation": "",
+      "plugin_id": "38291",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL Session Caching Information"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Secure Socket Layer (SSL) and Transport Layer Security (TLS) renegotiation are vulnerable to an attack in which the attacker forms a TLS connection with the target server, injects content of his choice, and then splices in a new TLS connection from a client. The server treats the client's initial TLS handshake as a renegotiation and thus believes that the initial data transmitted by the attacker is from the same entity as the subsequent client data. TLS protocol was extended to cryptographically tierenegotiations to the TLS connections they are being performed over. This is referred to as TLS secure renegotiation extension. This detection determines whether the TLS secure renegotiation extension is supported by the server or not.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "42350",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "TLS Secure Renegotiation Extension Support Information"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "SSL/TLS protocols have different version that can be supported by both the client and the server. This test attempts to send invalid protocol versions to the target in order to find out what is the target's behavior. The results section contains a table that indicates what was the target's response to each of our tests.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "38597",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL/TLS invalid protocol version tolerance"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "<P>The following is a list of supported SSL ciphers.<P>\nNote: If a cipher is included in this list it means that it was possible to establish a SSL connection using that cipher. There are some web servers setups that allow connections to be established using a LOW grade cipher, only to provide a web page stating that the URL is accessible only through a non-LOW grade cipher. In this case even though LOW grade cipher will be listed here QID 38140 will not be reported.\n<P>",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "38116",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL Server Information Retrieval"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The following is a list of SSL/TLS key exchange methods supported by the server, along with their respective key sizes and strengths.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "38704",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL/TLS Key Exchange Methods"
+    },
+    {
+      "affected_components": [
+        "trn-win7.trn.qualys.com:3389",
+        "win2008r2.trn.qualys.com:3389",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The following is a list of detected SSL/TLS protocol properties.",
+      "finding_guidance": "",
+      "impact": "Items include:<P><UL>\n<LI>Extended Master Secret: indicates whether the extended_master_secret extension is supported or required by the server. This extension enhances security and is recommended. Applicable to TLSv1, TLSv1.1, TLSv1.2, DTLSv1, DTLSv1.2</LI>\n<LI>Encrypt Then MAC: indicates whether the encrypt_then_mac extension is supported or required by the server. This extension enhances the security of non-AEAD ciphers and is recommended. Applicable to TLSv1, TLSv1.1, TLSv1.2, DTLSv1, DTLSv1.2</LI>\n<LI>Heartbeat: indicates whether the heartbeat extension is supported. It is not recommended to enable this, except for DTLS. Applicable to TLSv1, TLSv1.1, TLSv1.2, TLSv1.3, DTLSv1, DTLSv1.2</LI>\n<LI>Truncated HMAC: indicates whether the truncated_hmac extension is supported. This can degrade security and is not recommended. Applicable to TLSv1, TLSv1.1, TLSv1.2, DTLSv1, DTLSv1.2</LI>\n<LI>Cipher priority: indicates whether client, server or both determine the priority of ciphers. Having the server determine the priority is recommended. Applicable to SSLv3, TLSv1, TLSv1.1, TLSv1.2, TLSv1.3, DTLSv1, DTLSv1.2</LI>\n</UL>",
+      "mitigation": "N/A",
+      "plugin_id": "38706",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL/TLS Protocol Properties"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "A packet filtering device protecting this IP was detected. This is likely to be a firewall or a router using access control lists (ACLs).",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "34011",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Firewall Detected"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com:80"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Microsoft Internet Information Services (IIS) Web Server was detected on the target host.<P>\n\nQID Detection Logic (authenticated):<BR>\nOperating System: Windows<BR>\nThe QID checks for key &quot;HKLM\\SOFTWARE\\Microsoft\\InetStp SetupString&quot; value &quot;SetupString&quot; to verify if IIS is present on the Host or not.<P>",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "45104",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Microsoft IIS Server Detected"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The HTTP methods returned in response to an OPTIONS request to the Web server detected on the target host are listed.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "45056",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "HTTP Methods Returned by OPTIONS Request"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:8080"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "N/A",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "86000",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Web Server Version"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:8080",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Result section displays the default Web page for the Web server.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "12230",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Default Web Page"
+    },
+    {
+      "affected_components": [
+        "win2008r2.trn.qualys.com:80"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Version 1.1 of the HTTP protocol supports URL-Request Pipelining. This means that instead of using the &quot;Keep-Alive&quot; method to keep the TCP connection alive over multiple requests, the protocol allows multiple HTTP URL requests to be made in the same TCP packet. Any Web server which is HTTP 1.1 compliant should then process all the URLs requested in the single TCP packet and respond as usual.\n<P>\nThe target Web server was found to support this functionality of the HTTP 1.1 protocol.",
+      "finding_guidance": "",
+      "impact": "Support for URL-Request Pipelining has interesting consequences. For example, as explained in <A HREF=\"http://www.defcon.org/images/defcon-11/dc-11-presentations/dc-11-Roelker/dc-11-roelker-paper.pdf\" TARGET=\"_blank\">this paper by Daniel Roelker</A>, it can be used for evading detection by Intrusion Detection Systems. Also, it can be used in HTTP Response-Spliting style attacks.",
+      "mitigation": "N/A",
+      "plugin_id": "86565",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Web Server Supports HTTP Request Pipelining"
+    },
+    {
+      "affected_components": [
+        "trn-win2012-dc.trn.qualys.com"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "RootDSE is a standard attribute defined in the LDAP Version 3.0 specification. RootDSE contains information about the directory server, including its capabilities and configuration. The search response will contain a standard set of information, which is defined in the following RFC:\n<P>\n<a href=\"http://www.cis.ohio-state.edu/htbin/rfc/rfc2251.html\" target=\"_blank\">RFC 2251-Lightweight Directory Access Protocol(v3)</a>\n<P>\nThe root DSE (DSA-Specific Entry) data can be retrieved from an LDAPv3 server by performing a base-level search with a null BaseDN and filter ObjectClass=*. The root DSE publishes information about the LDAP server, including which LDAP versions it supports, any supported SASL mechanisms, supported controls, and the DN for its subschemaSubentry. In addition to server information, operational attributes may be exposed that allow for extended administration functionality.",
+      "finding_guidance": "",
+      "impact": "The information gathered can be used to launch further attacks against the system or network hosting the LDAP service.",
+      "mitigation": "",
+      "plugin_id": "45016",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-1999-0646\">CVE-1999-0646</a></li></ul>",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "LDAP Information Gathering"
+    },
+    {
+      "affected_components": [
+        "trn-win2012-dc.trn.qualys.com:389"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Active Directory is present on the remote system. The system is running as a Domain Controller.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "45022",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Microsoft Windows Active Directory / Domain Controller Present"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Based largely on the HTTP reply code, the following directories are most likely present on the host.",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "86672",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "List of Web Directories"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The target Web server supports the TRACE and/or TRACK HTTP methods. These methods allow debugging and connection trace analysis for connections from the client to the Web server. Per the HTTP specification, when this method is used, the Web server echoes back the information sent to it by the client unmodified and unfiltered. Microsoft IIS Web server uses an alias TRACK for the TRACE method, and is functionally the same.\n<P>\nThe exact method(s) used are shown in the Results section.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "45033",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "HTTP method TRACE and/or TRACK Enabled"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:80",
+        "demo20.s02.sjc01.qualys.com:8080",
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Apache, the open source web server software that is developed and maintained by Apache Software Foundation is detected on the host.<P>",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "86496",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Apache Web Server Detected"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:8080"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Apache Tomcat is an open-source Java Servlet Container developed by the Apache Software Foundation (ASF).<P>\n\nThe QID returns the HTTP Status Code for the Apache Tomcat Server Management page.<P>\n\nQID Detection Logic:<BR>\nThe QID sends a GET request to the paths /host-manager/html, /manager/html and /manager/status to check the HTTP Status Code in the response.<P>",
+      "finding_guidance": "",
+      "impact": "NA",
+      "mitigation": "NA",
+      "plugin_id": "45320",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Apache Tomcat Server Management page HTTP Status Code"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "libxml2 is a software library for parsing XML documents.<BR>\n\nThe remote host is running libxml2.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "45264",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "libxml2 Version Detected"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "",
+      "finding_guidance": "",
+      "impact": "",
+      "mitigation": "",
+      "plugin_id": "86001",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL Web Server Version"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "Diffie-Hellman is a popular cryptographic algorithm used by SSL/TLS. \n- For fixed primes: 1024 and below are considered unsafe.\n\n- For variable primes: 512 is unsafe. 768 is probably mostly safe, but might not be for long. 1024 and above are considered safe.",
+      "finding_guidance": "",
+      "impact": "N/A",
+      "mitigation": "N/A",
+      "plugin_id": "38609",
+      "references": "",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "SSL Server default Diffie-Hellman prime information"
+    },
+    {
+      "affected_components": [
+        "demo20.s02.sjc01.qualys.com:443",
+        "demo20.s02.sjc01.qualys.com:8443"
+      ],
+      "cvss_vector": "",
+      "cwe": "",
+      "description": "The Apache HTTP Server is a popular, open-source HTTP server for multiple platforms, including Windows, Unix, and Linux.\n<P>\nA cache management feature for Apache makes use of an entity tag (ETag) header. When this option is enabled and a request is made for a document relating to a file, an ETag response header is returned containing various file attributes for caching purposes. ETag information allows subsequent file requests to contain specific information, such as the file's inode number.\n<P>\nA weakness has been found in the generation of ETag headers under certain configurations implementing the FileETag directive. Among the file attributes included in the header is the file inode number that is returned to a client. \n<P>\n<B>Affected Versions:</B><BR>\nBy default, all Versions of Apache are vulnerable. \n<P>\nIn Apache Versions 1.3.22 and earlier, it's not possible to disable inodes in in ETag headers to mitigate this vulnerability, so Apache Version 1.3.22 and earlier are vulnerable at all times.\n<P>\nApache Version 1.3.23 and later have a setting that can be modified to remove the inode info from the ETag Headers to mitigate this vulnerability. Apache Versions &gt;= 1.3.23 allow the user to configure what goes into ETag. However, if the user does not configure Apache to not include inode in ETag, the Web server can still be vulnerable even if Apache &gt;= 1.3.23 is being used.",
+      "finding_guidance": "",
+      "impact": "This vulnerability poses a security risk, as the disclosure of inode information may aid in launching attacks against other network-based services. For instance, NFS uses inode numbers to generate file handles.",
+      "mitigation": "Workaround:<BR>\n<B>For Apache 1.3.22 and earlier:</B>\n<P>\nThere is no patch or remediation available for Apache Versions 1.3.22 and earlier since it's not possible to disable inodes in in ETag headers. Customers running versions of Apache &lt;= 1.3.22 will need to upgrade to a later version and then apply the settings listed below (see Apache Version 1.3.23 and later), as versions of Apache 1.3.22 and earlier do not have the ability to configure these setting.\n<P>\n<B>For Apache 1.3.23 and later:</B>\nIn Apache Version <A HREF=\"http://httpd.apache.org/docs/1.3/mod/core.html#fileetag\" TARGET=\"_blank\">1.3.23</A> and later, it's possible to configure the FileETag directive to generate ETag headers without inode information, which mitigates this vulnerability.<P>\nTo do so, include &quot;FileETag -INode&quot; in the Apache server configuration file for a specific subdirectory.<P>\nIn order to fix this vulnerability globally, for the Web server, use the option &quot;FileETag None&quot;. Use the option &quot;FileETag\nMTime Size&quot; if you just want to remove the Inode information.\n<P>\n<B>OpenBSD:</B><BR>\nOpenBSD has released a <A HREF=\"ftp://ftp.openbsd.org/pub/OpenBSD/patches/3.2/common/008_httpd.patch\" TARGET=\"_blank\">patch</A> that fixes this vulnerability. After installing the patch, inode numbers returned from the server are encoded using a private hash to avoid the release of sensitive information.\n<P>",
+      "plugin_id": "86477",
+      "references": "<ul><li><a href=\"http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2003-1418\">CVE-2003-1418</a></li></ul>",
+      "replication_steps": "",
+      "severity": "informational",
+      "tags": [],
+      "title": "Apache Web Server ETag Header Information Disclosure Weakness"
+    }
+  ],
   "outcome": "ok"
 }

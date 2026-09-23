@@ -180,6 +180,29 @@ def test_parse_unrecognized_file_exits_1_naming_the_file(
     assert r.output.count("notes.txt") == 1  # named once, not once per header
 
 
+def test_parse_refused_file_exits_1_under_its_own_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Nmap is recon output, not findings (grison.scanners.nmap.NmapScanner):
+    # detection still recognizes the file, but its parser deliberately refuses
+    # to process it (RefusedInput). That must be loud (exit 1) but under its
+    # own "file(s) refused" header, not folded into "could not be parsed" —
+    # the file parsed as expected, grison just declined to use it.
+    scans = tmp_path / "scans"
+    scans.mkdir()
+    shutil.copy(_FIX / "nmap/nmap_sample.xml", scans / "nmap_sample.xml")
+    monkeypatch.chdir(tmp_path)
+
+    r = _runner.invoke(app, ["parse", str(scans)])
+
+    assert r.exit_code == 1
+    assert "file(s) refused" in r.output
+    assert "nmap is recon output, not findings; inventory support is pending" in r.output
+    assert "nmap_sample.xml" in r.output
+    assert "file(s) could not be parsed" not in r.output
+    assert r.output.count("nmap_sample.xml") == 1  # named once, not once per header
+
+
 def test_parse_detected_file_that_fails_to_parse_exits_1_naming_the_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

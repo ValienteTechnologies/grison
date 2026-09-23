@@ -29,6 +29,7 @@ _XML_ROOT_TO_SCANNER: dict[str, str] = {
     "Scan": "acunetix",
     "WAS_SCAN_REPORT": "qualys",
     "SCAN": "qualys",
+    "ASSET_DATA_REPORT": "qualys",
     "report": "openvas",
     "get_reports_response": "openvas",
     "results": "openvas",

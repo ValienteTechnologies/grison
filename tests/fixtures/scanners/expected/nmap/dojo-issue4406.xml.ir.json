@@ -1,48 +1,6 @@
 {
   "detected": "nmap",
-  "error": null,
-  "findings": [
-    {
-      "affected_components": [
-        "22/tcp (ssh)",
-        "111/tcp (rpcbind)",
-        "179/tcp (tcpwrapped)",
-        "2379/tcp (etcd-client)",
-        "2380/tcp (etcd-server)",
-        "6443/tcp (sun-sr-https)",
-        "9100/tcp (jetdirect)",
-        "9253/tcp (http)",
-        "9353/tcp (http)",
-        "10250/tcp (http)",
-        "10256/tcp (http)",
-        "10257/tcp (unknown)",
-        "10259/tcp (unknown)",
-        "30150/tcp (unknown)",
-        "30151/tcp (unknown)",
-        "30367/tcp (mysql)",
-        "30368/tcp (mysql)",
-        "30369/tcp (mysql)",
-        "30370/tcp (mysql)",
-        "30371/tcp (mysql)",
-        "30372/tcp (mysql)",
-        "30373/tcp (mysql)",
-        "30475/tcp ()",
-        "31007/tcp (http)",
-        "31641/tcp ()"
-      ],
-      "cvss_vector": "",
-      "cwe": "",
-      "description": "<p>Open ports discovered on <strong>ip-10-250-195-71.eu-west-1.compute.internal</strong> (10.250.195.71):</p><table><thead><tr><th>Port</th><th>Service</th><th>Product/Version</th></tr></thead><tbody><tr><td>22/tcp</td><td>ssh</td><td>OpenSSH 7.4</td></tr><tr><td>111/tcp</td><td>rpcbind</td><td>2-4</td></tr><tr><td>179/tcp</td><td>tcpwrapped</td><td></td></tr><tr><td>2379/tcp</td><td>etcd-client</td><td></td></tr><tr><td>2380/tcp</td><td>etcd-server</td><td></td></tr><tr><td>6443/tcp</td><td>sun-sr-https</td><td></td></tr><tr><td>9100/tcp</td><td>jetdirect</td><td></td></tr><tr><td>9253/tcp</td><td>http</td><td>Golang net/http server</td></tr><tr><td>9353/tcp</td><td>http</td><td>Golang net/http server</td></tr><tr><td>10250/tcp</td><td>http</td><td>Golang net/http server</td></tr><tr><td>10256/tcp</td><td>http</td><td>Golang net/http server</td></tr><tr><td>10257/tcp</td><td>unknown</td><td></td></tr><tr><td>10259/tcp</td><td>unknown</td><td></td></tr><tr><td>30150/tcp</td><td>unknown</td><td></td></tr><tr><td>30151/tcp</td><td>unknown</td><td></td></tr><tr><td>30367/tcp</td><td>mysql</td><td>MySQL 5.7.32</td></tr><tr><td>30368/tcp</td><td>mysql</td><td>MySQL 5.7.32</td></tr><tr><td>30369/tcp</td><td>mysql</td><td>MySQL 5.7.32</td></tr><tr><td>30370/tcp</td><td>mysql</td><td>MySQL 5.7.32</td></tr><tr><td>30371/tcp</td><td>mysql</td><td>MySQL 5.7.32</td></tr><tr><td>30372/tcp</td><td>mysql</td><td>MySQL 5.7.32</td></tr><tr><td>30373/tcp</td><td>mysql</td><td>MySQL 5.7.32</td></tr><tr><td>30475/tcp</td><td></td><td></td></tr><tr><td>31007/tcp</td><td>http</td><td>Golang net/http server</td></tr><tr><td>31641/tcp</td><td></td><td></td></tr></tbody></table>",
-      "finding_guidance": "",
-      "impact": "",
-      "mitigation": "",
-      "plugin_id": "nmap-10.250.195.71",
-      "references": "",
-      "replication_steps": "",
-      "severity": "informational",
-      "tags": [],
-      "title": "Open Ports \u2013 ip-10-250-195-71.eu-west-1.compute.internal"
-    }
-  ],
-  "outcome": "ok"
+  "error": "nmap is recon output, not findings; inventory support is pending",
+  "findings": [],
+  "outcome": "refused"
 }

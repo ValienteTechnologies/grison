@@ -6,7 +6,22 @@ from typing import Any
 
 from grison.scanners.ir import ScanFinding, Severity
 
-from .base import Aggregator, ImportOptions, RawOccurrence, Scanner
+from .base import Aggregator, ImportOptions, RawOccurrence, RefusedInput, Scanner
+
+# sslyze pre-v5 JSON keys its per-server results under "scan_commands_results"
+# with target info under "server_info"; v5 renamed both ("scan_result" /
+# "server_location") and reshaped enough underneath (score/vector fields moved,
+# `status`/`result` wrapping changed) that this parser's v5-shaped field lookups
+# silently find nothing on an old export — 0 findings, not an error, is worse
+# than a refusal that says why.
+_OLD_SHAPE_MARKERS = ("scan_commands_results", "server_info")
+_NEW_SHAPE_MARKER = "scan_result"
+
+_REFUSAL = "sslyze JSON predates v5; re-run with sslyze 5 or newer"
+
+
+def _is_old_shape(server: dict[str, Any]) -> bool:
+    return _NEW_SHAPE_MARKER not in server and any(m in server for m in _OLD_SHAPE_MARKERS)
 
 
 @dataclass
@@ -88,6 +103,12 @@ class SslyzeScanner(Scanner):
     def parse(self, data: bytes, opts: ImportOptions) -> list[ScanFinding]:
         doc = json.loads(data)
         server_results = doc.get("server_scan_results", [])
+
+        old_shape = [s for s in server_results if _is_old_shape(s)]
+        if old_shape:
+            raise RefusedInput(
+                f"{_REFUSAL} ({len(old_shape)} of {len(server_results)} server entries)"
+            )
 
         agg = Aggregator()
 

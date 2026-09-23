@@ -1,6 +1,6 @@
 {
   "detected": "sslyze",
-  "error": null,
+  "error": "sslyze JSON predates v5; re-run with sslyze 5 or newer (1 of 1 server entries)",
   "findings": [],
-  "outcome": "ok"
+  "outcome": "refused"
 }

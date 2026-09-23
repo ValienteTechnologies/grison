@@ -1,5 +1,5 @@
 {
-  "detected": null,
+  "detected": "qualys",
   "error": null,
   "findings": [],
   "outcome": "ok"
