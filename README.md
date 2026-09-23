@@ -202,8 +202,11 @@ couldn't run":
 - **`grison parse <path…> [--scanner NAME] [-o DIR] [--finding-type TYPE] [--min-severity SPEC] [--dry-run]`**
   — turn a scanner export into markdown findings under `findings/inbox/` (default) or
   `-o DIR`. Fully offline; auto-detects the scanner from file content, or force it with
-  `--scanner`. Supported: Acunetix, Burp Suite, Nessus, Nmap, OpenVAS, Qualys
-  (network scan and WAS export alike), sslyze, OWASP ZAP.
+  `--scanner`. Supported: Acunetix, Burp Suite, Nessus, OpenVAS, Qualys (network scan
+  and WAS export alike), sslyze, OWASP ZAP. Nmap files are recognised but refused —
+  nmap is reconnaissance output, not findings; its own inventory support is pending.
+  Pre-v5 sslyze JSON is also refused. A file that's refused, unreadable, or fails to
+  parse is reported under its own heading and makes `grison parse` exit `1`.
 
 - **`grison status [--remote] [--json]`** — a whole-workspace overview: per-area
   counts (clean/edited/new/deleted/moved/invalid/unknown), plus any live collision

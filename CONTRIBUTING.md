@@ -40,7 +40,8 @@ internal callers import from the module that owns a name, never through a shim.
 | `grison/formats/` | The on-disk document formats (finding, narrative, note, wiki page, mirrors): parse, validate, dump |
 | `grison/validator/` | `core/` one module per rule family (names, findings, reports, wiki, index, scaffold, layout, scope); `registry.py` the rule table the spec and tests are checked against |
 | `grison/scaffold/` | Everything grison writes into a workspace besides synced content: spec copy, templates, CLAUDE.md, agent settings, hooks |
-| `grison/scanners/`, `grison/sinks/` | Scanner export parsers and the inbox writer behind `grison parse` |
+| `grison/scanners/` | Scanner export parsers behind `grison parse`. `base.py` (the shared `Aggregator` that groups occurrences by native id, merges severity to the max, and the `RefusedInput` exception a parser raises for input it recognises but won't turn into findings); `ir/` (`severity.py`, `cvss2.py`, `cwe.py`, `finding.py` — the shared IR types and normalisation, used by every scanner); `detect.py` (content-based scanner detection); one file per scanner (`acunetix.py`, `burp.py`, `nessus.py`, `nmap.py`, `openvas.py`, `qualys.py`, `sslyze.py`, `zap.py`) |
+| `grison/sinks/` | The inbox writer behind `grison parse` |
 | `grison/model/` | CVSS and CWE data |
 
 Top-level modules (`index.py`, `manifest.py`, `hashing.py`, `fsio.py`, `gitdrive.py`, `workspace.py`, `errors.py`) are the small cross-cutting pieces every package uses.
@@ -66,20 +67,40 @@ Top-level modules (`index.py`, `manifest.py`, `hashing.py`, `fsio.py`, `gitdrive
   transport swapped out — no real network, no real credentials. `tests/conftest.py`
   wires the `workspace`/`gw_server`/`bs_server` fixtures together and applies across
   every subpackage.
-- **Scanner golden/contract tests** (`tests/scanners/`) — `tests/fixtures/scanners/<scanner>/`
-  vendors a real corpus of scanner exports from DefectDojo and reptor alongside the
-  hand-made `*_sample.*` fixtures (provenance and licenses in
-  `tests/fixtures/scanners/ATTRIBUTION.md`). `test_golden.py` runs detection and
-  parsing over every fixture and compares the serialized IR against a committed
-  `tests/fixtures/scanners/expected/<scanner>/<file>.ir.json` — a behaviour
+- **Scanner tests** (`tests/scanners/`) — `test_scanner_<name>.py` is each parser's own
+  unit tests (hand-built XML/JSON snippets, one behaviour at a time); `test_scanner_
+  base.py` and `test_scanner_ir.py` cover the shared `Aggregator` and `ir/` types.
+  `tests/fixtures/scanners/<scanner>/` vendors a real corpus of scanner exports from
+  DefectDojo and reptor alongside the hand-made `*_sample.*` fixtures (provenance and
+  licenses in `tests/fixtures/scanners/ATTRIBUTION.md`). `test_golden.py` runs
+  detection and parsing over every fixture and compares the serialized IR against a
+  committed `tests/fixtures/scanners/expected/<scanner>/<file>.ir.json` — a behaviour
   recorder, not a correctness check, so it also pins current parser bugs. After an
   intentional parser change, regenerate the goldens with
   `uv run pytest tests/scanners/test_golden.py --update-golden` (the flag is
   registered in the root `tests/conftest.py` and also works against the whole
   suite). `test_contract.py` runs the real `grison parse` → `grison validate`
   pipeline (one invocation per scanner, batched) over every fixture the golden
-  records as detected/ok/non-empty, and `test_detect.py` asserts detection
-  against the golden for every corpus fixture individually.
+  records as detected/ok/non-empty; `test_detect.py` asserts detection against the
+  golden for every corpus fixture individually; `test_malformed.py` runs every
+  parser over a shared corpus of broken input (truncated, empty, a flipped byte,
+  invalid UTF-16) and asserts it fails as a reported error, never an exception that
+  escapes `grison parse`.
+
+### Adding a scanner
+
+1. Write the parser as an extraction-only pass over the vendor's format, built on
+   `Aggregator` (`grison/scanners/base.py`) for grouping and severity aggregation;
+   raise `RefusedInput` for input the scanner recognises but won't turn into
+   findings, rather than returning nothing.
+2. Register it in `grison/scanners/detect.py` and re-export it from
+   `grison/scanners/__init__.py`.
+3. Drop real samples into `tests/fixtures/scanners/<scanner>/`, prefixed by origin
+   (`dojo-`, `reptor-`, or unprefixed for hand-made), and record each one's source
+   path, commit and license in `tests/fixtures/scanners/ATTRIBUTION.md`.
+4. Regenerate the goldens: `uv run pytest tests/scanners/test_golden.py --update-golden`.
+5. `test_contract.py` and `test_detect.py` pick up the new fixtures automatically —
+   no per-scanner wiring needed there.
 - **Spec↔rule coverage** (`tests/core/test_spec_coverage.py`) — every rule id
   registered in `grison/validator/registry.py` must appear in
   `docs/workspace-format.md`, and must have both a `@pytest.mark.rule("XXX-nnn")`
