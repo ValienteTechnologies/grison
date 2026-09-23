@@ -3,11 +3,14 @@
 Parametrised over every file under ``tests/fixtures/scanners/<scanner>/`` (the
 hand-made ``*_sample.*`` fixtures plus the vendored DefectDojo/reptor corpus —
 see ``tests/fixtures/scanners/ATTRIBUTION.md``). For each file this records what
-``grison.scanners.detect_bytes`` and the matching parser do *today*, including
-current bugs (e.g. Acunetix's empty ``cwe``, Qualys WAS missing
-``INFORMATION_GATHERED`` items, SSLyze's pre-v5 JSON schema yielding zero
-findings, and the leading-whitespace Qualys files going undetected) — this
-module is a behaviour recorder, not a correctness check.
+``grison.scanners.detect_bytes`` and the matching parser do *today*, run through
+the same ``normalise_input`` step (see ``grison.scanners.detect``) the real
+pipeline (``grison/sinks/pipeline.py``) applies before both detection and
+parsing — so this module records the production contract, not a raw-bytes
+approximation of it. This still includes current bugs (e.g. Acunetix's empty
+``cwe``, Qualys WAS missing ``INFORMATION_GATHERED`` items, SSLyze's pre-v5
+JSON schema yielding zero findings) — this module is a behaviour recorder, not
+a correctness check.
 
 Regenerate every expected file after an intentional parser change with::
 
@@ -29,6 +32,7 @@ from typing import Any
 import pytest
 
 from grison.scanners import ImportOptions, detect_bytes, scanner_for
+from grison.scanners.detect import normalise_input
 from grison.scanners.ir import ScanFinding
 
 _FIX = Path(__file__).parent.parent / "fixtures" / "scanners"
@@ -54,7 +58,10 @@ def _finding_to_dict(f: ScanFinding) -> dict[str, Any]:
 
 
 def _run(path: Path) -> dict[str, Any]:
-    data = path.read_bytes()
+    # Same normalisation the pipeline applies once and feeds to both detection
+    # and parsing (grison/sinks/pipeline.py) — this records the production
+    # contract, not raw-bytes behaviour.
+    data = normalise_input(path.read_bytes())
     name = detect_bytes(data)
     doc: dict[str, Any] = {"detected": name, "outcome": "ok", "error": None, "findings": []}
     if name is None:
