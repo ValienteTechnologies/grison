@@ -9,14 +9,16 @@
       "cvss_vector": "",
       "cwe": "",
       "description": "SQL injection background.\n\nSQL injection was detected in the username parameter.",
-      "finding_guidance": "",
       "impact": "",
       "mitigation": "Use parameterized queries.",
+      "notes": [],
       "plugin_id": "1048832",
       "references": "<ul><li><a href=\"https://portswigger.net/kb/issues/00100200_sql-injection\">SQL injection</a></li></ul>",
       "replication_steps": "",
       "severity": "high",
-      "tags": [],
+      "tags": [
+        "confidence:certain"
+      ],
       "title": "SQL injection"
     }
   ],

@@ -7,11 +7,11 @@
         "https://vijaytest.com"
       ],
       "cvss_vector": "",
-      "cwe": "",
+      "cwe": "CWE-352",
       "description": "Vijay Test Description",
-      "finding_guidance": "",
       "impact": "Vijay Test Imapact",
       "mitigation": "Vijay Test Recommendation",
+      "notes": [],
       "plugin_id": "VijayReportItem1",
       "references": "",
       "replication_steps": "",

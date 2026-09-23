@@ -31,11 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   does — the evidence file still uploads, the referencing document's on-disk
   caption is rewritten to match, and its push still goes through in the same
   run; a bad extension has no such repair and is refused outright.
+- Burp and ZAP scanner imports carry the vendor's own confidence rating as a
+  `confidence:<value>` tag (lowercased — Burp: `certain`/`firm`/`tentative`; ZAP:
+  `false-positive`/`low`/`medium`/`high`, its own 0..3 scale). When a scanner
+  reports the same finding more than once with different confidence, the highest
+  (most certain) is kept. Documented in `docs/workspace-format.md`'s tags section.
 
 ### Removed
 
 - `grison/migrate/` (the one-time wiki cleanup used for the v1 -> v2 move): the
   migration is done; the code and its tests are gone.
+- `finding_guidance` (OpenVAS's `vuldetect` tag) dropped from the scanner IR:
+  workspace format 2 has no field for it, and it was never read past the parser
+  that set it.
 
 ### Changed
 
@@ -54,6 +62,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `.grison/env` was refused with WS-008 before bootstrap could write the
   `.grison/.gitignore` the rule asks for. A hand-placed env no longer counts as a
   bootstrapped workspace; the run bootstraps, then the workspace rules gate it.
+- Acunetix CWE was always empty: real exports carry `<CWEList><CWE id="200">CWE-200
+  </CWE></CWEList>`, not the flat `<CWE>` the parser only ever read (which real
+  Acunetix XML doesn't emit). The parser now reads the first `CWEList/CWE` id,
+  falling back to a flat `<CWE>` if present.
+- Acunetix CVSS extraction stays v3-first, but a finding with only a v4 vector
+  (`<CVSS4><Descriptor>`, no `<CVSS3><Descriptor>`) no longer silently loses it:
+  `grison parse` now warns `finding <title>: only a CVSS v4 vector was present,
+  dropped (v4 not supported in workspace format 2)` instead of leaving no trace.
+- `<b>`/`<i>` in scanner-supplied HTML (real Burp/ZAP output, e.g. `<b>X-Frame-
+  Options</b>`) used to fall back to plain-text degrade, losing the emphasis —
+  `grison.markdown.mapping` now rewrites them to `<strong>`/`<em>` via an
+  HTML-aware pass before conversion, so they come out as real markdown bold/
+  italic.
+- ZAP's `replication_steps` interpolated an alert instance's `uri`/`method`/
+  `param` into `<li>` markup unescaped; an instance uri carrying its own markup
+  (e.g. a reflected-XSS payload like `</style/</title/...`, which real ZAP
+  exports quote back verbatim) produced malformed HTML that `grison parse`
+  couldn't convert, dropping the payload text from the rendered finding
+  entirely. Every interpolated instance field is now `html.escape`d
+  (`grison/scanners/zap.py`); `sslyze.py`'s weak-key description escapes its
+  certificate public-key fields the same way, for consistency. With both fixes,
+  every prose field of every Burp/ZAP fixture converts without falling back to
+  the plain-text degrade.
 
 ## [0.4.2] - 2026-09-21
 

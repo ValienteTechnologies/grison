@@ -9,14 +9,16 @@
       "cvss_vector": "",
       "cwe": "CWE-79",
       "description": "<p>Reflected XSS was found in the search parameter.</p>",
-      "finding_guidance": "",
       "impact": "",
       "mitigation": "<p>Sanitize and encode all user-supplied input.</p>",
+      "notes": [],
       "plugin_id": "40012",
       "references": "<ul><li><a href=\"https://owasp.org/www-community/attacks/xss/\">https://owasp.org/www-community/attacks/xss/</a></li></ul>",
       "replication_steps": "<ul><li>https://example.com/search?q=test [GET] param: <code>q</code></li></ul>",
       "severity": "high",
-      "tags": [],
+      "tags": [
+        "confidence:medium"
+      ],
       "title": "Cross Site Scripting (Reflected)"
     }
   ],

@@ -105,7 +105,6 @@ class RawOccurrence:
     mitigation: str = ""
     references: FindingReferences = field(default_factory=list)
     replication_steps: str = ""
-    finding_guidance: str = ""
     tags: list[str] = field(default_factory=list)
 
 
@@ -130,7 +129,6 @@ class AggregatedRecord:
     mitigation: str = ""
     references: FindingReferences = field(default_factory=list)
     replication_steps: str = ""
-    finding_guidance: str = ""
     tags: list[str] = field(default_factory=list)
 
 
@@ -167,7 +165,6 @@ class Aggregator:
                 mitigation=occurrence.mitigation,
                 references=occurrence.references,
                 replication_steps=occurrence.replication_steps,
-                finding_guidance=occurrence.finding_guidance,
                 tags=occurrence.tags,
             )
             return

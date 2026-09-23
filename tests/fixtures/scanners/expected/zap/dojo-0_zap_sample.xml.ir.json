@@ -9,14 +9,16 @@
       "cvss_vector": "",
       "cwe": "CWE-16",
       "description": "The following directives either allow wildcard sources (or ancestors), are not defined, or are overly broadly defined: script-src, script-src-elem, script-src-attr, style-src, style-src-elem, style-src-attr, img-src, connect-src, frame-src, font-src, media-src, object-src, manifest-src, worker-src, prefetch-src",
-      "finding_guidance": "",
       "impact": "",
       "mitigation": "Ensure that your web server, application server, load balancer, etc. is properly configured to set the Content-Security-Policy header.",
+      "notes": [],
       "plugin_id": "10055",
       "references": "<ul><li><a href=\"http://www.w3.org/TR/CSP2/http://www.w3.org/TR/CSP/http://caniuse.com/#search=content+security+policyhttp://content-security-policy.com/https://github.com/shapesecurity/salvation\">http://www.w3.org/TR/CSP2/http://www.w3.org/TR/CSP/http://caniuse.com/#search=content+security+policyhttp://content-security-policy.com/https://github.com/shapesecurity/salvation</a></li></ul>",
       "replication_steps": "<ul><li>https://mainsite.com [GET] param: <code>Content-Security-Policy</code></li></ul>",
       "severity": "medium",
-      "tags": [],
+      "tags": [
+        "confidence:medium"
+      ],
       "title": "CSP Scanner: Wildcard Directive"
     },
     {
@@ -27,14 +29,16 @@
       "cvss_vector": "",
       "cwe": "CWE-614",
       "description": "A cookie has been set without the secure flag, which means that the cookie can be accessed via unencrypted connections.",
-      "finding_guidance": "",
       "impact": "",
       "mitigation": "Whenever a cookie contains sensitive information or is a session token, then it should always be passed using an encrypted channel. Ensure that the secure flag is set for cookies containing such sensitive information.",
+      "notes": [],
       "plugin_id": "10011",
       "references": "<ul><li><a href=\"http://www.owasp.org/index.php/Testing_for_cookies_attributes_(OWASP-SM-002)\">http://www.owasp.org/index.php/Testing_for_cookies_attributes_(OWASP-SM-002)</a></li></ul>",
       "replication_steps": "<ul><li>https://mainsite.com/dashboard [GET] param: <code>opvc</code></li><li>https://mainsite.com/dashboard [GET] param: <code>dmid</code></li><li>https://mainsite.com [GET] param: <code>sitevisitscookie</code></li></ul>",
       "severity": "low",
-      "tags": [],
+      "tags": [
+        "confidence:medium"
+      ],
       "title": "Cookie Without Secure Flag"
     },
     {
@@ -45,14 +49,16 @@
       "cvss_vector": "",
       "cwe": "CWE-16",
       "description": "A cookie has been set without the SameSite attribute, which means that the cookie can be sent as a result of a 'cross-site' request. The SameSite attribute is an effective counter measure to cross-site request forgery, cross-site script inclusion, and timing attacks.",
-      "finding_guidance": "",
       "impact": "",
       "mitigation": "Ensure that the SameSite attribute is set to either 'lax' or ideally 'strict' for all cookies.",
+      "notes": [],
       "plugin_id": "10054",
       "references": "<ul><li><a href=\"https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site\">https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site</a></li></ul>",
       "replication_steps": "<ul><li>https://mainsite.com [GET] param: <code>sitevisitscookie</code></li><li>https://mainsite.com/dashboard [GET] param: <code>dmid</code></li><li>https://mainsite.com [GET] param: <code>JSESSIONID</code></li><li>https://mainsite.com/dashboard [GET] param: <code>opvc</code></li></ul>",
       "severity": "low",
-      "tags": [],
+      "tags": [
+        "confidence:medium"
+      ],
       "title": "Cookie Without SameSite Attribute"
     },
     {
@@ -63,14 +69,16 @@
       "cvss_vector": "",
       "cwe": "CWE-200",
       "description": "A timestamp was disclosed by the application/web server - Unix",
-      "finding_guidance": "",
       "impact": "",
       "mitigation": "Manually confirm that the timestamp data is not sensitive, and that the data cannot be aggregated to disclose exploitable patterns.",
+      "notes": [],
       "plugin_id": "10096",
       "references": "<ul><li><a href=\"https://www.owasp.org/index.php/Top_10_2013-A6-Sensitive_Data_Exposurehttp://projects.webappsec.org/w/page/13246936/Information%20Leakage\">https://www.owasp.org/index.php/Top_10_2013-A6-Sensitive_Data_Exposurehttp://projects.webappsec.org/w/page/13246936/Information%20Leakage</a></li></ul>",
       "replication_steps": "<ul><li>https://mainsite.com [GET]</li><li>https://mainsite.com [GET]</li><li>https://mainsite.com [GET]</li><li>https://mainsite.com/dashboard [GET]</li></ul>",
       "severity": "low",
-      "tags": [],
+      "tags": [
+        "confidence:low"
+      ],
       "title": "Timestamp Disclosure - Unix"
     }
   ],

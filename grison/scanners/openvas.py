@@ -102,7 +102,6 @@ class OpenVASScanner(Scanner):
                     description=tags.get("summary") or result.findtext("description") or "",
                     impact=tags.get("impact", ""),
                     mitigation=tags.get("solution", ""),
-                    finding_guidance=tags.get("vuldetect", ""),
                     references=refs,
                 )
             )
@@ -119,7 +118,6 @@ class OpenVASScanner(Scanner):
             description=rec.description,
             impact=rec.impact,
             mitigation=rec.mitigation,
-            finding_guidance=rec.finding_guidance,
             references=refs_to_html(rec.references),
             affected_components=rec.affected_components,
         )

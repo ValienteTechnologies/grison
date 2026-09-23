@@ -79,22 +79,25 @@ def test_mapped_finding_serializes_and_roundtrips() -> None:
 
 def test_unsupported_tag_fallback_escapes_html_lookalikes() -> None:
     """FND-014 regression (burp/dojo-seven_findings.xml's XSS finding, see
-    ``tests/scanners/test_contract.py``): an unsupported tag (``<b>``, real Burp
-    output, not in the converter's GW whitelist) makes ``_prose_to_md`` fall back
-    to ``_TagStripper``. The stripped text can itself contain a payload that
-    looks like markup — here, an HTML-entity-escaped ``<script>`` tag decoded
-    back to literal text by the HTML parser — and that text must come out
-    backslash-escaped so it round-trips as plain text instead of being
-    reparsed as raw inline HTML."""
+    ``tests/scanners/test_contract.py``): an unsupported tag (``<u>`` here — real
+    Burp output uses ``<b>``/``<i>``, but those are now rewritten to their GW
+    equivalents by ``_normalize_scanner_html`` before this fallback ever runs;
+    see ``test_presentational_tags_are_rewritten_not_stripped`` below — so a tag
+    with no whitelisted alias is needed to still exercise the fallback) makes
+    ``_prose_to_md`` fall back to ``_TagStripper``. The stripped text can itself
+    contain a payload that looks like markup — here, an HTML-entity-escaped
+    ``<script>`` tag decoded back to literal text by the HTML parser — and that
+    text must come out backslash-escaped so it round-trips as plain text instead
+    of being reparsed as raw inline HTML."""
     from grison.markdown.converter import md_to_html
     from grison.markdown.mapping import _prose_to_md
 
     html = (
-        "<p>The payload <b>5d4ff&lt;script&gt;alert(1)&lt;/script&gt;18327</b> was submitted.</p>"
+        "<p>The payload <u>5d4ff&lt;script&gt;alert(1)&lt;/script&gt;18327</u> was submitted.</p>"
     )
     warnings: list[str] = []
     out = _prose_to_md(html, "description", warnings)
-    assert any("unsupported HTML tag: <b>" in w for w in warnings)
+    assert any("unsupported HTML tag: <u>" in w for w in warnings)
     assert "\\<script>" in out and "\\</script>" in out  # escaped, not bare
     # Round-trips back to the original literal text, not real markup.
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in md_to_html(out)
@@ -110,11 +113,50 @@ def test_unsupported_tag_fallback_does_not_double_unescape_entities() -> None:
     once and then escape for markdown, not decode twice."""
     from grison.markdown.mapping import _prose_to_md
 
-    html = "<p>Encode it as <b>&amp;lt;script&amp;gt;</b>, not the raw tag.</p>"
+    html = "<p>Encode it as <u>&amp;lt;script&amp;gt;</u>, not the raw tag.</p>"
     warnings: list[str] = []
     out = _prose_to_md(html, "description", warnings)
     assert "<script>" not in out
     assert "&lt;script&gt;" in out or "\\&lt;script\\&gt;" in out
+
+
+def test_presentational_tags_are_rewritten_not_stripped() -> None:
+    """``<b>``/``<i>`` (real Burp/ZAP output, not in the converter's GW whitelist
+    on their own) are rewritten to ``<strong>``/``<em>`` before conversion, so
+    they come out as real markdown bold/italic instead of degrading through the
+    lenient ``_TagStripper`` fallback."""
+    from grison.markdown.mapping import _prose_to_md
+
+    html = "<p>The <b>X-Frame-Options</b> header and <i>every</i> variable.</p>"
+    warnings: list[str] = []
+    out = _prose_to_md(html, "description", warnings)
+    assert warnings == []
+    assert "**X-Frame-Options**" in out
+    assert "*every*" in out
+
+
+def test_tag_alias_rewriter_leaves_script_body_raw() -> None:
+    """``handle_data`` must not ``html.escape`` the content of ``<script>``/
+    ``<style>`` elements: ``HTMLParser`` hands those bodies over as raw,
+    un-charref-converted CDATA (that's what ``CDATA_CONTENT_ELEMENTS`` means),
+    and escaping it like ordinary text would corrupt it (``a<b`` turning into
+    the literal text ``a&lt;b``)."""
+    from grison.markdown.mapping import _normalize_scanner_html
+
+    raw = "<script>if (a<b) { x(); }</script><style>.c{color:a<b}</style>"
+    out = _normalize_scanner_html(raw)
+    assert "a<b" in out
+    assert "&lt;" not in out
+
+
+def test_tag_alias_rewriter_passes_boolean_attribute_through() -> None:
+    """A boolean attribute (no value, e.g. ``disabled`` in ``<input disabled>``)
+    must pass through as a bare name — dropping it silently loses it, and
+    fabricating an empty value (``disabled=""``) changes what was in the
+    source."""
+    from grison.markdown.mapping import _normalize_scanner_html
+
+    assert _normalize_scanner_html("<input disabled>") == "<input disabled>"
 
 
 def test_nmap_table_converts_to_real_markdown_table() -> None:
@@ -139,3 +181,44 @@ def test_nmap_table_converts_to_real_markdown_table() -> None:
         "| 22/tcp | ssh | OpenSSH 8.9 |\n"
         "| 80/tcp | http | Apache 2.4 |"
     )
+
+
+def test_burp_zap_corpus_hits_zero_fallback_on_every_prose_field() -> None:
+    """Corpus check for the presentational-tag rewrite (2026-09) and the ZAP
+    instance-field escaping fix (see ``tests/scanners/test_scanner_zap.py``'s
+    ``test_instance_uri_is_escaped_in_replication_steps``): before either fix,
+    running every real burp/zap fixture's prose fields through ``_prose_to_md``
+    hit the ``_TagStripper`` fallback — the presentational-tag cases (12 of 138
+    description/mitigation fields, all ``<b>``/``<i>``) plus, for
+    ``replication_steps``, a ZAP alert instance whose uri carried unescaped
+    payload text that broke the generated ``<li>`` markup (real fixture:
+    dojo-zap-results-first-scan.xml's `</stYle/</titLe/...` uri). Covering all
+    four prose fields (not just description/mitigation) is what would have
+    caught that replication_steps regression."""
+    from grison.markdown.mapping import _prose_to_md
+    from grison.scanners import BurpScanner, ImportOptions, ZapScanner
+    from grison.scanners.detect import normalise_input
+
+    fixtures_dir = Path(__file__).parent.parent / "fixtures" / "scanners"
+    opts = ImportOptions()
+    total_fields = 0
+    for scanner_cls, subdir in ((BurpScanner, "burp"), (ZapScanner, "zap")):
+        for path in sorted((fixtures_dir / subdir).iterdir()):
+            if not path.is_file():
+                continue
+            try:
+                findings = scanner_cls().parse(normalise_input(path.read_bytes()), opts)
+            except Exception:  # noqa: BLE001 — a handful of fixtures don't parse; not this test's concern
+                continue
+            for finding in findings:
+                for field in ("description", "impact", "mitigation", "replication_steps"):
+                    value = getattr(finding, field)
+                    if not value.strip():
+                        continue
+                    total_fields += 1
+                    warnings: list[str] = []
+                    _prose_to_md(value, field, warnings)
+                    assert not any("HTML outside GW whitelist" in w for w in warnings), (
+                        f"{subdir}/{path.name} {field}: unexpected fallback hit: {warnings}"
+                    )
+    assert total_fields > 0  # the corpus walk itself actually ran

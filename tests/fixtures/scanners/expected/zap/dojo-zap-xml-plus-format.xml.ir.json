@@ -9,14 +9,16 @@
       "cvss_vector": "",
       "cwe": "CWE-200",
       "description": "This method was originally intended for file managemant operations. It is now most commonly used in REST services, PUT is most-often utilized for **update** capabilities, PUT-ing to a known resource URI with the request body containing the newly-updated representation of the original resource..",
-      "finding_guidance": "",
       "impact": "",
       "mitigation": "TBA",
+      "notes": [],
       "plugin_id": "90028",
       "references": "<ul><li><a href=\"http://projects.webappsec.org/Fingerprinting\">http://projects.webappsec.org/Fingerprinting</a></li></ul>",
       "replication_steps": "<ul><li>http://localhost:8080/bodgeit/js/qndto7n63d [PUT]</li></ul>",
       "severity": "medium",
-      "tags": [],
+      "tags": [
+        "confidence:medium"
+      ],
       "title": "Insecure HTTP Method - PUT"
     }
   ],

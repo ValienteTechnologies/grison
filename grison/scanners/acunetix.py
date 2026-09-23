@@ -34,6 +34,11 @@ class AcunetixScanner(Scanner):
         scans = root.findall(".//Scan") if root.tag != "Scan" else [root]
 
         agg = Aggregator()
+        # Whether the FIRST occurrence of a vuln_id had a CVSS v4 vector but no v3
+        # one — matches cvss_vector's own "first occurrence wins" merge semantics
+        # (Aggregator only keeps the first occurrence's non-severity fields), so
+        # this stays correct however later occurrences of the same key look.
+        v4_only: dict[str, bool] = {}
 
         for scan in scans:
             start_url = (scan.findtext("StartURL") or "").strip()
@@ -55,7 +60,17 @@ class AcunetixScanner(Scanner):
                 affected_item = (item.findtext("AffectedItem") or "").strip()
                 component = f"{start_url}{affected_item}" if affected_item else start_url
 
-                cwe = normalize_cwe((item.findtext("CWE") or "").strip())
+                # Real exports carry <CWEList><CWE id="200">CWE-200</CWE></CWEList>,
+                # not a flat <CWE> (gw-import's salvage source only ever saw the
+                # latter, which real Acunetix XML doesn't emit — hence the always-
+                # empty cwe bug this replaces). Read the first CWEList/CWE's id,
+                # falling back to a flat <CWE> if present.
+                cwe_list_el = item.find("CWEList/CWE")
+                if cwe_list_el is not None:
+                    cwe_raw = cwe_list_el.get("id") or cwe_list_el.text or ""
+                else:
+                    cwe_raw = item.findtext("CWE") or ""
+                cwe = normalize_cwe(cwe_raw.strip())
 
                 tags = [
                     t.text.strip() for t in item.findall(".//Tags/Tag") if t.text and t.text.strip()
@@ -71,8 +86,13 @@ class AcunetixScanner(Scanner):
 
                 # Salvage patch: gw-import's parser dropped CVSS. Real Acunetix
                 # exports carry a clean `CVSS:3.1/…` descriptor in <CVSS3><Descriptor>
-                # (alongside legacy <CVSS> v2 and <CVSS4> blocks we ignore).
+                # (alongside a legacy <CVSS> v2 block we ignore). Extraction stays
+                # v3-first: a v4-only descriptor (<CVSS4><Descriptor>) is recorded
+                # as a note instead (workspace format 2 has no v4 support) — see
+                # v4_only above and _to_finding below.
                 cvss_vector = (item.findtext("CVSS3/Descriptor") or "").strip()
+                cvss4_vector = (item.findtext("CVSS4/Descriptor") or "").strip()
+                v4_only.setdefault(vuln_id, bool(cvss4_vector) and not cvss_vector)
 
                 agg.add(
                     RawOccurrence(
@@ -90,10 +110,15 @@ class AcunetixScanner(Scanner):
                     )
                 )
 
-        findings = [self._to_finding(rec) for rec in agg.records()]
+        findings = [self._to_finding(rec, v4_only.get(rec.key, False)) for rec in agg.records()]
         return self.sort_by_severity(findings)
 
-    def _to_finding(self, rec: AggregatedRecord) -> ScanFinding:
+    def _to_finding(self, rec: AggregatedRecord, v4_only: bool = False) -> ScanFinding:
+        notes = (
+            ["only a CVSS v4 vector was present, dropped (v4 not supported in workspace format 2)"]
+            if v4_only and not rec.cvss_vector
+            else []
+        )
         return ScanFinding(
             title=rec.title,
             plugin_id=rec.key,
@@ -106,4 +131,5 @@ class AcunetixScanner(Scanner):
             references=refs_to_html(rec.references),
             tags=rec.tags,
             affected_components=rec.affected_components,
+            notes=notes,
         )
