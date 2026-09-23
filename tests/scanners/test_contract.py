@@ -54,12 +54,6 @@ _KNOWN_PIPELINE_BUGS: dict[str, dict[str, str]] = {
     # title into more than one line once rendered, and the wrapped remainder
     # renders as body text outside a '##' section (FND-016).
     "openvas": {"dojo-many_vuln.xml": "FND-016"},
-    # burp: this file's "Cross-site scripting (reflected)" finding description
-    # contains the HTML-entity-escaped payload "&lt;script&gt;...&lt;/script&gt;"
-    # (safe, literal text in the source XML). Somewhere in HTML->markdown mapping
-    # it comes back out HTML-unescaped as a literal "<script>" tag, which the
-    # markdown validator then rejects as unsupported inline HTML (FND-014).
-    "burp": {"dojo-seven_findings.xml": "FND-014"},
 }
 
 

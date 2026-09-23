@@ -99,6 +99,27 @@ FIXPOINT_CASES: list[tuple[str, str, bool]] = [
     ("unicode_turkish", "İstanbul ışık güç kullanıcı adı ıı İİ", True),
     ("hard_break", "line one\nline two", True),
     ("html_entity_amp", "Tom & Jerry", True),
+    # --- FND-014 regression (2026-09-23): an HTML-tag-shaped or entity-name-shaped
+    # literal text run, in running text, in a code span, and in a fenced code block.
+    # Running text must come back escaped (so it never reparses as raw inline HTML
+    # or a real entity); a code span/block's content is never inline-parsed, so the
+    # SAME bare text must survive there with no escaping at all.
+    ("xss_payload_escaped", "\\<script>alert(1)\\</script>", True),
+    ("less_than_bare_comparison", "a < b and c > d", True),
+    ("entity_name_amp", "\\&amp;", True),
+    ("entity_name_lt_tag_shaped", "\\&lt;script\\&gt;", True),
+    ("xss_payload_in_code_span", "`<script>alert(1)</script>`", True),
+    ("xss_payload_in_fence", "```\n<script>alert(1)</script>\n```", True),
+    # --- line-start "|"/thematic-break escaping (review fix, 2026-09-23):
+    # literal text that merely LOOKS like a GFM table row or a thematic break
+    # must round-trip as plain text, escaped, not be misread as either
+    # construct on the next push.
+    ("table_row_shape_escaped", "\\| a | b |", True),
+    ("pipe_prefix_escaped", "\\|x", True),
+    ("thematic_break_dash_escaped", "\\---", True),
+    ("thematic_break_star_escaped", "\\***", True),
+    ("thematic_break_underscore_escaped", "\\___", True),
+    ("thematic_break_spaced_dash_escaped", "\\- - -", True),
     ("quote_in_url_title", '[text](http://example.com "has \\"quotes\\" inside")', True),
     ("code_adjacent_bold", "`code`**bold**`more code`", True),
     ("empty_string", "", True),
