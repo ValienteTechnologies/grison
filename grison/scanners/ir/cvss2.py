@@ -35,3 +35,18 @@ def cvss2_to_cvss3(v2: str) -> str:
         return f"CVSS:3.1/AV:{av}/AC:{ac}/PR:{pr}/UI:{ui}/S:{scope}/C:{c}/I:{i}/A:{a}"
     except Exception:
         return ""
+
+
+def ensure_cvss3_prefix(vector: str) -> str:
+    """Prepend a ``CVSS:3.0/`` prefix to a bare CVSS3 vector string.
+
+    Several scanners (Nessus's ``cvss3_vector``, Qualys WAS's
+    ``CVSS_V3/VECTOR_STRING``) emit an already-v3 vector without its ``CVSS:3.x/``
+    header. This is not a v2->v3 conversion — the vector is real v3 data, just
+    missing its prefix — so a vector that already carries one is returned
+    untouched.
+    """
+    vector = vector.strip()
+    if not vector:
+        return ""
+    return vector if vector.startswith("CVSS:3") else f"CVSS:3.0/{vector}"

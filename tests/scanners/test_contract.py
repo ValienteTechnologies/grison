@@ -48,12 +48,12 @@ _runner = CliRunner()
 # the exclusion silently going stale (the file would then just be skipped forever,
 # with no contract coverage and no signal that it could be un-excluded).
 _KNOWN_PIPELINE_BUGS: dict[str, dict[str, str]] = {
-    # openvas: NVT <name>/<insight> text carries embedded literal newlines +
-    # indentation (parser doesn't normalize internal whitespace), which lands
-    # verbatim in the IR title. In three of this file's findings that breaks the
-    # title into more than one line once rendered, and the wrapped remainder
-    # renders as body text outside a '##' section (FND-016).
-    "openvas": {"dojo-many_vuln.xml": "FND-016"},
+    # openvas/dojo-many_vuln.xml (FND-016, embedded newlines in the NVT title
+    # breaking it across lines) was fixed by the parser-convergence step that
+    # added shared title whitespace-collapsing (grison.scanners.base.collapse_whitespace,
+    # applied in Aggregator.add) — the canary below caught the fix and this entry
+    # was dropped; the file is back under test_parse_then_validate's coverage.
+    #
     # burp: this file's "Cross-site scripting (reflected)" finding description
     # contains the HTML-entity-escaped payload "&lt;script&gt;...&lt;/script&gt;"
     # (safe, literal text in the source XML). Somewhere in HTML->markdown mapping

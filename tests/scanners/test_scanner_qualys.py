@@ -11,6 +11,7 @@ from pathlib import Path
 from grison.model.cvss import parse_cvss
 from grison.scanners import ImportOptions, QualysScanner
 from grison.scanners.ir import Severity
+from grison.scanners.qualys import _parse_severity
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "scanners"
 
@@ -39,6 +40,14 @@ def test_was_cvss_v3_vector_string_bare_gets_prefixed() -> None:
     xss = by_title["Reflected Cross-Site Scripting"]
     assert xss.cvss_vector == "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
     assert parse_cvss(xss.cvss_vector).base_score > 0
+
+
+def test_unrecognised_severity_code_yields_info() -> None:
+    # The project-wide rule (July 2026 parser audit): an unrecognised severity
+    # code falls back to INFO everywhere, same as every other parser's
+    # severity_or_info — not Qualys's own historical Medium default.
+    assert _parse_severity("9") == Severity.INFO
+    assert _parse_severity("") == Severity.INFO
 
 
 def test_was_cvss_v3_vector_string_already_prefixed_untouched() -> None:
