@@ -113,6 +113,13 @@ def test_cvss2_to_cvss3_full_conversion() -> None:
     assert v3 == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"
 
 
+def test_cvss2_to_cvss3_raises_on_colon_bearing_garbage() -> None:
+    # One accidental "key:value"-shaped token is not a vector either; without
+    # a real metric key the string must not turn into an all-defaults vector.
+    with pytest.raises(CvssConversionError):
+        _cvss2_to_cvss3("banana:split")
+
+
 def test_cvss2_to_cvss3_raises_on_garbage_vector() -> None:
     # No recognizable "KEY:VALUE" pair anywhere — not a CVSS2 vector at all.
     # Silently returning an all-defaults vector would be worse than dropping it.

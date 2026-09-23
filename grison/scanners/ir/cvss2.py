@@ -20,18 +20,22 @@ _CIA_MAP = {"N": "N", "P": "L", "C": "H"}
 
 class CvssConversionError(GrisonError, ValueError):
     """Raised by :func:`cvss2_to_cvss3` when ``v2`` doesn't parse as a CVSS2
-    vector at all (no recognizable ``KEY:VALUE`` pairs) — a caller must not
+    vector at all (none of the CVSS2 metric keys present) — a caller must not
     silently substitute an all-defaults vector for this; see each caller's own
     ``except`` for how it's surfaced (empty ``cvss_vector`` plus a dropped-note
     warning, matching the CVSS v4-only case)."""
 
 
+_V2_METRIC_KEYS = ("AV", "AC", "Au", "C", "I", "A")
+
+
 def cvss2_to_cvss3(v2: str) -> str:
     """Best-effort CVSS2 → CVSS3.1 vector string conversion.
 
-    Raises :class:`CvssConversionError` if ``v2`` carries no recognizable
-    ``KEY:VALUE`` metric pairs at all — never silently returns an all-defaults
-    vector for a string that isn't a CVSS2 vector in the first place. A vector
+    Raises :class:`CvssConversionError` if ``v2`` carries none of the CVSS2
+    metric keys (``AV``, ``AC``, ``Au``, ``C``, ``I``, ``A``) at all — never
+    silently returns an all-defaults vector for a string that isn't a CVSS2
+    vector in the first place. A vector
     that does parse but omits or misspells an individual metric still falls
     back to that metric's CVSS3 default (e.g. a missing ``Au`` becomes
     ``PR:N``) — CVSS2 exports in the wild are inconsistent about which metrics
@@ -43,7 +47,7 @@ def cvss2_to_cvss3(v2: str) -> str:
     # parens/whitespace before splitting, so "AV:" survives as a real key.
     vec = v2.split("#", 1)[-1].strip().strip("()")
     parts = dict(p.split(":", 1) for p in vec.split("/") if ":" in p)
-    if not parts:
+    if not any(key in parts for key in _V2_METRIC_KEYS):
         raise CvssConversionError(f"not a CVSS v2 vector: {v2!r}")
     av = _AV_MAP.get(parts.get("AV", ""), "N")
     ac = _AC_MAP.get(parts.get("AC", ""), "L")
