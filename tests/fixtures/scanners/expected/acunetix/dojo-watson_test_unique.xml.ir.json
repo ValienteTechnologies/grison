@@ -7,11 +7,11 @@
         "https://watson-unique-test.com"
       ],
       "cvss_vector": "",
-      "cwe": "",
+      "cwe": "CWE-79",
       "description": "Watson Unique Test Description GHI000",
-      "finding_guidance": "",
       "impact": "Watson Unique Test Impact XYZ123",
       "mitigation": "Watson Unique Test Recommendation DEF789",
+      "notes": [],
       "plugin_id": "WatsonUniqueReportItem2025",
       "references": "",
       "replication_steps": "",
