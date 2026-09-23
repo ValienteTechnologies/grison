@@ -159,6 +159,143 @@ def test_tag_alias_rewriter_passes_boolean_attribute_through() -> None:
     assert _normalize_scanner_html("<input disabled>") == "<input disabled>"
 
 
+# -- _StructureNormalizer (real-world scanner HTML structural cleanup) --------
+#
+# Adversarial cases for each of the three rewrite rules: an unclosed <p> auto-
+# closed at a block-level trigger or end-of-input, <div> unwrapping, and the
+# <dl>/<dt>/<dd> -> <ul><li><strong>...</strong> ...</li></ul> rewrite. Each
+# case is checked two ways: the normalizer's own text output (the exact shape
+# rewritten), and that the full _prose_to_md conversion succeeds with zero
+# fallback warnings — proving the rewrite actually unblocks real markdown
+# conversion, not just that it produces SOME string.
+
+
+def test_unclosed_p_nested_inside_li_is_closed_by_the_next_p() -> None:
+    # Two sibling <p>s inside one <li>, only the second one explicitly closed —
+    # real Qualys-style prose never closes a <p> at all. The first must be
+    # auto-closed the moment the second <p> starts, or the unclosed <p> ends up
+    # nested one level too deep and the eventual </li> mismatches it instead.
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = "<ul><li><p>foo<p>bar</p></li></ul>"
+    assert _normalize_scanner_html(raw) == "<ul><li><p>foo</p><p>bar</p></li></ul>"
+
+    warnings: list[str] = []
+    out = _prose_to_md(raw, "description", warnings)
+    assert warnings == []
+    assert out == "- foo\n\n  bar"
+
+
+def test_unclosed_p_inside_blockquote_is_closed_by_the_next_p() -> None:
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = "<blockquote><p>text<p>more</p></blockquote>"
+    assert _normalize_scanner_html(raw) == "<blockquote><p>text</p><p>more</p></blockquote>"
+
+    warnings: list[str] = []
+    out = _prose_to_md(raw, "description", warnings)
+    assert warnings == []
+    assert out == "> text\n>\n> more"
+
+
+def test_uppercase_p_is_normalized_and_auto_closed() -> None:
+    # Real Qualys exports spell the tag "<P>" — HTMLParser itself lowercases
+    # tag names, but the auto-close logic must still see it as "p".
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = "<P>Hello<P>World"
+    assert _normalize_scanner_html(raw) == "<p>Hello</p><p>World</p>"
+
+    warnings: list[str] = []
+    out = _prose_to_md(raw, "description", warnings)
+    assert warnings == []
+    assert out == "Hello\n\nWorld"
+
+
+def test_p_immediately_followed_by_ul_is_closed_before_the_list_opens() -> None:
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = "<P>Intro<UL><LI>one</LI><LI>two</LI></UL>"
+    assert _normalize_scanner_html(raw) == "<p>Intro</p><ul><li>one</li><li>two</li></ul>"
+
+    warnings: list[str] = []
+    out = _prose_to_md(raw, "description", warnings)
+    assert warnings == []
+    assert out == "Intro\n\n- one\n- two"
+
+
+def test_div_with_attributes_is_unwrapped() -> None:
+    # Real Acunetix output: <div class="bb-coolbox"><span ...>...</span></div>.
+    # The wrapper (tag AND attributes) is dropped; only its children survive.
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = '<div class="bb-coolbox" id="x">Manual confirmation required</div>'
+    assert _normalize_scanner_html(raw) == "Manual confirmation required"
+
+    warnings: list[str] = []
+    out = _prose_to_md(raw, "description", warnings)
+    assert warnings == []
+    assert out == "Manual confirmation required"
+
+
+def test_dl_with_several_dt_dd_pairs_becomes_a_list() -> None:
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = "<dl><dt>Term1</dt><dd>Def1</dd><dt>Term2</dt><dd>Def2</dd></dl>"
+    assert _normalize_scanner_html(raw) == (
+        "<ul><li><strong>Term1</strong> Def1</li><li><strong>Term2</strong> Def2</li></ul>"
+    )
+
+    warnings: list[str] = []
+    out = _prose_to_md(raw, "description", warnings)
+    assert warnings == []
+    assert out == "- **Term1** Def1\n- **Term2** Def2"
+
+
+def test_dl_missing_dd_still_closes_its_li() -> None:
+    # A <dt> with no following <dd> at all must not leave its <li> unclosed —
+    # closed by </dl> (end-of-input for a <dl> works the same way).
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = "<dl><dt>OnlyTerm</dt></dl>"
+    assert _normalize_scanner_html(raw) == "<ul><li><strong>OnlyTerm</strong> </li></ul>"
+
+    warnings: list[str] = []
+    out = _prose_to_md(raw, "description", warnings)
+    assert warnings == []
+    assert out == "- **OnlyTerm**"
+
+
+def test_unknown_tag_is_left_alone_and_still_refused() -> None:
+    # <limit> (real OpenVAS content, quoting an Apache <Limit> directive) has
+    # no rewrite rule — it must pass through untouched, so the converter still
+    # refuses it exactly as before this normalization pass existed.
+    from grison.markdown.mapping import _normalize_scanner_html, _prose_to_md
+
+    raw = "<p>See the <limit>Limit</limit> directive.</p>"
+    assert _normalize_scanner_html(raw) == "<p>See the <limit>Limit</limit> directive.</p>"
+
+    warnings: list[str] = []
+    _prose_to_md(raw, "description", warnings)
+    assert len(warnings) == 1
+    assert "unsupported HTML tag: <limit>" in warnings[0]
+
+
+def test_mismatched_closing_tag_is_left_alone_not_repaired() -> None:
+    # A <b> spanning across an unclosed <p> boundary (real Qualys shape) is a
+    # genuine mismatch between two DIFFERENT tags — this pass only ever closes
+    # <p>, and only when <p> is the innermost open element; it never guesses at
+    # a repair here, so the same mismatch the converter always raised is still
+    # what it raises.
+    from grison.markdown.mapping import _prose_to_md
+
+    raw = "<p><b>bold text<p>more</b></p>"
+    warnings: list[str] = []
+    _prose_to_md(raw, "description", warnings)
+    assert len(warnings) == 1
+    assert "mismatched closing tag: </strong>" in warnings[0]
+
+
 def test_nmap_table_converts_to_real_markdown_table() -> None:
     """The converter now supports GFM tables (grammar widened 2026-09-21), so an
     nmap port table (real shape: ``nmap.py``'s own ``<thead>``/``<tbody>``, no

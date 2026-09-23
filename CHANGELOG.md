@@ -128,6 +128,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   certificate public-key fields the same way, for consistency. With both fixes,
   every prose field of every Burp/ZAP fixture converts without falling back to
   the plain-text degrade.
+- Qualys's SCAN-format CVE references (`CVE_ID_LIST/CVE_ID`) read the wrapper
+  element's own text — whitespace, since the id lives in its nested `<ID>`
+  child — so a vuln-scan finding's CVE references came through as an empty or
+  garbage bullet instead of the CVE id. The three Qualys dialects (SCAN, the
+  WAS glossary, and the VM/`ASSET_DATA_REPORT` glossary) now share one helper
+  that reads `<ID>`/`<URL>` correctly everywhere, rendering a link when a URL
+  is present.
+- Real scanner HTML that never closes a `<p>` (Qualys prose above all — entire
+  multi-paragraph fields built from bare `<P>` with no `</P>` anywhere) used to
+  fall back to the plain-text degrade for the whole field. `grison.markdown.mapping`
+  now runs an HTML5-lite structural pass before conversion: an open `<p>` is
+  auto-closed when another block-level tag starts or the field ends (but never
+  on a mismatched closing tag, which is left for the existing fallback);
+  `<div>` is unwrapped (its children kept, the tag dropped); `<dl>`/`<dt>`/`<dd>`
+  is rewritten to `<ul><li><strong>term</strong> definition</li></ul>` (GW's
+  markdown vocabulary has no definition-list construct). Across the full
+  scanner-fixture corpus this cut prose-field fallbacks from 191 (of 1272) to
+  8 — the residual is unsupported tags (e.g. `<limit>`) and pre-existing
+  mismatched-tag nesting this pass deliberately leaves alone.
+- A CVSS v2 vector that isn't parseable at all (Nessus's `cvss_vector`,
+  OpenVAS's `cvss_base_vector`) used to silently convert to an all-defaults
+  CVSS3 vector instead of being flagged. It's now dropped with a
+  `CVSS v2 vector <raw> could not be converted, dropped` warning, the same way
+  an unconvertible CVSS v4-only vector already was.
 
 ## [0.4.2] - 2026-09-21
 

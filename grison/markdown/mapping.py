@@ -73,6 +73,178 @@ class MappingResult:
 _TAG_ALIASES: dict[str, str] = {"b": "strong", "i": "em"}
 
 
+def _serialize_attrs(attrs: list[tuple[str, str | None]]) -> str:
+    """Render an ``HTMLParser`` attribute list back to source form, shared by
+    every rewriter pass below. A boolean attribute (no value, e.g. ``disabled``
+    in ``<input disabled>``) passes through as a bare name — dropping it
+    entirely would silently lose it, and ``name=""`` would fabricate a value
+    that was never there."""
+    return "".join(
+        f' {name}="{html.escape(value, quote=True)}"' if value is not None else f" {name}"
+        for name, value in attrs
+    )
+
+
+# Block-level start tags whose arrival auto-closes a currently-open <p> (HTML5's
+# own implied-end-tag rule for <p>, applied narrowly — see _StructureNormalizer).
+_P_CLOSE_TRIGGERS = {
+    "p",
+    "ul",
+    "ol",
+    "li",
+    "div",
+    "table",
+    "pre",
+    "blockquote",
+    "dl",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+}
+
+
+class _StructureNormalizer(HTMLParser):
+    """HTML5-lite structural cleanup, run before :class:`_TagAliasRewriter`, over
+    the handful of fixed ways real scanner HTML violates well-formedness (Qualys
+    prose above all — entire multi-paragraph fields built from bare ``<P>`` with
+    no ``</P>`` anywhere):
+
+    - An open ``<p>`` is auto-closed when another block-level start tag in
+      ``_P_CLOSE_TRIGGERS`` arrives, or at end-of-input — but ONLY when ``<p>``
+      is still the INNERMOST open element at that point (this pass tracks a
+      real stack of every open tag to check that, not just a bare "is some p
+      open somewhere" flag). If something else opened inside the ``<p>`` is
+      still open too (e.g. a ``<b>`` a real closing tag never arrived for), this
+      pass does nothing — it never guesses which of two unclosed elements to
+      close, and leaves the whole thing exactly as malformed as it arrived, for
+      :func:`html_to_md`'s own fallback to handle, same as before this pass
+      existed. This is HTML5's own implied-end-tag rule for ``<p>``, applied
+      narrowly: nothing else is ever auto-closed, and a mismatched *closing*
+      tag is never repaired.
+    - ``<div>`` is unwrapped: its own start/end tags are dropped, its children
+      pass through untouched. Scanner-prose ``<div>`` wrapping is always
+      presentational (e.g. Acunetix's ``<div class="bb-coolbox">``) — this pass
+      never sees a real GW evidence ``<div>``, a construct scanner exports don't
+      have.
+    - ``<dl>``/``<dt>``/``<dd>`` becomes ``<ul><li><strong>dt</strong>
+      dd</li></ul>`` (GW's allowed vocabulary has no definition-list construct).
+      A ``<dt>`` with no following ``<dd>`` still closes its own ``<li>`` (on the
+      next ``<dt>``, or ``</dl>``/end-of-input) rather than leaking an unclosed
+      item.
+
+    Any other tag — including one the converter doesn't support at all, like
+    ``<limit>`` — passes through completely unchanged, so it still fails in
+    :func:`html_to_md` exactly as before this pass existed; this pass never
+    invents leniency for genuinely unsupported markup.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._out: list[str] = []
+        # Every tag currently open, in nesting order — including "div"/"dl",
+        # even though their own start/end tags are never written to _out, so a
+        # <p> auto-close only fires when <p> is genuinely the innermost open
+        # element (see _open) rather than one this pass has lost track of.
+        self._stack: list[str] = []
+        # One entry per currently-open <dl>, true while that level's current
+        # <li> (opened by a <dt>) hasn't been closed by a following <dt> or
+        # </dl> yet — see _open/_close's "dt"/"dl" handling.
+        self._dl_li_open: list[bool] = []
+        # The tag name of an open <script>/<style> element, or None — same
+        # raw-CDATA tracking as _TagAliasRewriter (see its own docstring for
+        # why handle_data must not html.escape this content).
+        self._cdata_tag: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._open(tag, attrs)
+        if tag in self.CDATA_CONTENT_ELEMENTS:
+            self._cdata_tag = tag
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        # A self-closing tag (e.g. <br/>) has no separate closing event to
+        # balance — same one-call treatment _TreeBuilder itself gives it.
+        self._open(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        self._close(tag)
+        if tag == self._cdata_tag:
+            self._cdata_tag = None
+
+    def handle_data(self, data: str) -> None:
+        if self._cdata_tag is not None:
+            self._out.append(data)
+        else:
+            self._out.append(html.escape(data))
+
+    def result(self) -> str:
+        # End-of-input is itself a <p>-closing trigger (class docstring) — a
+        # real Qualys field routinely ends on a final bare <P> with nothing
+        # after it. An unclosed <dl>/<dt> at end-of-input is flushed the same
+        # way, for the same reason.
+        if self._stack and self._stack[-1] == "p":
+            self._out.append("</p>")
+            self._stack.pop()
+        while self._dl_li_open:
+            if self._dl_li_open.pop():
+                self._out.append("</li>")
+            self._out.append("</ul>")
+        return "".join(self._out)
+
+    def _open(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "dt" and self._dl_li_open:
+            if self._dl_li_open[-1]:
+                self._out.append("</li>")
+            self._out.append("<li><strong>")
+            self._dl_li_open[-1] = True
+            return
+        if tag == "dd" and self._dl_li_open:
+            return  # dd content flows directly into the <li> its <dt> opened
+        if tag in _P_CLOSE_TRIGGERS and self._stack and self._stack[-1] == "p":
+            self._out.append("</p>")
+            self._stack.pop()
+        if tag == "div":
+            self._stack.append(tag)
+            return
+        if tag == "dl":
+            self._dl_li_open.append(False)
+            self._stack.append(tag)
+            self._out.append("<ul>")
+            return
+        self._out.append(f"<{tag}{_serialize_attrs(attrs)}>")
+        if tag != "br":
+            self._stack.append(tag)
+
+    def _close(self, tag: str) -> None:
+        if tag == "dt" and self._dl_li_open:
+            self._out.append("</strong> ")
+            return
+        if tag == "dd" and self._dl_li_open:
+            return
+        if tag == "dl":
+            if self._stack and self._stack[-1] == "dl":
+                self._stack.pop()
+            if self._dl_li_open:
+                if self._dl_li_open.pop():
+                    self._out.append("</li>")
+                self._out.append("</ul>")
+            return
+        if tag == "div":
+            if self._stack and self._stack[-1] == "div":
+                self._stack.pop()
+            return
+        # A mismatched closing tag (stack top isn't `tag`) is left exactly as
+        # malformed as it arrived — this pass never repairs one, only tracks
+        # what it can to keep its OWN <p> auto-close accurate (class
+        # docstring). A genuine match pops the stack so an ancestor's own
+        # later close, or a subsequent <p>-close check, sees the right top.
+        if self._stack and self._stack[-1] == tag:
+            self._stack.pop()
+        self._out.append(f"</{tag}>")
+
+
 class _TagAliasRewriter(HTMLParser):
     """Rewrites presentational HTML tags scanners emit (``<b>``, ``<i>``, ...) to
     their GW-whitelisted equivalents (``<strong>``, ``<em>``, ...) via a proper
@@ -104,14 +276,7 @@ class _TagAliasRewriter(HTMLParser):
 
     def _emit(self, tag: str, attrs: list[tuple[str, str | None]], *, self_closing: bool) -> None:
         out_tag = _TAG_ALIASES.get(tag, tag)
-        # A boolean attribute (no value, e.g. `disabled` in `<input disabled>`)
-        # passes through as a bare name — dropping it entirely would silently
-        # lose it, and `name=""` would fabricate a value that was never there.
-        attr_str = "".join(
-            f' {name}="{html.escape(value, quote=True)}"' if value is not None else f" {name}"
-            for name, value in attrs
-        )
-        self._out.append(f"<{out_tag}{attr_str}{'/' if self_closing else ''}>")
+        self._out.append(f"<{out_tag}{_serialize_attrs(attrs)}{'/' if self_closing else ''}>")
 
     def handle_endtag(self, tag: str) -> None:
         self._out.append(f"</{_TAG_ALIASES.get(tag, tag)}>")
@@ -129,13 +294,16 @@ class _TagAliasRewriter(HTMLParser):
 
 
 def _normalize_scanner_html(raw: str) -> str:
-    """Apply :class:`_TagAliasRewriter` to ``raw``. A no-op for anything without a
-    ``<`` (avoids paying for a parse pass on plain text, the common case for a
-    short field)."""
+    """Apply :class:`_StructureNormalizer` then :class:`_TagAliasRewriter` to
+    ``raw``. A no-op for anything without a ``<`` (avoids paying for two parse
+    passes on plain text, the common case for a short field)."""
     if "<" not in raw:
         return raw
+    structure = _StructureNormalizer()
+    structure.feed(raw)
+    structure.close()
     rewriter = _TagAliasRewriter()
-    rewriter.feed(raw)
+    rewriter.feed(structure.result())
     rewriter.close()
     return rewriter.result()
 
