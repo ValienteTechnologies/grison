@@ -719,6 +719,23 @@ def test_defect_leading_whitespace_in_html_text_does_not_become_indented_code() 
     assert md_to_html(md) == "<p>plain text</p>"
 
 
+def test_escape_literal_text_to_md_strips_leading_whitespace_like_finalize_line() -> None:
+    # Review fix (2026-09-23): escape_literal_text_to_md (used by
+    # grison.markdown.mapping's ConverterError fallback, a caller OUTSIDE the
+    # converter's own html->markdown direction) didn't strip a line's leading
+    # whitespace the way _finalize_line does for every line the converter's
+    # own output goes through — 6 leading spaces would read back as an
+    # indented code block on md_to_html and raise ConverterError. It now
+    # reuses _finalize_line, so it gets the exact same guarantee.
+    from grison.markdown.converter import escape_literal_text_to_md
+
+    line = "      six leading spaces"
+    stripped = line.strip()
+    escaped = escape_literal_text_to_md(line)
+    assert not escaped.startswith("    ")
+    assert md_to_html(escaped) == f"<p>{stripped}</p>"
+
+
 # --- whitespace-only/empty emphasis: correctly dropped, but reported ---------
 
 
@@ -866,3 +883,39 @@ def test_md_to_html_table_cell_renders_with_no_duplicate_child_lookup() -> None:
         "<table><tbody><tr><th><p>A</p></th></tr>"
         "<tr><td><p><strong>bold</strong></p></td></tr></tbody></table>"
     )
+
+
+# --- line-start pipe/thematic-break escaping (review fix, 2026-09-23) --------
+# `_md_escape_line_start` grew two new cases (leading "|", thematic-break-shaped
+# line) so plain-text lines that merely LOOK like a table row or a thematic
+# break survive `escape_literal_text_to_md`/`_finalize_line` as literal text.
+# A real table cell's own content must stay completely unaffected by this —
+# `_render_cell` already backslash-escapes every "|" itself, and cell content
+# is never its own markdown line, so it opts out via
+# `escape_pipe_and_thematic_break=False`.
+
+
+def test_html_to_md_table_cell_with_leading_pipe_is_single_escaped() -> None:
+    # Before the guard, this would come back double-escaped ("\\\\|x", a literal
+    # backslash followed by an escaped pipe) since both the new line-start rule
+    # and the cell's own blanket "|" -> "\|" replace would each escape it.
+    assert html_to_md("<table><tr><td>|x</td></tr></table>") == "| \\|x |\n| --- |"
+
+
+def test_html_to_md_table_cell_shaped_like_a_thematic_break_is_unescaped() -> None:
+    # A cell is never written out as its own markdown line, so content shaped
+    # like "---"/"***"/"___" needs no escaping at all inside one — the new rule
+    # must not touch it (would otherwise diverge from the pre-fix golden shape).
+    assert html_to_md("<table><tr><td>---</td></tr></table>") == "| --- |\n| --- |"
+
+
+def test_real_table_round_trip_unaffected_by_pipe_and_thematic_break_escaping() -> None:
+    html = (
+        "<table><tbody>"
+        "<tr><th><p>a</p></th><th><p>b</p></th></tr>"
+        "<tr><td><p>|x</p></td><td><p>---</p></td></tr>"
+        "</tbody></table>"
+    )
+    md = html_to_md(html)
+    assert md == "| a | b |\n| --- | --- |\n| \\|x | --- |"
+    assert md_to_html(md) == html

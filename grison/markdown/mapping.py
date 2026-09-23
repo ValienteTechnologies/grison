@@ -19,12 +19,11 @@ the sync engine's index, not by anything stamped into the document.
 
 from __future__ import annotations
 
-import html as _html
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 
-from grison.markdown.converter import ConverterError, html_to_md
+from grison.markdown.converter import ConverterError, escape_literal_text_to_md, html_to_md
 from grison.model.cvss import CvssError, parse_cvss
 from grison.model.cwe import is_known_cwe, normalize_cwe
 from grison.model.enums import FindingType, Severity
@@ -59,7 +58,16 @@ class MappingResult:
 class _TagStripper(HTMLParser):
     """Lenient fallback: reduce HTML to text when it's outside the GW whitelist.
     Table cells are joined with `` | `` — without a separator, row values would run
-    together into one ambiguous token (``22/tcpsshOpenSSH``)."""
+    together into one ambiguous token (``22/tcpsshOpenSSH``).
+
+    ``handle_data`` already receives HTML-unescaped text (``HTMLParser``'s default
+    ``convert_charrefs=True``) — :meth:`text` must NOT run ``html.unescape`` on the
+    result again: that would silently double-decode a literal, safe entity NAME
+    sitting in the source text (e.g. Burp's own remediation prose spells out
+    ``&amp;lt;`` to *display* the four characters ``&lt;`` — already correctly
+    decoded once to ``&lt;`` here — into the real ``<`` character, corrupting the
+    text). :func:`escape_literal_text_to_md` in :meth:`text`'s caller is what makes
+    the result safe to embed in a markdown field, not a second unescape pass."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -97,7 +105,7 @@ def _prose_to_md(html: str, field: str, warnings: list[str]) -> str:
         stripper = _TagStripper()
         stripper.feed(html)
         warnings.append(f"{field}: HTML outside GW whitelist, degraded to text ({e})")
-        return _html.unescape(stripper.text())
+        return escape_literal_text_to_md(stripper.text())
 
 
 def ir_to_finding(

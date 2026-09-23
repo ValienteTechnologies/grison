@@ -77,6 +77,46 @@ def test_mapped_finding_serializes_and_roundtrips() -> None:
     assert "grison:" not in md  # no machine field on grison parse output (engine step 3 item E)
 
 
+def test_unsupported_tag_fallback_escapes_html_lookalikes() -> None:
+    """FND-014 regression (burp/dojo-seven_findings.xml's XSS finding, see
+    ``tests/scanners/test_contract.py``): an unsupported tag (``<b>``, real Burp
+    output, not in the converter's GW whitelist) makes ``_prose_to_md`` fall back
+    to ``_TagStripper``. The stripped text can itself contain a payload that
+    looks like markup — here, an HTML-entity-escaped ``<script>`` tag decoded
+    back to literal text by the HTML parser — and that text must come out
+    backslash-escaped so it round-trips as plain text instead of being
+    reparsed as raw inline HTML."""
+    from grison.markdown.converter import md_to_html
+    from grison.markdown.mapping import _prose_to_md
+
+    html = (
+        "<p>The payload <b>5d4ff&lt;script&gt;alert(1)&lt;/script&gt;18327</b> was submitted.</p>"
+    )
+    warnings: list[str] = []
+    out = _prose_to_md(html, "description", warnings)
+    assert any("unsupported HTML tag: <b>" in w for w in warnings)
+    assert "\\<script>" in out and "\\</script>" in out  # escaped, not bare
+    # Round-trips back to the original literal text, not real markup.
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in md_to_html(out)
+
+
+def test_unsupported_tag_fallback_does_not_double_unescape_entities() -> None:
+    """A literal entity NAME in the source text (author prose describing HTML
+    entities, e.g. ``&amp;lt;`` meaning the four characters ``&lt;``) must decode
+    exactly once. ``HTMLParser`` (``convert_charrefs=True``, the default) already
+    unescapes it once in ``handle_data``; running ``html.unescape`` on the result
+    AGAIN would turn ``&amp;lt;`` into a real ``<`` character — silently
+    fabricating markup that was never in the source. The fallback must decode
+    once and then escape for markdown, not decode twice."""
+    from grison.markdown.mapping import _prose_to_md
+
+    html = "<p>Encode it as <b>&amp;lt;script&amp;gt;</b>, not the raw tag.</p>"
+    warnings: list[str] = []
+    out = _prose_to_md(html, "description", warnings)
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out or "\\&lt;script\\&gt;" in out
+
+
 def test_nmap_table_converts_to_real_markdown_table() -> None:
     """The converter now supports GFM tables (grammar widened 2026-09-21), so an
     nmap port table (real shape: ``nmap.py``'s own ``<thead>``/``<tbody>``, no

@@ -106,7 +106,16 @@ def _render_cell(
         raise ConverterError(
             "unsupported <br> inside a <table> cell (a GFM table cell can't contain a line break)"
         )
-    text = _finalize_line(_render_inline(content_children, refs, on_loss, raw_state), on_loss)
+    # escape_pipe_and_thematic_break=False: this text is never written out as its
+    # own markdown line (it's embedded between two "| " column separators below),
+    # so it can never be misread as a thematic break; and every "|" in it —
+    # leading or not — is already backslash-escaped one line down, so escaping a
+    # leading one here too would double the backslash instead of protecting it.
+    text = _finalize_line(
+        _render_inline(content_children, refs, on_loss, raw_state),
+        on_loss,
+        escape_pipe_and_thematic_break=False,
+    )
     return text.replace("|", "\\|")
 
 

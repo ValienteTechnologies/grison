@@ -396,6 +396,7 @@ from __future__ import annotations
 
 from grison.markdown.converter.errors import ConverterError
 from grison.markdown.converter.from_html import html_to_md
+from grison.markdown.converter.mdtext import escape_literal_text_to_md
 from grison.markdown.converter.to_html import md_to_html
 
-__all__ = ["ConverterError", "html_to_md", "md_to_html"]
+__all__ = ["ConverterError", "escape_literal_text_to_md", "html_to_md", "md_to_html"]

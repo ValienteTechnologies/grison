@@ -28,6 +28,7 @@ Kept fast (bounded examples, no per-test deadline) so it stays a few seconds in 
 from __future__ import annotations
 
 import re
+import string
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
@@ -400,25 +401,41 @@ TRICKY_WORDS = [
     "[bracket]text",
     "para(gram)text",
     "zero​width",  # an author's OWN literal Cf character — must survive, not multiply
+    "<script>alert(1)</script>",  # FND-014 regression: an XSS-shaped payload as plain text
+    "a < b and c > d",  # bare '<' NOT shaped like a tag opener (space follows) — no escape needed
+    "5 < 10 </not a tag",  # bare '<' immediately followed by a real tag-opener shape
+    "&amp;",  # literal entity NAME as text (not a bare '&') — must not re-decode on push
+    "&lt;script&gt;",  # entity-escaped tag-shaped text, spelled out literally by the author
+    "| a | b |",  # GFM table-row shape as plain text (review fix, 2026-09-23)
+    "|x",  # leading '|' alone, no spaces
+    "---",  # thematic-break shape: 3 dashes, no spaces
+    "***",  # thematic-break shape: 3 asterisks, no spaces
+    "___",  # thematic-break shape: 3 underscores, no spaces
+    "- - -",  # thematic-break shape: dashes separated by spaces
 ]
 
-# A word that STARTS or ENDS with any markdown/HTML-significant character
-# (grison's own _MD_ESCAPE_CHARS set — "\\`*_[]<&!" — replicated here) is
+# A word that STARTS or ENDS with a CommonMark ASCII punctuation character —
+# escaped by grison's own _MD_ESCAPE_CHARS set ("\\`*_[]<&!") or not (e.g. a
+# bare "|"/"-"/"("/"." grison never needs to backslash-escape on its own) — is
 # excluded from being the sole/leaf content of a <strong>/<em> specifically:
-# once escaped, such a leaf renders with punctuation (its escaping backslash,
-# or the character itself) immediately touching the wrapper's own delimiter —
-# a genuinely deeper CommonMark flanking-rule interaction than the
-# same-tag SIBLING merge `_merge_adjacent_inline` handles (that fixes two
-# ADJACENT same-tag elements colliding into one ambiguous delimiter run; this
-# is about a delimiter run flanked by a non-whitespace/non-punctuation character on one
+# CommonMark's flanking rule cares about ANY punctuation immediately touching
+# a delimiter run, not just the characters grison happens to escape — a
+# delimiter run flanked by a non-whitespace/non-punctuation character on one
 # side and punctuation on the other isn't flanking on either side, so it can't
-# open/close at all). This is a genuine, narrow markdown-representability gap,
-# not something a real Ghostwriter/TinyMCE edit produces (there's no toolbar
-# path to bold text starting with a literal asterisk with nothing separating
-# it from the bold delimiter itself) — the generator avoids constructing it;
-# text (including these tricky words) is still fully exercised standalone,
-# unwrapped, via the plain "text" kind.
-_ESCAPE_ADJACENT_CHARS = set("\\`*_[]<&!")
+# open/close at all (found via property fuzzing, 2026-09-23: an *unescaped*
+# leading "|" — e.g. "| a | b |" directly after "</strong><em>" with no
+# separator — hit this same gap even though grison never touches that
+# character; same for a bare leading "-"). This is a genuinely deeper
+# CommonMark flanking-rule interaction than the same-tag SIBLING merge
+# `_merge_adjacent_inline` handles (that fixes two ADJACENT same-tag elements
+# colliding into one ambiguous delimiter run). This is a genuine, narrow
+# markdown-representability gap, not something a real Ghostwriter/TinyMCE edit
+# produces (there's no toolbar path to bold text directly followed by italic
+# text with nothing separating them and the italic text starting with
+# punctuation) — the generator avoids constructing it; text (including these
+# tricky words) is still fully exercised standalone, unwrapped, via the plain
+# "text" kind.
+_ESCAPE_ADJACENT_CHARS = set(string.punctuation)
 SAFE_LEAF_WORDS = [
     w
     for w in TRICKY_WORDS
