@@ -43,6 +43,12 @@ def test_qualys_was_root_variant() -> None:
     assert detect_bytes(b"<WAS_SCAN_REPORT></WAS_SCAN_REPORT>") == "qualys"
 
 
+def test_qualys_asset_data_report_root_variant() -> None:
+    # The Qualys VM export root (dojo-Qualys_Sample_Report.xml / dojo-empty.xml
+    # in the corpus) — a third Qualys root alongside SCAN and WAS_SCAN_REPORT.
+    assert detect_bytes(b"<ASSET_DATA_REPORT></ASSET_DATA_REPORT>") == "qualys"
+
+
 def test_unknown_xml_root_is_none() -> None:
     assert detect_bytes(b"<foobar><child/></foobar>") is None
 
